@@ -51,7 +51,8 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + t | toggle float (a floated window lands centred) |
 | super + e | toggle split direction |
 | super + r | rotate the tree 90° |
-| super + b | balance all tiles |
+| super + b | new window in the default browser (first press: allow "skhd wants to control System Events") |
+| super + shift + b | balance all tiles |
 | super + s | toggle stacked ⇄ tiled for the current Space |
 | super + ← → ↑ ↓ | resize by 60 px |
 | super + m | minimize |
