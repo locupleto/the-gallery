@@ -76,3 +76,7 @@ lalt - b : d="$HOME/.ai_voice_assistant"; [ -d "$d" ] || d="$HOME/Developer/proj
 # the Automation prompt "skhd wants to control iTerm2" — allow it once.
 lalt - return : osascript -e 'tell application "iTerm2" to create window with default profile'
 shift + lalt - r : yabai --restart-service; skhd --reload
+
+# --- web apps (Omarchy convention: super+y = YouTube) ---------------------------
+# Safari web apps live in ~/Applications; open -a activates the one window they have.
+lalt - y : open -a "$HOME/Applications/YouTube.app"

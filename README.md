@@ -59,6 +59,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + w | close window |
 | super + return | new iTerm window (first press: allow "skhd wants to control iTerm2") |
 | super + shift + r | restart yabai, reload skhd |
+| super + y | open the YouTube web app (Omarchy convention) |
 
 Mouse: Option-drag moves a window, Option-right-drag resizes, dropping onto a
 tile swaps.
