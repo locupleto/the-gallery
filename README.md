@@ -49,7 +49,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + tab | focus the previous window |
 | super + f | toggle zoom (window fills its display) |
 | super + t | toggle float (a floated window lands centred) |
-| super + e | toggle split direction |
+| super + shift + e | toggle split direction |
 | super + r | rotate the tree 90° |
 | super + b | new window in the default browser (first press: allow "skhd wants to control System Events") |
 | super + shift + b | balance all tiles |
@@ -59,7 +59,12 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + w | close window |
 | super + return | new iTerm window (first press: allow "skhd wants to control iTerm2") |
 | super + shift + r | restart yabai, reload skhd |
-| super + y | open the YouTube web app (Omarchy convention) |
+| super + a / shift + a | ChatGPT / Grok web apps |
+| super + c | Calendar |
+| super + e | Gmail web app |
+| super + y | YouTube web app |
+| super + x | X web app |
+| super + g | Telegram (Omarchy's messaging slot) |
 
 Mouse: Option-drag moves a window, Option-right-drag resizes, dropping onto a
 tile swaps.

@@ -50,7 +50,7 @@ shift + lalt - s : (yabai -m window --display next || yabai -m window --display 
 # --- window state --------------------------------------------------------------
 lalt - f : yabai -m window --toggle zoom-fullscreen
 lalt - t : yabai -m window --toggle float --grid 4:4:1:1:2:2
-lalt - e : yabai -m window --toggle split
+shift + lalt - e : yabai -m window --toggle split
 lalt - m : yabai -m window --minimize
 lalt - w : yabai -m window --close
 
@@ -77,6 +77,14 @@ lalt - b : d="$HOME/.ai_voice_assistant"; [ -d "$d" ] || d="$HOME/Developer/proj
 lalt - return : osascript -e 'tell application "iTerm2" to create window with default profile'
 shift + lalt - r : yabai --restart-service; skhd --reload
 
-# --- web apps (Omarchy convention: super+y = YouTube) ---------------------------
+# --- apps (Omarchy web-app keys) -------------------------------------------------
 # Safari web apps live in ~/Applications; open -a activates the one window they have.
+# Omarchy: a ChatGPT, shift+a Grok, c Calendar, e Email, y YouTube, x X, g messaging
+# (WhatsApp there; Telegram here). Split toggle moved to shift+e to free super+e.
+lalt - a : open -a "$HOME/Applications/ChatGPT.app"
+shift + lalt - a : open -a "$HOME/Applications/Grok.app"
+lalt - c : open -a Calendar
+lalt - e : open -a "$HOME/Applications/Gmail.app"
 lalt - y : open -a "$HOME/Applications/YouTube.app"
+lalt - x : open -a "$HOME/Applications/X.app"
+lalt - g : open -a Telegram
