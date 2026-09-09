@@ -56,7 +56,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + ← → ↑ ↓ | resize by 60 px |
 | super + m | minimize |
 | super + w | close window |
-| super + return | open iTerm |
+| super + return | new iTerm window (first press: allow "skhd wants to control iTerm2") |
 | super + shift + r | restart yabai, reload skhd |
 
 Mouse: Option-drag moves a window, Option-right-drag resizes, dropping onto a
