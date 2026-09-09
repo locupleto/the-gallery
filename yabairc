@@ -1,0 +1,41 @@
+#!/usr/bin/env sh
+# yabai configuration for the voice assistant's desk (installed by tiler/install.sh
+# to ~/.config/yabai/yabairc). No scripting addition: SIP stays enabled, Spaces are
+# switched by the Mission Control hotkeys (Ctrl+N), never by yabai.
+
+# --- layout ------------------------------------------------------------------
+yabai -m config layout                  bsp
+yabai -m config window_placement        second_child
+# New windows open on the display under the pointer (what DESKTOP_AUTO_PLACE=mouse
+# did before the tiler); the assistant skips its own auto-placement while yabai runs.
+yabai -m config window_origin_display   cursor
+# The house grid: 7:5 columns (7/12 = 0.5833), matching DESKTOP_COLUMNS in config.py.
+yabai -m config split_ratio             0.5833
+yabai -m config split_type              auto
+yabai -m config auto_balance            off
+yabai -m config window_zoom_persist     on
+
+# --- gaps --------------------------------------------------------------------
+yabai -m config window_gap              8
+yabai -m config top_padding             8
+yabai -m config bottom_padding          8
+yabai -m config left_padding            8
+yabai -m config right_padding           8
+
+# --- mouse -------------------------------------------------------------------
+# Option-drag moves, Option-right-drag resizes, dropping on a tile swaps.
+yabai -m config mouse_modifier          alt
+yabai -m config mouse_action1           move
+yabai -m config mouse_action2           resize
+yabai -m config mouse_drop_action       swap
+yabai -m config focus_follows_mouse     off
+yabai -m config mouse_follows_focus     off
+
+# --- windows that must never be tiled ----------------------------------------
+yabai -m rule --add app="^(System Settings|System Preferences|Calculator|Activity Monitor|Archive Utility|Installer|Software Update|Logi Options\+?|iStat Menus|CleanMyMac X|Digital Colou?r Meter|Font Book|Migration Assistant)$" manage=off
+yabai -m rule --add app="^Finder$" title="(Copy|Info|Connect|Move|Delete|Get Info)" manage=off
+# Sheets, popovers, floating panels and anything that is not a standard window.
+yabai -m rule --add subrole!="^AXStandardWindow$" manage=off
+yabai -m rule --apply
+
+echo "yabai configuration loaded"
