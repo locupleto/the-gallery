@@ -75,14 +75,14 @@ run install -m 755 yabairc "$YABAI_RC"
 run install -m 644 skhdrc  "$SKHD_RC"
 
 # --- services --------------------------------------------------------------------------
-# --start-service installs the LaunchAgent on first use and starts it; on later runs
-# it fails harmlessly ("already running"), so fall back to a restart.
+# A running service is restarted so the freshly copied rc files take effect
+# (--start-service on a running service returns 0 without reloading anything).
 for f in yabai skhd; do
-    if [ "$DRY" = 1 ]; then echo "[dry] $f --start-service || $f --restart-service"; continue; fi
-    if "$f" --start-service >/dev/null 2>&1; then
-        echo "[tiler] $f service started"
-    else
+    if [ "$DRY" = 1 ]; then echo "[dry] $f --restart-service (or --start-service)"; continue; fi
+    if pgrep -xq "$f"; then
         "$f" --restart-service && echo "[tiler] $f service restarted"
+    else
+        "$f" --start-service && echo "[tiler] $f service started"
     fi
 done
 
