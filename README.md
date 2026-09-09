@@ -72,8 +72,9 @@ Command** key (`PTT_KEY=cmd_r` in its LaunchAgent), no longer right Option.
 
 ## Configuration
 
-- `yabairc` → `~/.config/yabai/yabairc`: bsp layout, 8 px gaps, `split_ratio
-  0.5833` (the 7:5 house grid, same as `DESKTOP_COLUMNS`), new windows on the
+- `yabairc` → `~/.config/yabai/yabairc`: bsp layout, 8 px gaps, even splits
+  (`split_ratio 0.5`; the 7:5 house grid is applied only when asked for a
+  "column" by voice), new windows on the
   display under the pointer, and `manage=off` rules for System Settings,
   utilities, Finder dialogs and any non-standard window.
 - `skhdrc` → `~/.config/skhd/skhdrc`: the table above.
