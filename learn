@@ -54,7 +54,10 @@ fetch_if_evicted() {
 }
 
 # --- in-window rendering -----------------------------------------------------------------
-GLOW_STYLE="${GLOW_STYLE:-dark}"
+# The house glow style: glow's "dark" with the literal "## " heading prefixes
+# removed (installed next to this script; falls back to the built-in style).
+GLOW_STYLE="${GLOW_STYLE:-$(dirname "$SELF")/learn.style.json}"
+[ -f "$GLOW_STYLE" ] || GLOW_STYLE=dark
 strip_frontmatter() { awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; next} !fm' "$1"; }
 
 set_title() { printf '\033]0;%s\007' "$TITLE_PREFIX: $1"; }
@@ -153,8 +156,8 @@ Left Option is **super**; the right Option types \`@ | [ ] { }\`. Space
 switching rides on the Mission Control Ctrl+N shortcuts. Push-to-talk for
 the voice assistant is the right Command key.
 
-> Generated from \`tiler/skhdrc\` by \`tiler/learn install\` — edit the \`##\`
-> lines there, not this note.
+> Generated from \`tiler/skhdrc\` by \`tiler/learn install\` — edit the
+> description lines there, not this note.
 
 EOF
     awk '
