@@ -54,6 +54,9 @@ fetch_if_evicted() {
 }
 
 # --- in-window rendering -----------------------------------------------------------------
+GLOW_STYLE="${GLOW_STYLE:-dark}"
+strip_frontmatter() { awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; next} !fm' "$1"; }
+
 set_title() { printf '\033]0;%s\007' "$TITLE_PREFIX: $1"; }
 
 float_me() {
@@ -88,10 +91,13 @@ show() {
     float_me
     fetch_if_evicted "$f" || die "no sheet named '$name' in $SHEETS"
     command -v glow >/dev/null || die "glow is not installed (brew install glow)"
-    # Strip the YAML frontmatter; glow renders the rest. -p = pager (q / Esc quits).
+    # Strip the YAML frontmatter; glow renders the rest in its pager (q / Esc
+    # quits). Fed from a pipe glow would guess "no terminal" and print raw
+    # markdown (the "# Headline" look), hence the forced style. Keep the pipe:
+    # given a file path, glow first interrogates the terminal for its colours
+    # and stalls where nothing answers.
     clear
-    awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; next} !fm' "$f" \
-        | glow -p -w 110 -
+    strip_frontmatter "$f" | glow -p -s "$GLOW_STYLE" -w 110 -
 }
 
 menu() {
@@ -102,7 +108,7 @@ menu() {
     local pick
     pick="$(list_sheets | fzf --height=100% --layout=reverse --border=rounded \
         --prompt='Learn > ' --header='Enter shows a sheet, Esc closes' \
-        --preview "awk 'NR==1 && /^---\$/ {fm=1; next} fm && /^---\$/ {fm=0; next} !fm' \"$SHEETS/{}.md\" 2>/dev/null | head -60" \
+        --preview "\"$SELF\" preview {}" \
         --preview-window=right:60%:wrap)" || exit 0
     [ -n "$pick" ] && exec "$SELF" show "$pick"
 }
@@ -227,6 +233,7 @@ case "${1:-}" in
     menu)     menu ;;
     show)     [ -n "${2:-}" ] || die "usage: learn show <Sheet>"; show "$2" ;;
     list)     list_sheets ;;
+    preview)  f="$(sheet_path "${2:-}")"; [ -e "$f" ] && strip_frontmatter "$f" | glow -s "$GLOW_STYLE" -w "${FZF_PREVIEW_COLUMNS:-70}" - | head -80 || echo "(not fetched from iCloud yet)" ;;
     keys-md)  keys_md "${2:-}" ;;
     install)  install_all "${2:-}" ;;
     *)        sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
