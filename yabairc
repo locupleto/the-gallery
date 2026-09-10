@@ -37,6 +37,8 @@ yabai -m rule --add app="^(System Settings|System Preferences|Calculator|Activit
 yabai -m rule --add app="^Finder$" title="(Copy|Info|Connect|Move|Delete|Get Info)" manage=off
 # Sheets, popovers, floating panels and anything that is not a standard window.
 yabai -m rule --add subrole!="^AXStandardWindow$" manage=off
+# The Learn cheat-sheet window (tiler/learn): a floating, centred iTerm window.
+yabai -m rule --add app="^iTerm2$" title="^Learn: " manage=off grid=6:6:1:1:4:4
 yabai -m rule --apply
 
 echo "yabai configuration loaded"

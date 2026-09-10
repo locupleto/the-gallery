@@ -35,7 +35,8 @@ SKHD_RC="$HOME/.config/skhd/skhdrc"
 if [ "$UNINSTALL" = 1 ]; then
     command -v yabai >/dev/null && run yabai --stop-service || true
     command -v skhd  >/dev/null && run skhd  --stop-service || true
-    run rm -f "$YABAI_RC" "$SKHD_RC"
+    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn"
+    run rm -rf "$HOME/Applications/Learn.app"
     echo "[tiler] services stopped, rc files removed. The voice assistant falls back"
     echo "        to System Events placement on its own (no restart needed)."
     exit 0
@@ -68,11 +69,24 @@ for f in yabai skhd; do
         run brew install "asmvik/formulae/$f"
     fi
 done
+# The Learn menu (tiler/learn): fzf picks a sheet, glow renders it.
+for f in fzf glow; do
+    if brew list --formula "$f" >/dev/null 2>&1; then
+        echo "[tiler] $f already installed ($(brew list --versions "$f"))"
+    else
+        run brew install "$f"
+    fi
+done
 
 # --- configuration -------------------------------------------------------------------
 run install -d "$(dirname "$YABAI_RC")" "$(dirname "$SKHD_RC")"
 run install -m 755 yabairc "$YABAI_RC"
 run install -m 644 skhdrc  "$SKHD_RC"
+# The Learn script lives next to skhdrc (skhd and Learn.app run under launchd, which
+# cannot read this volume); it also writes the generated key sheet into the vault
+# and builds ~/Applications/Learn.app for Spotlight.
+run install -m 755 learn "$(dirname "$SKHD_RC")/learn"
+if [ "$DRY" = 1 ]; then echo "[dry] learn install skhdrc"; else "$(dirname "$SKHD_RC")/learn" install "$PWD/skhdrc"; fi
 
 # --- services --------------------------------------------------------------------------
 # A running service is restarted so the freshly copied rc files take effect
@@ -97,6 +111,8 @@ cat <<'MSG'
      ride on these Ctrl+N shortcuts).
   3. iTerm > Secure Keyboard Entry must be OFF, or skhd stops seeing keys while
      iTerm is frontmost.
-  4. Try: left Option+h/j/k/l (focus), left Option+2 (Space 2), right Option+2 (@).
+  4. Try: left Option+h/j/k/l (focus), left Option+2 (Space 2), right Option+2 (@),
+     left Option+space (Learn menu; first press: allow "skhd wants to control iTerm2"),
+     Cmd+space "Learn" (first launch: allow "Learn wants to control iTerm2").
   Verify: `yabai -m query --displays` lists your displays; `skhd --observe` shows keys.
 MSG

@@ -65,6 +65,8 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + y | YouTube web app |
 | super + x | X web app |
 | super + g | Telegram (Omarchy's messaging slot) |
+| super + space | Learn menu: pick a cheat sheet (first press: allow "skhd wants to control iTerm2") |
+| super + shift + space | the tiler key sheet, generated from `skhdrc` |
 
 Mouse: Option-drag moves a window, Option-right-drag resizes, dropping onto a
 tile swaps.
@@ -76,6 +78,26 @@ and `{` `}` (⌥⇧8/9). Only the **left** Option is bound here, so type those
 symbols with the **right** Option — exactly like AltGr on Linux. Because of
 that, the voice assistant's push-to-talk on the Studio is the **right
 Command** key (`PTT_KEY=cmd_r` in its LaunchAgent), no longer right Option.
+
+## Learn (cheat sheets on a key)
+
+Omarchy's "Learn" menu, rebuilt on this desk. `tiler/learn` opens a
+floating, centred iTerm window (a `yabairc` rule floats any iTerm window
+titled `Learn: …`) with an fzf list of the vault's `Cheat-Sheets` notes;
+Enter renders the chosen one with glow, `q` or Esc closes. Three doors:
+
+- **super + space** — the menu; **super + shift + space** — the tiler keys directly.
+- **Spotlight → "Learn"** — `~/Applications/Learn.app`, a shell-script bundle
+  built by `tiler/learn install` (first launch: allow "Learn wants to control iTerm2").
+
+One source per sheet: the notes are read in place from the Obsidian vault
+(`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault/Cheat-Sheets`,
+override with `OBSIDIAN_VAULT` or `LEARN_SHEETS`), never copied, and an
+evicted iCloud note is fetched first. The only generated sheet is
+`Tiler-Keys.md`, written from the `## description` lines above each binding
+in `skhdrc` — so keep those lines current; `tiler/install.sh` regenerates the
+note and the app every run. Dependencies: `fzf`, `glow` (Homebrew, installed
+by the script).
 
 ## Configuration
 
