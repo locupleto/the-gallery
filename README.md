@@ -82,8 +82,10 @@ Command** key (`PTT_KEY=cmd_r` in its LaunchAgent), no longer right Option.
 ## Learn (cheat sheets on a key)
 
 Omarchy's "Learn" menu, rebuilt on this desk. `tiler/learn` opens a
-floating, centred iTerm window (a `yabairc` rule floats any iTerm window
-titled `Learn: …`) with an fzf list of the vault's `Cheat-Sheets` notes;
+floating iTerm window, centred on the display that had focus when the key
+was pressed (the script finds its own window by its `Learn: …` title and
+moves, floats and centres it by id; a `yabairc` rule is the backup), with
+an fzf list of the vault's `Cheat-Sheets` notes;
 Enter renders the chosen one with glow, `q` or Esc closes. Three doors:
 
 - **super + space** — the menu; **super + shift + space** — the tiler keys directly.

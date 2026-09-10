@@ -9,6 +9,7 @@
 # keys), and "Learn" in Spotlight (~/Applications/Learn.app).
 #
 #   learn open menu|show <Sheet>   open a floating iTerm window running the command
+#                                  (centred on the display that has focus)
 #   learn menu                     pick a sheet with fzf, then show it (in-window)
 #   learn show <Sheet>             render one sheet with glow (in-window)
 #   learn list                     the sheet names, one per line
@@ -62,22 +63,50 @@ strip_frontmatter() { awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; ne
 
 set_title() { printf '\033]0;%s\007' "$TITLE_PREFIX: $1"; }
 
+# The display the sheet belongs on: the one that had focus when the key was
+# pressed (or Learn was picked in Spotlight). Captured by open_window and handed
+# to the in-window command as --display N; iTerm itself opens the window
+# wherever its last window was, which is the wrong display half the time.
+LEARN_DISPLAY="${LEARN_DISPLAY:-}"
+
+focused_display() {
+    command -v yabai >/dev/null || return 0
+    yabai -m query --displays --display 2>/dev/null \
+        | sed -n 's/^[[:space:]]*"index":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1
+}
+
+# Our own window's yabai record, found by the title set_title just gave it —
+# never by focus: on a cold or slow iTerm the new window is not focused yet, and
+# the focused one is whatever the user was in (once, another iTerm window, which
+# then got floated instead). One JSON object per line, empty until the title has
+# propagated.
+own_window() {
+    yabai -m query --windows 2>/dev/null | tr -d '\n' | sed 's/},[[:space:]]*{/}\
+{/g' | grep -E "\"app\":[[:space:]]*\"iTerm2\"" | grep -F "\"title\":" | grep -F "$TITLE_PREFIX: $1\"" | head -1
+}
+
 float_me() {
     # The yabairc rule floats us by title; this is the belt to that brace, for a
-    # window yabai managed before the title arrived.
+    # window yabai managed before the title arrived (always, in practice: the
+    # title is set from inside the window). Also parks us on the right display.
     command -v yabai >/dev/null || return 0
-    local w
-    for _ in 1 2 3 4 5 6; do
-        w="$(yabai -m query --windows --window 2>/dev/null || true)"
+    local name="$1" w="" id
+    for _ in $(seq 1 40); do          # a cold iTerm restores its windows first
+        w="$(own_window "$name" || true)"
         [ -n "$w" ] && break
         sleep 0.1
     done
     [ -n "$w" ] || return 0
-    printf '%s' "$w" | grep -q '"app": *"iTerm2"' || return 0
-    if printf '%s' "$w" | grep -q '"is-floating": *false'; then
-        yabai -m window --toggle float >/dev/null 2>&1 || true
+    id="$(printf '%s' "$w" | sed -n 's/.*"id":[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+    [ -n "$id" ] || return 0
+    if [ -n "$LEARN_DISPLAY" ]; then
+        yabai -m window "$id" --display "$LEARN_DISPLAY" >/dev/null 2>&1 || true
     fi
-    yabai -m window --grid 6:6:1:1:4:4 >/dev/null 2>&1 || true
+    if printf '%s' "$w" | grep -q '"is-floating":[[:space:]]*false'; then
+        yabai -m window "$id" --toggle float >/dev/null 2>&1 || true
+    fi
+    yabai -m window "$id" --grid 6:6:1:1:4:4 >/dev/null 2>&1 || true
+    yabai -m window "$id" --focus >/dev/null 2>&1 || true
 }
 
 # iTerm warns "a session ended very soon after starting" (and blames the
@@ -91,7 +120,7 @@ show() {
     f="$(sheet_path "$name")"
     trap linger EXIT
     set_title "$name"
-    float_me
+    float_me "$name"
     fetch_if_evicted "$f" || die "no sheet named '$name' in $SHEETS"
     command -v glow >/dev/null || die "glow is not installed (brew install glow)"
     # Strip the YAML frontmatter; glow renders the rest in its pager (q / Esc
@@ -106,22 +135,23 @@ show() {
 menu() {
     trap linger EXIT
     set_title "menu"
-    float_me
+    float_me "menu"
     command -v fzf >/dev/null || die "fzf is not installed (brew install fzf)"
     local pick
     pick="$(list_sheets | fzf --height=100% --layout=reverse --border=rounded \
         --prompt='Learn > ' --header='Enter shows a sheet, Esc closes' \
         --preview "\"$SELF\" preview {}" \
         --preview-window=right:60%:wrap)" || exit 0
-    [ -n "$pick" ] && exec "$SELF" show "$pick"
+    [ -n "$pick" ] && exec "$SELF" ${LEARN_DISPLAY:+--display "$LEARN_DISPLAY"} show "$pick"
 }
 
 # --- the floating window ----------------------------------------------------------------------
 open_window() {
     # A fresh iTerm window running this script. Needs Automation → iTerm2 for the
     # caller (skhd, or Learn.app in Spotlight) — one prompt, once.
-    local cmd
-    cmd="$(printf '%q ' "$SELF" "$@")"
+    local cmd disp
+    disp="$(focused_display)"
+    cmd="$(printf '%q ' "$SELF" ${disp:+--display "$disp"} "$@")"
     if pgrep -xq iTerm2; then
         osascript -e "tell application \"iTerm2\" to create window with default profile command \"$cmd\"" >/dev/null
     else
@@ -231,6 +261,7 @@ SH
 }
 
 # --- main ---------------------------------------------------------------------------------------
+if [ "${1:-}" = "--display" ]; then LEARN_DISPLAY="${2:-}"; shift 2; fi
 case "${1:-}" in
     open)     shift; open_window "$@" ;;
     menu)     menu ;;
