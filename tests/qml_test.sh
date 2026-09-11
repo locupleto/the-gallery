@@ -9,7 +9,7 @@
 # (bin/gallery's PY_RESOLVE_KIND detects the plugin's panel entry point
 # ends in .qml) and shell out to gallery-qml, which launches the
 # Quickshell-for-macOS host in a real window titled "Gallery: <name>" that
-# yabai floats and centres (rule label gallery-qml, grid 6:6:1:1:4:4, no
+# yabai floats and centres (rule label gallery-qml, no grid; the plugin sizes its own window and the host centres it, no
 # app filter -- see bin/gallery's ensure_gallery_qml_yabai_rule). Unlike
 # the tui path, "is this plugin open" is tracked by a pidfile
 # (~/.config/gallery/state/qml/<slug>.pid) that gallery-qml itself writes

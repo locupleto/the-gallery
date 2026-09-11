@@ -41,6 +41,7 @@ QML_DEST="${CONFIG_DIR}/qml"
 PATCHES_SRC="${SCRIPT_DIR}/patches"
 PATCHES_DEST="${CONFIG_DIR}/patches"
 OMARCHY_THEME_LINK="${HOME_DIR}/.config/omarchy/current/theme"
+OMARCHY_STATE_THEME_LINK="${HOME_DIR}/.local/state/omarchy/current/theme"
 OMARCHY_THEME_TARGET="${CONFIG_DIR}/themes/current"
 HS_INIT="${HOME_DIR}/.hammerspoon/init.lua"
 
@@ -265,26 +266,33 @@ else
   echo "[gallery] no ~/.config/skhd; skipping key bindings (install the tiler first)"
 fi
 
-# --- Omarchy theme compatibility symlink --------------------------------------------
-# Some unmodified Omarchy QML plugins read their colours from
-# ~/.config/omarchy/current/theme (Omarchy's own theme-current convention)
-# rather than anything Gallery-specific. Point that at Gallery's own
-# `current` theme symlink so such a plugin sees the right colours without
-# any plugin-side patch. Only replaced when it is itself a symlink (or
-# absent) -- a real directory there is left alone (e.g. a genuine Omarchy
-# install sharing this Mac) and reported, never clobbered.
-echo "[gallery] linking Omarchy theme compatibility symlink ${OMARCHY_THEME_LINK} -> ${OMARCHY_THEME_TARGET}"
-run mkdir -p "$(dirname "${OMARCHY_THEME_LINK}")"
-if [ "${DRY_RUN}" -eq 1 ]; then
-  echo "[dry] would link ${OMARCHY_THEME_LINK} -> ${OMARCHY_THEME_TARGET} unless a real directory is already there"
-elif [ -L "${OMARCHY_THEME_LINK}" ] || [ ! -e "${OMARCHY_THEME_LINK}" ]; then
-  tmp_link="$(mktemp -u "$(dirname "${OMARCHY_THEME_LINK}")/.theme.XXXXXXXX")"
-  ln -s "${OMARCHY_THEME_TARGET}" "${tmp_link}"
-  mv -fh "${tmp_link}" "${OMARCHY_THEME_LINK}"
-  echo "[gallery] linked ${OMARCHY_THEME_LINK} -> ${OMARCHY_THEME_TARGET}"
-else
-  echo "[gallery] ${OMARCHY_THEME_LINK} is a real directory, not a symlink -- leaving it in place"
-fi
+# --- Omarchy theme compatibility symlinks ------------------------------------------
+# Unmodified Omarchy QML plugins read their colours through Omarchy's own
+# theme-current convention. Omarchy 4's qs.Commons Color/Style singletons
+# (vendored under qml/vendor) read ~/.local/state/omarchy/current/theme;
+# older plugins and scripts use ~/.config/omarchy/current/theme. Point both
+# at Gallery's own `current` theme symlink so such a plugin sees the right
+# colours without any plugin-side patch. A link is only replaced when it is
+# itself a symlink (or absent) -- a real directory there is left alone (a
+# genuine Omarchy install sharing this Mac) and reported, never clobbered.
+link_omarchy_theme() {
+  local link="$1"
+  echo "[gallery] linking Omarchy theme compatibility symlink ${link} -> ${OMARCHY_THEME_TARGET}"
+  run mkdir -p "$(dirname "${link}")"
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    echo "[dry] would link ${link} -> ${OMARCHY_THEME_TARGET} unless a real directory is already there"
+  elif [ -L "${link}" ] || [ ! -e "${link}" ]; then
+    local tmp_link
+    tmp_link="$(mktemp -u "$(dirname "${link}")/.theme.XXXXXXXX")"
+    ln -s "${OMARCHY_THEME_TARGET}" "${tmp_link}"
+    mv -fh "${tmp_link}" "${link}"
+    echo "[gallery] linked ${link} -> ${OMARCHY_THEME_TARGET}"
+  else
+    echo "[gallery] ${link} is a real directory, not a symlink -- leaving it in place"
+  fi
+}
+link_omarchy_theme "${OMARCHY_THEME_LINK}"
+link_omarchy_theme "${OMARCHY_STATE_THEME_LINK}"
 
 # --- Hammerspoon reload -------------------------------------------------------------
 # The init.lua pathwatcher reloads Hammerspoon (debounced) when the Spoon copy above
