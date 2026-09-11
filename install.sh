@@ -28,6 +28,8 @@ RENDER_TOOL_DEST="${CONFIG_DIR}/bin/render-theme.py"
 DEFAULT_THEME="tokyo-night"
 BIN_SRC="${SCRIPT_DIR}/bin/gallery"
 BIN_DEST="${HOME_DIR}/bin/gallery"
+HS_BIN_SRC="${SCRIPT_DIR}/bin/gallery-hs"
+HS_BIN_DEST="${HOME_DIR}/bin/gallery-hs"
 HS_INIT="${HOME_DIR}/.hammerspoon/init.lua"
 
 DRY_RUN=0
@@ -77,6 +79,12 @@ do_uninstall() {
     run rm -f "${BIN_DEST}"
   else
     echo "[gallery] no CLI installed at ${BIN_DEST}"
+  fi
+
+  if [ -e "${HS_BIN_DEST}" ]; then
+    run rm -f "${HS_BIN_DEST}"
+  else
+    echo "[gallery] no CLI installed at ${HS_BIN_DEST}"
   fi
 
   echo "[gallery] leaving ${CONFIG_DIR} in place"
@@ -138,6 +146,10 @@ echo "[gallery] installing CLI to ${BIN_DEST}"
 run mkdir -p "${HOME_DIR}/bin"
 run cp "${BIN_SRC}" "${BIN_DEST}"
 run chmod +x "${BIN_DEST}"
+
+echo "[gallery] installing hs watchdog CLI to ${HS_BIN_DEST}"
+run cp "${HS_BIN_SRC}" "${HS_BIN_DEST}"
+run chmod +x "${HS_BIN_DEST}"
 
 GALLERY_BLOCK='-- gallery:begin
 -- hs.ipc must be loaded or the hs command-line tool blocks forever.

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.spaces",
+  "name": "Spaces Overview",
+  "version": "0.0.1",
+  "kinds": ["overlay"],
+  "entryPoints": {
+    "overlay": "index.html"
+  },
+  "gallery": {
+    "overlay": {
+      "display": "cursor",
+      "dismiss": "any-key",
+      "focus": "none"
+    }
+  }
+}

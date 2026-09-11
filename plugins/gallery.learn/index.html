@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Learn</title>
+<style>
+  :root {
+    color-scheme: dark;
+    /* Fallbacks in case the bridge's injected CSS variables never land
+       (JS bridge disabled) -- match lib/bridge.lua's DEFAULT_THEME. */
+    --gallery-background: #1f1811;
+    --gallery-foreground: #e8e6df;
+    --gallery-accent: #d8a656;
+    --gallery-muted: #9a886c;
+    --gallery-surface: #2a2214;
+    --gallery-danger: #e5726f;
+    --gallery-success: #5cc98f;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--gallery-background);
+    color: var(--gallery-foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  body {
+    box-sizing: border-box;
+    overflow-y: auto;
+  }
+
+  #scroll {
+    padding: 1.25em 1.75em 2.5em;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+
+  .learn-empty {
+    color: var(--gallery-muted);
+    font-style: italic;
+    padding: 2em 0;
+    text-align: center;
+  }
+
+  .learn-doc h1, .learn-doc h2, .learn-doc h3,
+  .learn-doc h4, .learn-doc h5, .learn-doc h6 {
+    color: var(--gallery-accent);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 1.1em 0 0.4em;
+  }
+
+  .learn-doc h1:first-child, .learn-doc h2:first-child {
+    margin-top: 0;
+  }
+
+  .learn-doc h1 { font-size: 1.5em; border-bottom: 1px solid var(--gallery-surface); padding-bottom: 0.3em; }
+  .learn-doc h2 { font-size: 1.25em; }
+  .learn-doc h3 { font-size: 1.1em; }
+  .learn-doc h4, .learn-doc h5, .learn-doc h6 { font-size: 1em; color: var(--gallery-muted); }
+
+  .learn-doc p {
+    line-height: 1.5;
+    margin: 0.6em 0;
+  }
+
+  .learn-doc ul, .learn-doc ol {
+    margin: 0.4em 0 0.8em;
+    padding-left: 1.4em;
+    line-height: 1.5;
+  }
+
+  .learn-doc li {
+    margin: 0.15em 0;
+  }
+
+  .learn-doc a {
+    color: var(--gallery-accent);
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--gallery-accent) 40%, transparent);
+  }
+
+  .learn-doc a:hover {
+    border-bottom-color: var(--gallery-accent);
+  }
+
+  .learn-doc code {
+    background: var(--gallery-surface);
+    color: var(--gallery-accent);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .learn-doc pre {
+    background: var(--gallery-surface);
+    border: 1px solid color-mix(in srgb, var(--gallery-muted) 35%, transparent);
+    border-radius: 6px;
+    padding: 0.8em 1em;
+    overflow-x: auto;
+    margin: 0.6em 0 1em;
+  }
+
+  .learn-doc pre code {
+    background: none;
+    color: var(--gallery-foreground);
+    padding: 0;
+    font-size: 0.85em;
+    line-height: 1.4;
+    white-space: pre;
+  }
+
+  .learn-doc strong {
+    color: var(--gallery-foreground);
+    font-weight: 700;
+  }
+
+  .learn-doc em {
+    color: var(--gallery-muted);
+  }
+
+  .learn-table {
+    margin: 0.6em 0 1em;
+    border: 1px solid color-mix(in srgb, var(--gallery-muted) 30%, transparent);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .learn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 1em;
+    padding: 0.35em 0.75em;
+    border-bottom: 1px solid color-mix(in srgb, var(--gallery-muted) 20%, transparent);
+    font-size: 0.92em;
+  }
+
+  .learn-row:last-child {
+    border-bottom: none;
+  }
+
+  .learn-row:first-child {
+    background: var(--gallery-surface);
+    font-weight: 600;
+    color: var(--gallery-accent);
+  }
+
+  .learn-cell {
+    flex: 1 1 auto;
+    min-width: 6em;
+  }
+</style>
+</head>
+<body>
+  <div id="scroll">
+    <div id="content" class="learn-empty">Loading...</div>
+  </div>
+
+  <script>
+    (function () {
+      var content = document.getElementById("content");
+
+      function safeLog(message) {
+        if (window.gallery && typeof window.gallery.log === "function") {
+          window.gallery.log(message);
+        }
+      }
+
+      // This page is always loaded as file://<installed plugin dir>/index.html
+      // (see lib/panel.lua), so its own directory -- needed to locate the
+      // sibling learn-menu.py -- is derived from location.pathname rather
+      // than hardcoded, per the plugin contract.
+      function pluginDir() {
+        var path = window.location.pathname;
+        var idx = path.lastIndexOf("/");
+        return idx >= 0 ? path.slice(0, idx) : "";
+      }
+
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          if (window.gallery && typeof window.gallery.close === "function") {
+            window.gallery.close();
+          } else {
+            try { window.close(); } catch (e) { /* nothing more to do */ }
+          }
+        }
+      });
+
+      function renderError(message) {
+        content.className = "learn-empty";
+        content.textContent = message;
+      }
+
+      if (!window.gallery || typeof window.gallery.exec !== "function") {
+        renderError("gallery.exec unavailable (bridge not loaded)");
+        return;
+      }
+
+      var dir = pluginDir();
+      window.gallery.exec("/usr/bin/python3", [dir + "/learn-menu.py", "render"]).then(function (r) {
+        if (r.code !== 0) {
+          renderError("learn-menu.py render exited " + r.code + ": " + (r.stderr || "").trim());
+          safeLog("render failed: exit " + r.code + " " + (r.stderr || "").trim());
+          return;
+        }
+        var html = (r.stdout || "").trim();
+        if (!html) {
+          renderError("No output from learn-menu.py render");
+          return;
+        }
+        content.outerHTML = html;
+        safeLog("rendered sheet (" + html.length + " chars)");
+      }).catch(function (err) {
+        renderError("error: " + (err && err.message ? err.message : String(err)));
+      });
+    })();
+  </script>
+</body>
+</html>

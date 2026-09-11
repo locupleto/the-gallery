@@ -16,6 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 GALLERY_BIN="${HOME}/bin/gallery"
+GALLERY_HS="${REPO_ROOT}/bin/gallery-hs"
 HS_TIMEOUT=10
 
 say() {
@@ -23,11 +24,12 @@ say() {
 }
 
 hs_eval() {
-  # Runs a Lua expression through `hs -c`, capped at HS_TIMEOUT seconds.
-  # On a freshly (re)launched Hammerspoon, the first use of any given
-  # extension in that runtime prints a "-- Loading extension: X" banner to
-  # stdout ahead of the actual return value, so only the LAST line is kept.
-  hs -t "${HS_TIMEOUT}" -q -c "$1" | grep -v "^-- " | tail -n 1
+  # Runs a Lua expression through gallery-hs (a watchdog wrapper around
+  # `hs -c`; see bin/gallery-hs), capped at HS_TIMEOUT seconds. gallery-hs
+  # already strips any "-- Loading extension: X" banner line Hammerspoon
+  # prints ahead of the actual return value on the first use of a given
+  # extension in a fresh runtime; `tail -n 1` stays as a defensive no-op.
+  "${GALLERY_HS}" -t "${HS_TIMEOUT}" "$1" | tail -n 1
 }
 
 wait_for_hs_ready() {
@@ -38,7 +40,7 @@ wait_for_hs_ready() {
   local waited=0
   local max_wait=30
   while [ "${waited}" -lt "${max_wait}" ]; do
-    if hs -t 3 -q -c "return spoon.Gallery and 'ready' or 'no-gallery'" 2>/dev/null | grep -q ready; then
+    if "${GALLERY_HS}" -t 3 "return spoon.Gallery and 'ready' or 'no-gallery'" 2>/dev/null | grep -q ready; then
       say "Hammerspoon ready after ${waited}s"
       return 0
     fi
@@ -56,6 +58,10 @@ require_hs() {
   fi
   if ! command -v "${GALLERY_BIN}" >/dev/null 2>&1 && [ ! -x "${GALLERY_BIN}" ]; then
     echo "[gate] installed CLI not found at ${GALLERY_BIN}; run ./install.sh first" >&2
+    exit 1
+  fi
+  if [ ! -x "${GALLERY_HS}" ]; then
+    echo "[gate] ${GALLERY_HS} not found or not executable" >&2
     exit 1
   fi
 }

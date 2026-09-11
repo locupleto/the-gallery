@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+#
+# gallery-hs -- watchdog wrapper around the Hammerspoon `hs -c` CLI.
+#
+# Usage:
+#   gallery-hs [-t SECONDS] '<lua expression>'
+#
+# Prints the result to stdout, with any "-- Loading extension: X" banner
+# lines that `hs` prints ahead of the actual return value (the first use of
+# a given extension in a fresh Hammerspoon runtime) filtered out. Exits 0 on
+# success. On the watchdog firing (see below) or on either of the two
+# transient reload errors surviving a single retry, prints the error text to
+# stderr and exits 124.
+#
+# This is bin/gallery's own hs_call, extracted so tests/*.sh can call the
+# same watchdog directly instead of invoking `hs -t N -q -c` bare, which is
+# what used to hang test scripts after a Hammerspoon reload silently dropped
+# the reply to that one client (Hammerspoon itself keeps answering fresh
+# clients throughout). Never wrap `hs` in coreutils `timeout` here or in any
+# caller: killing the client mid-request leaves Hammerspoon replying to a
+# dead port, which has wedged and once crashed it.
+#
+set -euo pipefail
+
+usage() {
+  echo "usage: gallery-hs [-t SECONDS] '<lua expression>'" >&2
+  exit 2
+}
+
+HS_TIMEOUT=10
+while getopts ":t:" opt; do
+  case "${opt}" in
+    t) HS_TIMEOUT="${OPTARG}" ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+[ $# -eq 1 ] || usage
+EXPR="$1"
+
+# Every IPC call uses the hs tool's own graceful timeout (-t). Never wrap hs in
+# `timeout`: killing the client mid-request leaves Hammerspoon replying to a dead
+# port, which has wedged and once crashed it. A request that lands during a
+# config reload returns "error sending to remote" within a second; retry once.
+#
+# Watchdog: a request that lands while Hammerspoon reloads is dropped, and the
+# client then waits forever (the -t flag does not cover that case). Run hs in
+# the background, give it HS_TIMEOUT seconds, kill it if it is still there,
+# and retry once. A client killed after that long has no reply coming, so the
+# dead-port crash seen when killing a mid-reply client does not apply.
+tmp="$(mktemp -t gallery-hs)"
+cleanup() { rm -f "${tmp}"; }
+trap cleanup EXIT
+
+out=""
+for attempt in 1 2; do
+  : > "${tmp}"
+  hs -t "${HS_TIMEOUT}" -q -c "${EXPR}" > "${tmp}" 2>&1 &
+  pid=$!
+  waited=0
+  while kill -0 "${pid}" 2>/dev/null && [ "${waited}" -lt "$(( HS_TIMEOUT * 10 + 20 ))" ]; do
+    sleep 0.1; waited=$((waited + 1))
+  done
+  if kill -0 "${pid}" 2>/dev/null; then
+    kill -9 "${pid}" 2>/dev/null; wait "${pid}" 2>/dev/null
+    out="error sending to remote: client watchdog timeout"
+  else
+    wait "${pid}" 2>/dev/null || true
+    out="$(cat "${tmp}")"
+  fi
+  case "${out}" in
+    "error sending to remote"*|"error: can't access Hammerspoon message port"*)
+      [ "${attempt}" -eq 1 ] && sleep 1.5 && continue
+      printf '%s\n' "${out}" >&2
+      exit 124 ;;
+  esac
+  printf '%s\n' "${out}" | grep -v '^-- ' || true
+  exit 0
+done

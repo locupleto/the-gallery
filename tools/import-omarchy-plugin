@@ -1,0 +1,691 @@
+#!/usr/bin/env python3
+"""import-omarchy-plugin -- scaffold a Gallery plugin from an Omarchy 4
+Quickshell plugin.
+
+Usage:
+  import-omarchy-plugin <git-url-or-dir> [--out DIR] [--id NEW_ID]
+
+An Omarchy plugin is a directory with manifest.json (schemaVersion 1) plus
+a logic layer (plain JS, or JS embedded in QML, that shells out through
+Quickshell `Process { command: [...] }` blocks) and a view layer (QML
+importing Omarchy's private qs.Commons/qs.Ui component library). Per the
+vault note Plugin-Contract.md and Omarchy-Plugin-System.md: the logic
+layer ports to macOS unchanged (it is plain JS plus subprocess calls);
+the view layer does not (no Quickshell/QML renderer exists on macOS) and
+must be hand-rewritten as HTML/CSS/JS against the window.gallery bridge.
+
+This tool automates everything that generalizes:
+  1. Clone (shallow) a git URL, or read a local directory, and load its
+     manifest.json. Fails clearly if it is missing or not schemaVersion 1.
+  2. Scan every .qml/.js file for Quickshell `Process` command arrays,
+     `import` statements, and known non-portable modules/paths/binaries.
+  3. Classify each extracted command's binary: available (found on
+     PATH/opt/homebrew/bin), missing (not installed, but plausibly
+     installable), or non-portable (Linux-only, no macOS equivalent).
+  4. Write a Gallery plugin skeleton: manifest.json (converted), every
+     .js file copied verbatim, an index.html skeleton (loads the copied
+     JS as classic scripts, includes a Process shim, and TODO-comments
+     every QML view that needs a hand rewrite), a service.js stub when
+     the manifest declares a "service" kind, and PORT-REPORT.md.
+  5. Print the report path and verdict. Exit 0 for portable/partial,
+     2 for not portable, 1 on error.
+  6. Run `~/bin/gallery validate <out>` (if installed) and fold its
+     output into the report.
+
+stdlib only, no third-party dependencies.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Known non-portable Quickshell modules/paths/binaries (see the objective
+# in the task that produced this tool, and Omarchy-Plugin-System.md's
+# "Consequences for The Gallery" section: Quickshell itself is Linux-only,
+# and these are the specific system interfaces that have no macOS analog).
+# ---------------------------------------------------------------------------
+NON_PORTABLE_MODULES = [
+    "Quickshell.Hyprland",
+    "Quickshell.Wayland",
+    "Quickshell.Services.Pipewire",
+    "Quickshell.Services.Notifications",
+    "Quickshell.Services.UPower",
+    "Quickshell.Services.Mpris",
+    "Quickshell.Services.SystemTray",
+]
+NON_PORTABLE_PATHS = ["/sys/", "/proc/"]
+# Exact-match non-portable binaries, plus prefix matches (pw-cat, pw-play,
+# ...; dbus-send, dbus-monitor, ...).
+NON_PORTABLE_BIN_EXACT = {"hyprctl", "pactl", "wpctl", "bluetoothctl", "notify-send"}
+NON_PORTABLE_BIN_PREFIXES = ("pw-", "dbus")
+NON_PORTABLE_GENERIC_TOKENS = ["hyprctl", "pactl", "wpctl", "pw-", "bluetoothctl", "notify-send", "dbus"]
+
+# Free-text scan tokens: every module/path/binary name we grep every line
+# of every .qml/.js file for, regardless of whether it appears in a
+# Process command array, an import statement, or a plain shell string
+# (e.g. embedded in a `bash -c "..."` argument).
+ALL_SCAN_TOKENS = NON_PORTABLE_MODULES + NON_PORTABLE_PATHS + NON_PORTABLE_GENERIC_TOKENS
+
+# Gallery kinds that get an HTML entry point (see Gallery.spoon/lib/manifest.lua
+# KNOWN_KINDS); "service" is the only kind that gets service.js instead.
+VISUAL_KINDS = {"panel", "overlay", "bar-widget", "menu", "bar"}
+
+PROG = "import-omarchy-plugin"
+
+
+class Fail(Exception):
+    """A clear, expected failure -- printed to stderr, no traceback."""
+
+    def __init__(self, message, code=1):
+        super().__init__(message)
+        self.code = code
+
+
+class ArgParser(argparse.ArgumentParser):
+    # argparse's default error() exits with code 2, which this tool
+    # reserves for the "not portable" verdict; route usage errors to
+    # exit 1 (errors) instead so a caller can trust 2 == "not portable".
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        raise Fail(message, code=1)
+
+
+# ---------------------------------------------------------------------------
+# Source resolution: git URL (shallow clone into a scratch temp dir) or a
+# local directory read in place.
+# ---------------------------------------------------------------------------
+
+def is_git_url(s):
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", s):
+        return True
+    if re.match(r"^[\w.\-]+@[\w.\-]+:", s):
+        return True
+    if s.endswith(".git"):
+        return True
+    return False
+
+
+def derive_repo_name(url):
+    s = url.rstrip("/")
+    if s.endswith(".git"):
+        s = s[:-4]
+    s = s.rsplit("/", 1)[-1]
+    s = s.rsplit(":", 1)[-1]
+    s = re.sub(r"[^A-Za-z0-9._-]", "_", s)
+    return s or "plugin"
+
+
+def clone_repo(url):
+    # Scratch clones land in the system temp directory (tempfile respects
+    # $TMPDIR) rather than any one hardcoded path -- a fresh, disposable
+    # directory per run, cleaned up once scanning is done.
+    name = derive_repo_name(url)
+    dest = Path(tempfile.mkdtemp(prefix=f"import-{name}-"))
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "--quiet", url, str(dest)],
+            check=True, capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        raise Fail("git not found on PATH")
+    except subprocess.CalledProcessError as e:
+        raise Fail(f"git clone failed for {url}: {e.stderr.strip()}")
+
+    commit = "unknown"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "--short", "HEAD"],
+            check=True, capture_output=True, text=True,
+        )
+        commit = proc.stdout.strip() or "unknown"
+    except subprocess.CalledProcessError:
+        pass
+    return dest, commit
+
+
+def resolve_source(source_arg):
+    """Returns (source_dir: Path, commit: str, is_clone: bool)."""
+    if is_git_url(source_arg):
+        dest, commit = clone_repo(source_arg)
+        return dest, commit, True
+    p = Path(source_arg).expanduser().resolve()
+    if not p.is_dir():
+        raise Fail(f"no such directory: {source_arg}")
+    return p, "local", False
+
+
+# ---------------------------------------------------------------------------
+# manifest.json loading -- fails clearly if missing or not schemaVersion 1.
+# ---------------------------------------------------------------------------
+
+def load_source_manifest(source_dir):
+    mpath = source_dir / "manifest.json"
+    if not mpath.is_file():
+        raise Fail(f"manifest.json not found in {source_dir}")
+    try:
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise Fail(f"manifest.json is not valid JSON: {e}")
+    if not isinstance(manifest, dict):
+        raise Fail("manifest.json does not decode to an object")
+    if manifest.get("schemaVersion") != 1:
+        raise Fail(f"manifest.json schemaVersion is {manifest.get('schemaVersion')!r}, expected 1")
+    if not isinstance(manifest.get("id"), str) or not manifest["id"]:
+        raise Fail("manifest.json has no 'id'")
+    if not isinstance(manifest.get("kinds"), list) or not manifest["kinds"]:
+        raise Fail("manifest.json has no non-empty 'kinds' array")
+    return manifest
+
+
+# ---------------------------------------------------------------------------
+# Scanning: Process command arrays, import statements, non-portable tokens.
+# ---------------------------------------------------------------------------
+
+COMMAND_RE = re.compile(r"\bcommand\s*[:=]\s*\[")
+IMPORT_RE = re.compile(r"^\s*import\s+(.+?)\s*$", re.MULTILINE)
+
+
+def find_bracket_end(text, open_index):
+    """`text[open_index]` is '['. Return the index just past the matching
+    ']', tracking string literals (so a ']' or ',' inside a quoted string
+    is not mistaken for structure). Returns -1 if unterminated."""
+    depth = 0
+    in_str = None
+    i = open_index
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if in_str:
+            if c == "\\":
+                i += 2
+                continue
+            if c == in_str:
+                in_str = None
+            i += 1
+            continue
+        if c in ("'", '"'):
+            in_str = c
+            i += 1
+            continue
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return -1
+
+
+def split_top_level(s, sep):
+    """Split `s` on `sep` characters that sit outside quotes and outside
+    nested [], {}, ()."""
+    parts = []
+    depth = 0
+    in_str = None
+    current = []
+    i = 0
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if in_str:
+            current.append(c)
+            if c == "\\" and i + 1 < n:
+                current.append(s[i + 1])
+                i += 2
+                continue
+            if c == in_str:
+                in_str = None
+            i += 1
+            continue
+        if c in ("'", '"'):
+            in_str = c
+            current.append(c)
+            i += 1
+            continue
+        if c in "[{(":
+            depth += 1
+            current.append(c)
+            i += 1
+            continue
+        if c in "]})":
+            depth -= 1
+            current.append(c)
+            i += 1
+            continue
+        if c == sep and depth == 0:
+            parts.append("".join(current))
+            current = []
+            i += 1
+            continue
+        current.append(c)
+        i += 1
+    tail = "".join(current)
+    parts.append(tail)
+    return parts
+
+
+def unescape_js_string(s):
+    return (
+        s.replace("\\\\", "\x00")
+        .replace('\\"', '"')
+        .replace("\\'", "'")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\x00", "\\")
+    )
+
+
+STRING_LIT_RE = re.compile(r'^"((?:[^"\\]|\\.)*)"$|^\'((?:[^\'\\]|\\.)*)\'$', re.DOTALL)
+
+
+def literal_value_of(element):
+    """If `element` is one or more quoted string literals joined by JS `+`
+    concatenation (whitespace/newlines allowed around the `+`), return the
+    concatenated literal value. Otherwise return None (it depends on a
+    variable or expression -- a dynamic element)."""
+    parts = [p.strip() for p in split_top_level(element, "+")]
+    if not parts or any(p == "" for p in parts):
+        return None
+    values = []
+    for p in parts:
+        m = STRING_LIT_RE.match(p)
+        if not m:
+            return None
+        raw = m.group(1) if m.group(1) is not None else m.group(2)
+        values.append(unescape_js_string(raw))
+    return "".join(values)
+
+
+def classify_element(element):
+    """Returns (display_value, is_literal)."""
+    value = literal_value_of(element)
+    if value is not None:
+        return value, True
+    return "<dynamic>", False
+
+
+def find_commands(relpath, text):
+    """Find every `command: [...]` / `command = [...]` array in `text`
+    (however deeply nested in the surrounding QML/JS -- declarative
+    Process{} property or an imperative `xProcess.command = [...]`
+    reassignment both match). Returns a list of
+    {file, line, tokens: [(display, is_literal), ...]}."""
+    results = []
+    for m in COMMAND_RE.finditer(text):
+        open_index = m.end() - 1
+        end = find_bracket_end(text, open_index)
+        if end == -1:
+            continue
+        inner = text[open_index + 1 : end - 1]
+        line_no = text.count("\n", 0, m.start()) + 1
+        elements = [e.strip() for e in split_top_level(inner, ",")]
+        elements = [e for e in elements if e != ""]
+        tokens = [classify_element(e) for e in elements]
+        if not tokens:
+            continue
+        results.append({"file": relpath, "line": line_no, "tokens": tokens})
+    return results
+
+
+def find_imports(text):
+    return [m.group(1).strip() for m in IMPORT_RE.finditer(text)]
+
+
+def scan_non_portable(relpath, text):
+    hits = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for token in ALL_SCAN_TOKENS:
+            if token in line:
+                hits.append((relpath, lineno, token))
+    return hits
+
+
+def scan_source(source_dir):
+    qml_files, js_files, commands, non_portable_hits = [], [], [], []
+    imports_by_file = {}
+    for root, dirs, files in os.walk(source_dir):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for fname in files:
+            ext = Path(fname).suffix.lower()
+            if ext not in (".qml", ".js"):
+                continue
+            full = Path(root) / fname
+            rel = str(full.relative_to(source_dir))
+            try:
+                text = full.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            (qml_files if ext == ".qml" else js_files).append(rel)
+            imports_by_file[rel] = find_imports(text)
+            commands.extend(find_commands(rel, text))
+            non_portable_hits.extend(scan_non_portable(rel, text))
+    qml_files.sort()
+    js_files.sort()
+    return qml_files, js_files, commands, non_portable_hits, imports_by_file
+
+
+# ---------------------------------------------------------------------------
+# Binary classification: available / missing / non-portable.
+# ---------------------------------------------------------------------------
+
+def classify_binary(name):
+    if name in NON_PORTABLE_BIN_EXACT or name.startswith(NON_PORTABLE_BIN_PREFIXES):
+        return "non-portable"
+    path = os.environ.get("PATH", "") + os.pathsep + "/opt/homebrew/bin"
+    return "available" if shutil.which(name, path=path) else "missing"
+
+
+def classify_command(command):
+    tokens = command["tokens"]
+    value, is_literal = tokens[0]
+    if not is_literal:
+        return "unknown (dynamic binary)"
+    return classify_binary(value)
+
+
+# ---------------------------------------------------------------------------
+# Manifest conversion.
+# ---------------------------------------------------------------------------
+
+def convert_manifest(manifest, new_id, source_arg, commit):
+    kinds = manifest["kinds"]
+    entry_points = {kind: ("service.js" if kind == "service" else "index.html") for kind in kinds}
+    out = {
+        "schemaVersion": 1,
+        "id": new_id,
+        "name": manifest.get("name") or new_id,
+        "version": manifest.get("version") or "0.0.1",
+        "kinds": kinds,
+        "entryPoints": entry_points,
+    }
+    if VISUAL_KINDS.intersection(kinds):
+        out["gallery"] = {"panel": {"width": 480, "height": 360, "transparent": False}}
+    out["imported"] = {
+        "source": source_arg,
+        "commit": commit,
+        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+    }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Output skeleton.
+# ---------------------------------------------------------------------------
+
+def copy_js_files(out_dir, js_files, source_dir):
+    copied = []
+    used = set()
+    for rel in sorted(js_files):
+        base = Path(rel).name
+        name, n = base, 1
+        while name in used:
+            stem, ext = os.path.splitext(base)
+            name = f"{stem}-{n}{ext}"
+            n += 1
+        used.add(name)
+        shutil.copy2(source_dir / rel, out_dir / name)
+        copied.append(name)
+    return copied
+
+
+def escape_html(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def build_index_html(title, copied_js, qml_files, imports_by_file):
+    script_tags = "\n".join(f'  <script src="{name}"></script>' for name in copied_js)
+    if qml_files:
+        todo_lines = []
+        for qf in qml_files:
+            imports = imports_by_file.get(qf) or []
+            imports_str = ", ".join(imports) if imports else "(no imports found)"
+            todo_lines.append(f"    - {qf} (imports: {imports_str})")
+        todo_block = "\n".join(todo_lines)
+    else:
+        todo_block = "    (no QML view files found in the source plugin)"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{escape_html(title)}</title>
+</head>
+<body>
+<!--
+  Generated by tools/import-omarchy-plugin -- see PORT-REPORT.md alongside
+  this file for the full port report. The following Omarchy QML view
+  file(s) have no macOS renderer (Quickshell/QML is Linux-only) and must
+  be hand-ported to HTML/CSS/JS against the window.gallery bridge (see
+  the vault note Plugin-Contract.md) before this plugin has a working UI:
+
+{todo_block}
+-->
+{script_tags}
+<script>
+  // Process shim: makes an Omarchy Model.js's Process command-array idiom
+  // (Quickshell.Io) work unmodified against window.gallery.exec.
+  window.Process = {{
+    run: function (cmd) {{
+      return gallery.exec(cmd[0], cmd.slice(1));
+    }}
+  }};
+</script>
+</body>
+</html>
+"""
+
+
+def build_service_js(copied_js):
+    if copied_js:
+        listing = "\n".join(f"// - {name}" for name in copied_js)
+    else:
+        listing = "// (no .js files were found to copy from the source plugin)"
+    return f"""// Generated stub for the "service" entry point by
+// tools/import-omarchy-plugin. Omarchy's Service.qml orchestrates its
+// Process calls declaratively inside QML; port that orchestration here
+// as plain JS, using the copied logic file(s) below and the Process shim
+// pattern from index.html (window.gallery.exec(cmd[0], cmd.slice(1))).
+//
+// Logic files copied alongside this stub:
+{listing}
+
+// TODO: hand-port the Service.qml Process orchestration here.
+"""
+
+
+def write_output(out_dir, manifest_out, js_files, source_dir, qml_files, imports_by_file):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    copied_js = copy_js_files(out_dir, js_files, source_dir)
+    (out_dir / "manifest.json").write_text(json.dumps(manifest_out, indent=2) + "\n", encoding="utf-8")
+    (out_dir / "index.html").write_text(
+        build_index_html(manifest_out["name"], copied_js, qml_files, imports_by_file), encoding="utf-8"
+    )
+    if "service" in manifest_out["kinds"]:
+        (out_dir / "service.js").write_text(build_service_js(copied_js), encoding="utf-8")
+    return copied_js
+
+
+# ---------------------------------------------------------------------------
+# Verdict.
+# ---------------------------------------------------------------------------
+
+def compute_verdict(qml_files, non_portable_hits, commands_with_class):
+    non_portable_commands = [c for c in commands_with_class if c["classification"] == "non-portable"]
+    if non_portable_hits or non_portable_commands:
+        examples = [f"`{tok}` ({f}:{ln})" for f, ln, tok in non_portable_hits[:3]]
+        examples += [f"`{c['tokens'][0][0]}` ({c['file']}:{c['line']})" for c in non_portable_commands[:3]]
+        reason = "relies on non-portable APIs/binaries with no macOS equivalent: " + ", ".join(examples[:3])
+        return "not portable", reason
+    if qml_files:
+        return (
+            "partial",
+            "logic layer (JS + shell commands found) looks portable; the QML view(s) have no macOS "
+            "renderer and require a hand-written HTML/CSS/JS rewrite",
+        )
+    return "portable", "no QML views and no known non-portable APIs or commands found"
+
+
+# ---------------------------------------------------------------------------
+# gallery validate.
+# ---------------------------------------------------------------------------
+
+def run_gallery_validate(out_dir):
+    gallery_bin = Path.home() / "bin" / "gallery"
+    if not (gallery_bin.is_file() and os.access(gallery_bin, os.X_OK)):
+        return None
+    # No external hard-kill timeout wrapper: `gallery validate` shells out
+    # to `hs -t 10 -q -c ...`, which already carries its own graceful
+    # timeout and a one-shot retry (see bin/gallery's hs_call). Killing an
+    # in-flight `hs` client from outside (coreutils `timeout`, or an
+    # equally-forceful Python subprocess timeout) is exactly what
+    # tests/run.sh warns never to do: it can leave Hammerspoon replying to
+    # a dead port and wedge IPC for other clients. A generous
+    # subprocess.run(timeout=...) here is a last-resort safety net, not
+    # the primary mechanism -- if it fires, that's an unrelated Hammerspoon
+    # IPC hang (observed in practice under concurrent sessions hitting the
+    # same Spoon instance), not something this plugin caused.
+    try:
+        proc = subprocess.run(
+            [str(gallery_bin), "validate", str(out_dir)],
+            capture_output=True, text=True, timeout=30,
+        )
+        output = (proc.stdout or "") + (proc.stderr or "")
+        return output.strip() or f"(exit {proc.returncode}, no output)"
+    except subprocess.TimeoutExpired:
+        return (
+            "(gallery validate timed out after 30s -- Hammerspoon's IPC did not reply. This is a "
+            "known flakiness in the shared Gallery Spoon instance under concurrent callers, not "
+            "specific to this plugin; see the tool's run_gallery_validate() comment.)"
+        )
+    except OSError as e:
+        return f"(gallery validate failed to run: {e})"
+
+
+# ---------------------------------------------------------------------------
+# Report.
+# ---------------------------------------------------------------------------
+
+def build_report(new_id, source_arg, commit, out_dir, commands_with_class, non_portable_hits,
+                  copied_js, qml_files, imports_by_file, verdict, reason, validate_output):
+    lines = [f"# Port report: {new_id}", ""]
+    lines.append(f"- Source: {source_arg}")
+    lines.append(f"- Commit: {commit}")
+    lines.append(f"- Imported: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}")
+    lines.append(f"- Output: {out_dir}")
+    lines.append("")
+
+    lines.append("## Commands found")
+    lines.append("")
+    if commands_with_class:
+        lines.append("| File:Line | Classification | Arguments |")
+        lines.append("|---|---|---|")
+        for c in commands_with_class:
+            args = " ".join(t[0] for t in c["tokens"])
+            lines.append(f"| {c['file']}:{c['line']} | {c['classification']} | `{args}` |")
+    else:
+        lines.append("(no Process command arrays found)")
+    lines.append("")
+
+    lines.append("## Non-portable API usage")
+    lines.append("")
+    if non_portable_hits:
+        for f, ln, tok in non_portable_hits:
+            lines.append(f"- {f}:{ln}: `{tok}`")
+    else:
+        lines.append("(none found)")
+    lines.append("")
+
+    lines.append("## JS files copied")
+    lines.append("")
+    if copied_js:
+        for name in copied_js:
+            lines.append(f"- {name}")
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    lines.append("## QML views needing a hand rewrite")
+    lines.append("")
+    if qml_files:
+        for qf in qml_files:
+            imports = imports_by_file.get(qf) or []
+            imports_str = ", ".join(imports) if imports else "(no imports found)"
+            lines.append(f"- {qf} (imports: {imports_str})")
+    else:
+        lines.append("(none found)")
+    lines.append("")
+
+    lines.append("## Verdict")
+    lines.append("")
+    lines.append(f"**{verdict}** -- {reason}")
+    lines.append("")
+
+    if validate_output is not None:
+        lines.append("## gallery validate output")
+        lines.append("")
+        lines.append("```")
+        lines.append(validate_output)
+        lines.append("```")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+def main(argv):
+    parser = ArgParser(prog=PROG, description="Scaffold a Gallery plugin from an Omarchy Quickshell plugin.")
+    parser.add_argument("source", help="git URL or local directory of the Omarchy plugin")
+    parser.add_argument("--out", help="output directory (default: ./imported/<id>)")
+    parser.add_argument("--id", dest="new_id", help="new plugin id (default: same as source manifest's id)")
+    args = parser.parse_args(argv)
+
+    source_dir, commit, is_clone = resolve_source(args.source)
+    try:
+        manifest = load_source_manifest(source_dir)
+        new_id = args.new_id or manifest["id"]
+        out_dir = Path(args.out).expanduser().resolve() if args.out else (Path.cwd() / "imported" / new_id)
+
+        qml_files, js_files, commands, non_portable_hits, imports_by_file = scan_source(source_dir)
+        for c in commands:
+            c["classification"] = classify_command(c)
+
+        manifest_out = convert_manifest(manifest, new_id, args.source, commit)
+        copied_js = write_output(out_dir, manifest_out, js_files, source_dir, qml_files, imports_by_file)
+
+        verdict, reason = compute_verdict(qml_files, non_portable_hits, commands)
+        validate_output = run_gallery_validate(out_dir)
+
+        report = build_report(
+            new_id, args.source, commit, out_dir, commands, non_portable_hits,
+            copied_js, qml_files, imports_by_file, verdict, reason, validate_output,
+        )
+        report_path = out_dir / "PORT-REPORT.md"
+        report_path.write_text(report, encoding="utf-8")
+
+        print(f"report: {report_path}")
+        print(f"verdict: {verdict} -- {reason}")
+        return 0 if verdict in ("portable", "partial") else 2
+    finally:
+        if is_clone:
+            shutil.rmtree(source_dir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Fail as e:
+        print(f"{PROG}: error: {e}", file=sys.stderr)
+        sys.exit(e.code)
+    except KeyboardInterrupt:
+        sys.exit(1)

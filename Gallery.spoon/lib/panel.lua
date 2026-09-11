@@ -140,14 +140,25 @@ function M.open(ctx, id)
     end
   end
 
+  -- Cascade: each panel already open shifts this one down and right by a
+  -- step (manifest gallery.panel.cascade, default 32 px, 0 disables), so a
+  -- second panel does not sit exactly on top of the first.
+  local openCount = 0
+  for _ in pairs(ctx.windows) do openCount = openCount + 1 end
+  local step = panelCfg.cascade
+  if step == nil then step = 32 end
+  local offset = openCount * step
+
   local rect
   if screenFrame then
     rect = {
-      x = screenFrame.x + (screenFrame.w - width) / 2,
-      y = screenFrame.y + (screenFrame.h - height) / 2,
+      x = screenFrame.x + (screenFrame.w - width) / 2 + offset,
+      y = screenFrame.y + (screenFrame.h - height) / 2 + offset,
       w = width,
       h = height,
     }
+    if rect.x + width > screenFrame.x + screenFrame.w then rect.x = screenFrame.x + screenFrame.w - width end
+    if rect.y + height > screenFrame.y + screenFrame.h then rect.y = screenFrame.y + screenFrame.h - height end
   else
     rect = { x = 0, y = 0, w = width, h = height }
   end

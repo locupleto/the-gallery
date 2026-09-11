@@ -31,6 +31,20 @@
 --- Returns a table with .open(ctx, id), .close(ctx, id), .toggle(ctx, id),
 --- .isOpen(id), and the .choosers state table itself.
 
+-- Expand a leading "~" in a command path or argument so manifests need not
+-- hardcode the home directory.
+local function expandHome(v)
+  if type(v) == "string" and v:sub(1, 2) == "~/" then
+    return os.getenv("HOME") .. v:sub(2)
+  end
+  return v
+end
+local function expandArgs(list)
+  local out = {}
+  for i, a in ipairs(list or {}) do out[i] = expandHome(a) end
+  return out
+end
+
 local M = {}
 
 M.choosers = {}
@@ -75,7 +89,7 @@ local function loadCommandItems(ctx, id, sourceCfg)
   end
 
   local stdout = ""
-  local newOk, task = pcall(hs.task.new, command, function(exitCode, out, err)
+  local newOk, task = pcall(hs.task.new, expandHome(command), function(exitCode, out, err)
     stdout = out or ""
     if exitCode ~= 0 then
       ctx.log("WARN", "menu source command for " .. id .. " exited " .. tostring(exitCode) .. ": " .. tostring(err))
@@ -138,7 +152,7 @@ local function runAction(ctx, id, action)
       if type(args) ~= "table" then
         args = {}
       end
-      local newOk, task = pcall(hs.task.new, command, function() end, args)
+      local newOk, task = pcall(hs.task.new, expandHome(command), function() end, expandArgs(args))
       if newOk and task then
         local startOk = false
         pcall(function() startOk = task:start() end)

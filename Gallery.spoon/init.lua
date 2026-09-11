@@ -82,6 +82,7 @@ local Feed = dofile(resourcePath("lib/feed.lua"))
 -- e.g. spoon.Gallery.Menu.isOpen(id) -- through the live, already-running
 -- instance rather than dofile'ing a disconnected copy.
 obj.Menu = Menu
+obj.Panel = Panel -- exposed for tests and tooling; open/close/toggle route by kind
 obj.Overlay = Overlay
 obj.Service = Service
 obj.Feed = Feed
@@ -133,6 +134,12 @@ end
 --- with only non-interactive kinds (service, bar-widget, bar).
 local function primaryInteractiveKind(manifest)
   local kinds = manifest and manifest.kinds
+  -- A plugin with several interactive kinds may say which one `open` means
+  -- (manifest.gallery.primaryKind); otherwise panel > overlay > menu.
+  local hint = manifest and manifest.gallery and manifest.gallery.primaryKind
+  if hint and tableContains(kinds, hint) and (hint == "panel" or hint == "overlay" or hint == "menu") then
+    return hint
+  end
   if tableContains(kinds, "panel") then
     return "panel"
   elseif tableContains(kinds, "overlay") then
@@ -278,6 +285,14 @@ end
 --- Dispatch an IPC verb from the `gallery` CLI. Always returns a string,
 --- even on error, and never raises out of this function.
 function obj:ipc(verb, id)
+  -- DEBUG timing so a hung client can be correlated against the log: did
+  -- the handler itself ever finish, or is the reply what got lost? Uses
+  -- hs.timer.secondsSinceEpoch when available (real Hammerspoon runtime),
+  -- falling back to os.clock (e.g. a headless test harness) so this never
+  -- raises on its own.
+  local startTime = (hs and hs.timer and hs.timer.secondsSinceEpoch and hs.timer.secondsSinceEpoch()) or os.clock()
+  log("DEBUG", "ipc " .. tostring(verb) .. " " .. tostring(id) .. " start")
+
   local ok, result = pcall(function()
     if verb == "status" then
       return self:status()
@@ -313,6 +328,10 @@ function obj:ipc(verb, id)
       return "unknown verb: " .. tostring(verb)
     end
   end)
+
+  local endTime = (hs and hs.timer and hs.timer.secondsSinceEpoch and hs.timer.secondsSinceEpoch()) or os.clock()
+  local elapsedMs = math.floor((endTime - startTime) * 1000 + 0.5)
+  log("DEBUG", "ipc " .. tostring(verb) .. " " .. tostring(id) .. " done in " .. tostring(elapsedMs) .. " ms")
 
   if ok then
     return result

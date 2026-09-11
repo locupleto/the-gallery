@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.sysmon",
+  "name": "System Monitor",
+  "version": "0.0.1",
+  "kinds": ["panel"],
+  "entryPoints": {
+    "panel": "index.html"
+  },
+  "gallery": {
+    "panel": {
+      "width": 720,
+      "height": 460,
+      "transparent": false
+    }
+  }
+}

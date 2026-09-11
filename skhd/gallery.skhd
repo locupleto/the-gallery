@@ -4,6 +4,12 @@
 # Installed by the-gallery/install.sh; edit the copy in the repo, not this file.
 #
 # Lines starting with "## " are picked up by the tiler key sheet generator.
+# Provisional layout (2026-09-11): everything on the 0 key until Learn replaces
+# the fzf menu on super+space.
 
-## Gallery: toggle the hello panel (Phase 0 smoke test)
-lalt - 0 : "$HOME/bin/gallery" toggle gallery.hello
+## Gallery: Learn menu (cheat sheets as a chooser; the chosen sheet opens in a panel)
+lalt - 0 : "$HOME/bin/gallery" toggle gallery.learn
+## Gallery: system monitor panel
+shift + lalt - 0 : "$HOME/bin/gallery" toggle gallery.sysmon
+## Gallery: workspace overview overlay (any key dismisses)
+ctrl + lalt - 0 : "$HOME/bin/gallery" toggle gallery.spaces

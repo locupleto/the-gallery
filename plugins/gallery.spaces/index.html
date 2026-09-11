@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Gallery Spaces</title>
+<style>
+  :root {
+    color-scheme: dark;
+    /* Fallbacks in case the bridge's injected CSS variables never land
+       (JS bridge disabled) -- match Gallery.spoon/lib/bridge.lua's
+       DEFAULT_THEME, same convention as plugins/gallery.hello/index.html. */
+    --gallery-background: #1f1811;
+    --gallery-foreground: #e8e6df;
+    --gallery-accent: #d8a656;
+    --gallery-muted: #9a886c;
+    --gallery-surface: #2a2214;
+    --gallery-danger: #e5726f;
+    --gallery-success: #5cc98f;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    /* Translucent backdrop over the host's transparent overlay webview
+       (Gallery.spoon/lib/overlay.lua calls webview:transparent(true)),
+       built from the theme token via color-mix rather than a hardcoded
+       rgba() so it stays correct across light and dark themes -- same
+       technique plugins/gallery.hello/index.html uses for its focus
+       ring. */
+    background: color-mix(in srgb, var(--gallery-background) 82%, transparent);
+    color: var(--gallery-foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+
+  body {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 100%;
+    padding: 2.5em 3em 1.5em;
+    gap: 1.4em;
+  }
+
+  #displays {
+    display: flex;
+    flex-direction: column;
+    gap: 1.4em;
+    overflow-y: auto;
+  }
+
+  .display-group h2 {
+    margin: 0 0 0.5em;
+    font-size: 0.85em;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gallery-muted);
+  }
+
+  .space-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9em;
+    align-items: flex-start;
+  }
+
+  .space-card {
+    box-sizing: border-box;
+    width: 15em;
+    min-height: 6em;
+    background: color-mix(in srgb, var(--gallery-surface) 92%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gallery-muted) 45%, transparent);
+    border-radius: 8px;
+    padding: 0.7em 0.8em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4em;
+  }
+
+  .space-card.is-focused {
+    border-color: var(--gallery-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--gallery-accent) 35%, transparent);
+  }
+
+  .space-card h3 {
+    margin: 0;
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--gallery-foreground);
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+  }
+
+  .space-card.is-focused h3 {
+    color: var(--gallery-accent);
+  }
+
+  .space-card h3 .dot {
+    width: 0.5em;
+    height: 0.5em;
+    border-radius: 50%;
+    background: var(--gallery-accent);
+    flex: none;
+  }
+
+  .window-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+  }
+
+  .window-row {
+    font-size: 0.78em;
+    line-height: 1.35;
+    color: var(--gallery-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .window-row .app {
+    font-weight: 600;
+  }
+
+  .window-row .title {
+    color: var(--gallery-muted);
+  }
+
+  .window-row.is-focused .app {
+    color: var(--gallery-accent);
+  }
+
+  .window-row.is-muted {
+    opacity: 0.55;
+  }
+
+  .window-row .badge {
+    font-size: 0.85em;
+    color: var(--gallery-muted);
+  }
+
+  .space-empty {
+    font-size: 0.78em;
+    color: var(--gallery-muted);
+    font-style: italic;
+  }
+
+  #status {
+    text-align: center;
+    font-size: 0.95em;
+    color: var(--gallery-danger);
+  }
+
+  #legend {
+    text-align: center;
+    font-size: 0.8em;
+    color: var(--gallery-muted);
+    letter-spacing: 0.02em;
+  }
+</style>
+</head>
+<body>
+  <div id="displays"></div>
+  <div id="status" hidden></div>
+  <div id="legend">press any key to dismiss</div>
+
+  <script src="Model.js"></script>
+  <script>
+    (function () {
+      var displaysEl = document.getElementById("displays");
+      var statusEl = document.getElementById("status");
+
+      function safeLog(message) {
+        if (window.gallery && typeof window.gallery.log === "function") {
+          window.gallery.log(message);
+        }
+      }
+
+      function el(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) {
+          node.className = className;
+        }
+        if (text != null) {
+          node.textContent = text;
+        }
+        return node;
+      }
+
+      function renderWindowRow(w) {
+        var row = el("li", "window-row");
+        if (w.hasFocus) {
+          row.classList.add("is-focused");
+        }
+        if (w.isFloating || w.isMinimized) {
+          row.classList.add("is-muted");
+        }
+
+        var appSpan = el("span", "app", w.app || "?");
+        row.appendChild(appSpan);
+
+        if (w.title) {
+          row.appendChild(document.createTextNode(" — "));
+          row.appendChild(el("span", "title", GallerySpacesModel.truncate(w.title, 34)));
+        }
+
+        var badgeText = "";
+        if (w.isMinimized) {
+          badgeText = " (min)";
+        } else if (w.isFloating) {
+          badgeText = " (float)";
+        }
+        if (badgeText) {
+          row.appendChild(el("span", "badge", badgeText));
+        }
+
+        return row;
+      }
+
+      function renderSpaceCard(space) {
+        var card = el("div", "space-card");
+        if (space.hasFocus) {
+          card.classList.add("is-focused");
+        }
+
+        var heading = el("h3");
+        if (space.hasFocus) {
+          heading.appendChild(el("span", "dot"));
+        }
+        var label = "Space " + space.index;
+        if (space.label) {
+          label += " · " + space.label;
+        }
+        heading.appendChild(document.createTextNode(label));
+        card.appendChild(heading);
+
+        if (space.windows.length === 0) {
+          card.appendChild(el("div", "space-empty", "empty"));
+        } else {
+          var list = el("ul", "window-list");
+          space.windows.forEach(function (w) {
+            list.appendChild(renderWindowRow(w));
+          });
+          card.appendChild(list);
+        }
+
+        return card;
+      }
+
+      function render(viewModel) {
+        if (viewModel.error) {
+          displaysEl.innerHTML = "";
+          statusEl.hidden = false;
+          statusEl.textContent = viewModel.error;
+          return;
+        }
+        statusEl.hidden = true;
+
+        displaysEl.innerHTML = "";
+        viewModel.displays.forEach(function (group) {
+          var section = el("div", "display-group");
+          section.appendChild(el("h2", null, group.displayLabel));
+          var row = el("div", "space-row");
+          group.spaces.forEach(function (space) {
+            row.appendChild(renderSpaceCard(space));
+          });
+          section.appendChild(row);
+          displaysEl.appendChild(section);
+        });
+      }
+
+      function onSpacesData(data) {
+        render(GallerySpacesModel.buildViewModel(data));
+      }
+
+      // ---- primary path: gallery.data.subscribe("spaces", cb) --------
+      // Per Plugin-Contract.md, the host pushes {spaces, windows} every
+      // 2s (Gallery.spoon/lib/bridge.lua's SPACES_INTERVAL) straight from
+      // `yabai -m query --spaces` / `--windows`; the first push arrives
+      // as soon as subscribe() is handled, so this alone satisfies
+      // "render immediately on the first push".
+      if (window.gallery && window.gallery.data && typeof window.gallery.data.subscribe === "function") {
+        window.gallery.data.subscribe("spaces", onSpacesData);
+        return;
+      }
+
+      // ---- fallback path: gallery.data is not defined -----------------
+      // Host gap: Plugin-Contract.md documents gallery.data.subscribe as
+      // the way plugins receive the yabai spaces feed, but it (or
+      // window.gallery itself) was not present when this page loaded.
+      // Poll yabai directly through gallery.exec instead, on the same
+      // 2s cadence, reproducing bridge.lua's own two-query shape so
+      // Model.js needs no fallback-specific code path.
+      safeLog("WARN: window.gallery.data unavailable -- falling back to gallery.exec polling of yabai directly");
+
+      if (!window.gallery || typeof window.gallery.exec !== "function") {
+        render({ error: "window.gallery bridge unavailable (no data feed, no exec fallback possible)", displays: [] });
+        return;
+      }
+
+      var YABAI = "/opt/homebrew/bin/yabai";
+      var POLL_INTERVAL_MS = 2000;
+      var pollInFlight = false;
+
+      function pollOnce() {
+        if (pollInFlight) {
+          return;
+        }
+        pollInFlight = true;
+        window.gallery.exec(YABAI, ["-m", "query", "--spaces"]).then(function (spacesResult) {
+          if (spacesResult.code !== 0) {
+            throw new Error("yabai --spaces exited " + spacesResult.code);
+          }
+          var spaces = JSON.parse(spacesResult.stdout);
+          return window.gallery.exec(YABAI, ["-m", "query", "--windows"]).then(function (windowsResult) {
+            if (windowsResult.code !== 0) {
+              throw new Error("yabai --windows exited " + windowsResult.code);
+            }
+            var windows = JSON.parse(windowsResult.stdout);
+            render(GallerySpacesModel.buildViewModel({ spaces: spaces, windows: windows }));
+          });
+        }).catch(function (err) {
+          render({ error: "yabai poll failed: " + (err && err.message ? err.message : String(err)), displays: [] });
+        }).then(function () {
+          pollInFlight = false;
+        });
+      }
+
+      pollOnce();
+      window.setInterval(pollOnce, POLL_INTERVAL_MS);
+    })();
+  </script>
+</body>
+</html>

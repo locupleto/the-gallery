@@ -43,27 +43,25 @@ THEME_HOOKS_DIR="${CONFIG_DIR}/hooks/theme-set.d"
 # on); fall back to the repo-relative copy for an uninstalled dev checkout.
 RENDER_TOOL_INSTALLED="${CONFIG_DIR}/bin/render-theme.py"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="${HOME}/Library/Logs/gallery.log"
+RENDER_TOOL_REPO="${SCRIPT_DIR}/../tools/render-theme.py"
+
 # Every IPC call uses the hs tool's own graceful timeout (-t). Never wrap hs in
 # `timeout`: killing the client mid-request leaves Hammerspoon replying to a dead
 # port, which has wedged and once crashed it. A request that lands during a
 # config reload returns "error sending to remote" within a second; retry once.
 HS_TIMEOUT="${GALLERY_HS_TIMEOUT:-10}"
 hs_call() {
-  local out attempt
-  for attempt in 1 2; do
-    out="$(hs -t "${HS_TIMEOUT}" -q -c "$1" 2>&1)" || true
-    case "${out}" in
-      "error sending to remote"*|"error: can't access Hammerspoon message port"*)
-        [ "${attempt}" -eq 1 ] && sleep 1.5 && continue
-        printf '%s\n' "${out}" >&2; return 124 ;;
-    esac
-    printf '%s\n' "${out}" | grep -v '^-- ' ; return 0
-  done
+  # Delegates to gallery-hs, which carries the watchdog (temp file, kill -9
+  # after HS_TIMEOUT seconds, single retry after 1.5s on the two transient
+  # reload errors or the watchdog itself) described in that script's own
+  # header comment. Resolve it next to this script first (dev checkout),
+  # falling back to the installed copy in ~/bin (see install.sh).
+  local gallery_hs="${SCRIPT_DIR}/gallery-hs"
+  [ -x "${gallery_hs}" ] || gallery_hs="${HOME}/bin/gallery-hs"
+  "${gallery_hs}" -t "${HS_TIMEOUT}" "$1"
 }
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="${HOME}/Library/Logs/gallery.log"
-RENDER_TOOL_REPO="${SCRIPT_DIR}/../tools/render-theme.py"
 
 usage() {
   cat >&2 << 'EOF'
