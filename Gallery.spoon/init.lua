@@ -130,7 +130,17 @@ end
 --- decode and validate each, and populate obj.plugins keyed by id. A
 --- missing plugin directory, an unreadable manifest, or a manifest that
 --- fails validation is logged and skipped -- this never raises.
+-- Extensions are loaded eagerly here so the first panel open does not pay
+-- their load cost (measured at about 2.5 s cold) and so their console
+-- banners do not leak into CLI output.
+local function preloadExtensions()
+  for _, name in ipairs({ "hs.webview", "hs.mouse", "hs.screen", "hs.drawing", "hs.canvas", "hs.json", "hs.fs" }) do
+    pcall(require, name)
+  end
+end
+
 function obj:start()
+  preloadExtensions()
   self.plugins = {}
   self.windows = self.windows or {}
 

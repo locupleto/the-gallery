@@ -103,6 +103,8 @@ run cp "${BIN_SRC}" "${BIN_DEST}"
 run chmod +x "${BIN_DEST}"
 
 GALLERY_BLOCK='-- gallery:begin
+-- hs.ipc must be loaded or the hs command-line tool blocks forever.
+require("hs.ipc")
 hs.loadSpoon("Gallery")
 spoon.Gallery:start()
 
@@ -144,7 +146,32 @@ fi
 echo "[gallery] reloading Hammerspoon if running"
 if pgrep -x "Hammerspoon" >/dev/null 2>&1; then
   if command -v hs >/dev/null 2>&1; then
-    run hs -c "hs.reload()"
+# --- skhd bindings ----------------------------------------------------------------
+# Copied next to skhdrc, which includes it with `.load "gallery.skhd"` (added by
+# the tiler installer in ai_voice_assistant). skhd is reloaded if it is running.
+SKHD_DIR="${HOME_DIR}/.config/skhd"
+if [ -d "${SKHD_DIR}" ]; then
+  run install -m 644 "${SCRIPT_DIR}/skhd/gallery.skhd" "${SKHD_DIR}/gallery.skhd"
+  if pgrep -xq skhd; then
+    if [ "${DRY_RUN}" -eq 1 ]; then echo "[dry] skhd --reload"; else skhd --reload && echo "[gallery] skhd reloaded"; fi
+  fi
+else
+  echo "[gallery] no ~/.config/skhd; skipping key bindings (install the tiler first)"
+fi
+
+    # hs blocks forever if the running Hammerspoon has not loaded hs.ipc yet
+    # (first install, or a config without the ipc require), so cap the wait and
+    # fall back to a full relaunch, which always picks up init.lua.
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      echo "[dry] hs -c hs.reload() (5s cap) or relaunch Hammerspoon"
+    elif timeout 5 hs -c "hs.reload()" >/dev/null 2>&1; then
+      echo "[gallery] Hammerspoon reloaded"
+    else
+      echo "[gallery] hs IPC not answering; relaunching Hammerspoon"
+      osascript -e 'tell application "Hammerspoon" to quit' >/dev/null 2>&1 || true
+      sleep 2; pkill -x Hammerspoon 2>/dev/null || true; sleep 1
+      open -a Hammerspoon
+    fi
   else
     run open -g -a Hammerspoon
   fi

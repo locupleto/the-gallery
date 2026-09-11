@@ -15,6 +15,24 @@
 #
 set -euo pipefail
 
+# Callers such as skhd or launchd may not carry the Homebrew path; hs lives there.
+export PATH="${PATH}:/opt/homebrew/bin:/usr/local/bin:${HOME}/bin"
+
+# Every IPC call is capped: hs blocks forever when Hammerspoon has not loaded
+# hs.ipc (fresh install, broken init.lua), and a hung CLI would wedge skhd.
+HS_TIMEOUT="${GALLERY_HS_TIMEOUT:-10}"
+hs_call() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${HS_TIMEOUT}" hs -c "$1"
+  else
+    hs -c "$1" &
+    local pid=$! waited=0
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "${HS_TIMEOUT}" ]; do sleep 1; waited=$((waited+1)); done
+    if kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null; echo "hs IPC timed out after ${HS_TIMEOUT}s" >&2; return 124; fi
+    wait "$pid"
+  fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="${HOME}/Library/Logs/gallery.log"
 
@@ -51,9 +69,9 @@ run_ipc() {
       echo "gallery: invalid id: ${id}" >&2
       exit 1
     fi
-    hs -c "return spoon.Gallery:ipc('${verb}', '${id}')"
+    hs_call "return spoon.Gallery:ipc('${verb}', '${id}')"
   else
-    hs -c "return spoon.Gallery:ipc('${verb}')"
+    hs_call "return spoon.Gallery:ipc('${verb}')"
   fi
 }
 
@@ -82,7 +100,7 @@ cmd_toggle() {
 
 cmd_reload() {
   require_hs
-  hs -c "hs.reload()"
+  hs_call "hs.reload()" || echo "Hammerspoon did not answer; open -a Hammerspoon to relaunch" >&2
 }
 
 cmd_log() {
@@ -129,7 +147,7 @@ cmd_doctor() {
   fi
 
   if command -v hs >/dev/null 2>&1; then
-    if [ "$(hs -c "return hs.accessibilityState()" 2>/dev/null)" = "true" ]; then
+    if [ "$(hs_call "return hs.accessibilityState()" 2>/dev/null)" = "true" ]; then
       echo "OK      Accessibility granted"
     else
       echo "MISSING Accessibility granted"

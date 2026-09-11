@@ -1,0 +1,9 @@
+# The Gallery key bindings, included by ~/.config/skhd/skhdrc via `.load "gallery.skhd"`.
+# skhd is the only hotkey grabber on this machine; Hammerspoon binds no keys of
+# its own. Each line calls into the Gallery Spoon over the hs IPC bridge.
+# Installed by the-gallery/install.sh; edit the copy in the repo, not this file.
+#
+# Lines starting with "## " are picked up by the tiler key sheet generator.
+
+## Gallery: toggle the hello panel (Phase 0 smoke test)
+lalt - 0 : "$HOME/bin/gallery" toggle gallery.hello
