@@ -94,7 +94,7 @@ local function loadCommandItems(ctx, id, sourceCfg)
     if exitCode ~= 0 then
       ctx.log("WARN", "menu source command for " .. id .. " exited " .. tostring(exitCode) .. ": " .. tostring(err))
     end
-  end, args)
+  end, expandArgs(args))
   if not newOk or not task then
     ctx.log("WARN", "failed to create menu source task for " .. id)
     return items

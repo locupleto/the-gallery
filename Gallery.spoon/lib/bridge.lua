@@ -278,7 +278,7 @@ function M.new(ctx, id, dir)
   end
 
   ------------------------------------------------------------------------
-  -- exec: hs.task.new(cmd, callback, args) -- args array only, no shell.
+  -- exec: hs.task.new(cmd, callback, streamCallback, args) -- args array only, no shell.
   -- Rejects immediately (no task spawned) once MAX_CONCURRENT_TASKS is
   -- already running; rejects after the fact if the binary cannot be
   -- found or task:start() otherwise fails (confirmed by hand: hs.task.new
@@ -303,11 +303,28 @@ function M.new(ctx, id, dir)
       return
     end
 
+    -- Streaming form of hs.task.new: without a stream callback Hammerspoon
+    -- only drains the pipes after the process exits, so any command whose
+    -- output exceeds the 64 KiB pipe buffer blocks on write and never
+    -- terminates (seen with `ps -Aro ...`, ~77 KB). With the stream callback
+    -- the pipes are read as data arrives; the termination callback's own
+    -- stdOut/stdErr are then empty, so the buffers below are the only copy.
+    local outChunks, errChunks = {}, {}
     local task
     local createOk, createErr = pcall(function()
       task = hs.task.new(cmd, function(exitCode, stdOut, stdErr)
         activeTasks = activeTasks - 1
-        reply(requestId, true, { code = exitCode, stdout = stdOut or "", stderr = stdErr or "" })
+        if stdOut and stdOut ~= "" then outChunks[#outChunks + 1] = stdOut end
+        if stdErr and stdErr ~= "" then errChunks[#errChunks + 1] = stdErr end
+        reply(requestId, true, {
+          code = exitCode,
+          stdout = table.concat(outChunks),
+          stderr = table.concat(errChunks),
+        })
+      end, function(_task, stdOut, stdErr)
+        if stdOut and stdOut ~= "" then outChunks[#outChunks + 1] = stdOut end
+        if stdErr and stdErr ~= "" then errChunks[#errChunks + 1] = stdErr end
+        return true
       end, args)
     end)
     if not createOk or not task then
