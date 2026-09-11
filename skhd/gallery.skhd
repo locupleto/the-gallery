@@ -1,14 +1,14 @@
 # The Gallery key bindings, included by ~/.config/skhd/skhdrc via `.load "gallery.skhd"`.
 # skhd is the only hotkey grabber on this machine; Hammerspoon binds no keys of
-# its own. Each line calls into the Gallery Spoon over the hs IPC bridge.
+# its own. Each line calls the Gallery CLI, which opens terminal-style plugins
+# (tui/menu kinds) in a floating iTerm window itself and routes webview kinds
+# over the hs IPC bridge.
 # Installed by the-gallery/install.sh; edit the copy in the repo, not this file.
 #
 # Lines starting with "## " are picked up by the tiler key sheet generator.
-# Provisional layout (2026-09-11): everything on the 0 key until Learn replaces
-# the fzf menu on super+space.
+# Learn stays on super+space in the tiler's own skhdrc.
 
-## Gallery: Learn menu (cheat sheets as a chooser; the chosen sheet opens in a panel)
-## Gallery: system monitor panel
+## Gallery: system monitor (btop in a floating terminal)
 shift + lalt - 0 : "$HOME/bin/gallery" toggle gallery.sysmon
-## Gallery: workspace overview overlay (any key dismisses)
+## Gallery: spaces and windows picker (fzf in a floating terminal)
 ctrl + lalt - 0 : "$HOME/bin/gallery" toggle gallery.spaces
