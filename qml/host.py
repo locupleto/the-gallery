@@ -159,6 +159,7 @@ def read_theme_background():
     except OSError:
         return None
     background = None
+    darker_background = None
     color0 = None
     for line in raw.splitlines():
         match = re.match(r'\s*([A-Za-z0-9_-]+)\s*=\s*"?(#[0-9A-Fa-f]{6})', line)
@@ -166,9 +167,13 @@ def read_theme_background():
             continue
         if match.group(1) == "background":
             background = match.group(2)
+        elif match.group(1) == "darker_background":
+            darker_background = match.group(2)
         elif match.group(1) == "color0":
             color0 = match.group(2)
-    return background or color0
+    # Prefer the theme's deepest tone so the host window fill matches the
+    # near-black QML plugin surfaces (see qs.Commons Color.qml).
+    return darker_background or background or color0
 
 
 def resolve_background_color(root):

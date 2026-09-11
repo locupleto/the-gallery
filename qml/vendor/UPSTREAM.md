@@ -18,8 +18,14 @@ module as `qs.Commons` / `qs.Ui`, matching what Omarchy plugins `import`.)
 
 ## Patches applied on top of upstream
 
-None. Every vendored file loads under the gallery-qml shim (qml/shim/) as
-shipped upstream -- see qml/README.md for what the shim provides and what a
+One, deliberate: **Commons/Color.qml** -- `loadColors()` prefers the theme's
+`darker_background` token over `background` when setting the foundational
+`background` surface, so every QML plugin panel is painted with the theme's
+deepest tone and reads as one near-black UI alongside the iTerm floating
+surfaces (which render-theme.py deepens the same way). Falls back to
+`background` for any theme that omits `darker_background`. Re-apply after a
+re-vendor. Otherwise every vendored file loads under the gallery-qml shim
+(qml/shim/) as shipped upstream -- see qml/README.md for what the shim provides and what a
 handful of qs.Ui files reference but never get compiled by the plugins this
 host targets (KeyboardPanel.qml, SpeedTestOverlay.qml, PopupCard.qml,
 Panel.qml and a few others reach further into layer-shell-only Quickshell

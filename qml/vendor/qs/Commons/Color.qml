@@ -139,6 +139,7 @@ QtObject {
     var loadedForeground = false
     var loadedBackground = false
     var color0Value = ""
+    var darkerBackgroundValue = ""
     var color4Value = ""
     var color7Value = ""
     var color8Value = ""
@@ -147,6 +148,7 @@ QtObject {
       if (!match) continue
       if (match[1] === "foreground") { foreground = match[2]; loadedForeground = true }
       else if (match[1] === "background") { background = match[2]; loadedBackground = true }
+      else if (match[1] === "darker_background") darkerBackgroundValue = match[2]
       // Prefer the explicit `accent` key; only fall back to color4 when the
       // theme doesn't define a separate accent. color4 appears later in the
       // file so the old single-property approach clobbered accent with it.
@@ -159,6 +161,10 @@ QtObject {
       else if (match[1] === "red" || match[1] === "color1") urgent = match[2]
     }
     if (!loadedBackground && color0Value.length > 0) background = color0Value
+    // Gallery: paint every QML surface with the theme's deepest tone so
+    // plugin panels read as one near-black UI, matching the iTerm floating
+    // surfaces. Falls back to the ordinary background when a theme omits it.
+    if (darkerBackgroundValue.length > 0) background = darkerBackgroundValue
     if (!loadedForeground && color7Value.length > 0) foreground = color7Value
     if (!foundAccent && color4Value.length > 0) accent = color4Value
     if (!foundMuted) muted = color8Value.length > 0 ? color8Value : foreground
