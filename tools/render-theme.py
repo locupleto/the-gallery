@@ -11,6 +11,8 @@ Gallery.spoon and `gallery theme set` manage) and writes:
   ~/.config/gallery/state/theme.json
   ~/.config/gallery/state/theme.sh
   ~/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json
+  ~/.config/btop/themes/gallery.theme
+  ~/.config/btop/btop.conf (color_theme key only, rewritten in place)
 
 stdlib only -- no third-party TOML parser, since the upstream files this
 repo vendors (see tools/vendor-omarchy-themes.sh) are a flat `key = "value"`
@@ -51,6 +53,9 @@ ITERM_DYNAMIC_PROFILES_DIR = (
     Path.home() / "Library" / "Application Support" / "iTerm2" / "DynamicProfiles"
 )
 ITERM_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-theme.json"
+BTOP_CONFIG_DIR = Path.home() / ".config" / "btop"
+BTOP_THEME_PATH = BTOP_CONFIG_DIR / "themes" / "gallery.theme"
+BTOP_CONF_PATH = BTOP_CONFIG_DIR / "btop.conf"
 
 ANSI_NAMES = [
     "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
@@ -254,12 +259,129 @@ def render_iterm_profile(tokens: dict, name: str) -> str:
         "Selection Color": iterm_color_dict(tokens["selection_background"]),
         "Selected Text Color": iterm_color_dict(tokens["selection_foreground"]),
         "Use Separate Colors for Light and Dark Mode": False,
+        # A Gallery window is a floating TUI host (see bin/gallery-tui), not
+        # an everyday terminal: it should behave like a modal utility panel
+        # that vanishes silently the moment its command (btop, fzf, ...)
+        # exits, never prompting and never leaving a dead session on screen.
+        "Window Type": 0,
+        "Blinking Cursor": False,
+        "Scrollback Lines": 1000,
+        "Unlimited Scrollback": False,
+        "Silence Bell": True,
+        "Flashing Bell": False,
+        "Visual Bell": False,
+        "Close Sessions On End": True,
+        "Prompt Before Closing 2": 0,
+        "Transparency": 0.0,
     }
     for i in range(16):
         profile[f"Ansi {i} Color"] = iterm_color_dict(tokens[f"color{i}"])
 
     doc = {"Profiles": [profile]}
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
+
+
+# --- btop -------------------------------------------------------------------
+
+def render_btop_theme(tokens: dict, name: str) -> str:
+    """Render a complete btop theme (every key the shipped themes under
+    /opt/homebrew/share/btop/themes define -- checked against dracula.theme,
+    which carries the full 42-key set including graph_text/meter_bg/
+    process_*) mapped from Gallery tokens.
+
+    Mapping spirit (mirrors tokyo-night.theme/dracula.theme's own choices):
+    accent drives title/hi_fg/selected_bg/proc_misc (the "this is Gallery"
+    highlight color); muted (or lighter_background, whichever the theme's
+    colors.toml carries) drives the neutral chrome -- inactive text, the
+    divider line, the meter background, and the cpu/mem box outlines; the
+    net box and the download/upload graphs pick up blue/cyan since network
+    graphs read best cool; the process box and its gradient pick up magenta
+    so it reads distinctly from cpu (green->yellow->red heat gradient) and
+    mem (blue/cyan/yellow/green per sub-meter) at a glance.
+    """
+
+    def or_(value: str | None, fallback: str) -> str:
+        return value if value else fallback
+
+    neutral = or_(tokens.get("lighter_background"), or_(tokens.get("muted"), tokens["color8"]))
+    orange = or_(tokens.get("orange"), tokens["color3"])
+
+    pairs = [
+        ("main_bg", tokens["background"]),
+        ("main_fg", tokens["foreground"]),
+        ("title", tokens["accent"]),
+        ("hi_fg", tokens["accent"]),
+        ("selected_bg", tokens["accent"]),
+        ("selected_fg", tokens["foreground"]),
+        ("inactive_fg", neutral),
+        ("graph_text", tokens["foreground"]),
+        ("meter_bg", neutral),
+        ("proc_misc", tokens["accent"]),
+        ("cpu_box", neutral),
+        ("mem_box", neutral),
+        ("net_box", tokens["color4"]),
+        ("proc_box", tokens["color5"]),
+        ("div_line", neutral),
+        ("temp_start", tokens["color2"]),
+        ("temp_mid", tokens["color3"]),
+        ("temp_end", tokens["color1"]),
+        ("cpu_start", tokens["color2"]),
+        ("cpu_mid", tokens["color3"]),
+        ("cpu_end", tokens["color1"]),
+        ("free_start", tokens["color4"]),
+        ("free_mid", tokens["color6"]),
+        ("free_end", tokens["color2"]),
+        ("cached_start", tokens["color6"]),
+        ("cached_mid", tokens["color4"]),
+        ("cached_end", tokens["color5"]),
+        ("available_start", tokens["color3"]),
+        ("available_mid", orange),
+        ("available_end", tokens["color1"]),
+        ("used_start", tokens["color2"]),
+        ("used_mid", tokens["color10"]),
+        ("used_end", tokens["color2"]),
+        ("download_start", tokens["color4"]),
+        ("download_mid", tokens["color6"]),
+        ("download_end", tokens["color2"]),
+        ("upload_start", tokens["color5"]),
+        ("upload_mid", tokens["color4"]),
+        ("upload_end", tokens["color6"]),
+        ("process_start", tokens["color5"]),
+        ("process_mid", tokens["accent"]),
+        ("process_end", neutral),
+    ]
+
+    lines = [
+        f"# Gallery theme: {name}",
+        "# Generated by tools/render-theme.py -- do not edit by hand.",
+        "",
+    ]
+    lines.extend(f'theme[{key}]="{value}"' for key, value in pairs)
+    return "\n".join(lines) + "\n"
+
+
+def update_btop_conf(theme_name: str) -> None:
+    """Idempotently set `color_theme = "<theme_name>"` in btop.conf, leaving
+    every other key untouched. btop rewrites this file on exit, so only the
+    one key this function owns is ever touched -- never a full overwrite."""
+    new_line = f'color_theme = "{theme_name}"\n'
+
+    if BTOP_CONF_PATH.is_file():
+        lines = BTOP_CONF_PATH.read_text().splitlines(keepends=True)
+        replaced = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("color_theme"):
+                lines[i] = new_line
+                replaced = True
+                break
+        if not replaced:
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] += "\n"
+            lines.append(new_line)
+        BTOP_CONF_PATH.write_text("".join(lines))
+    else:
+        BTOP_CONF_PATH.parent.mkdir(parents=True, exist_ok=True)
+        BTOP_CONF_PATH.write_text(new_line)
 
 
 def write_file(path: Path, content: str) -> None:
@@ -291,12 +413,16 @@ def main(argv: list[str]) -> int:
     write_file(STATE_DIR / "theme.json", render_json(tokens, name, light))
     write_file(STATE_DIR / "theme.sh", render_shell(tokens, name))
     write_file(ITERM_PROFILE_PATH, render_iterm_profile(tokens, name))
+    write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
+    update_btop_conf("gallery")
 
     print(f"rendered theme '{name}' ({'light' if light else 'dark'})")
     print(f"  {STATE_DIR / 'theme.css'}")
     print(f"  {STATE_DIR / 'theme.json'}")
     print(f"  {STATE_DIR / 'theme.sh'}")
     print(f"  {ITERM_PROFILE_PATH}")
+    print(f"  {BTOP_THEME_PATH}")
+    print(f"  {BTOP_CONF_PATH} (color_theme = gallery)")
     return 0
 
 

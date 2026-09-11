@@ -1263,6 +1263,83 @@ cmd_doctor() {
     ok=0
   fi
 
+  local login_items
+  if login_items="$(osascript -e 'tell application "System Events" to get name of every login item' 2>/dev/null)"; then
+    if [[ "${login_items}" == *"Hammerspoon"* ]]; then
+      echo "OK      Hammerspoon is a login item"
+    else
+      echo "WARN    Hammerspoon is a login item"
+    fi
+  else
+    echo "WARN    Hammerspoon is a login item (osascript error)"
+  fi
+
+  if pgrep -x skhd >/dev/null 2>&1 \
+    && grep -q '\.load "gallery\.skhd"' "${HOME}/.config/skhd/skhdrc" 2>/dev/null \
+    && [ -f "${HOME}/.config/skhd/gallery.skhd" ]; then
+    echo "OK      skhd running with gallery.skhd loaded"
+  else
+    echo "WARN    skhd running with gallery.skhd loaded (run the tiler installer)"
+  fi
+
+  if command -v yabai >/dev/null 2>&1; then
+    local yabai_windows
+    if yabai_windows="$(yabai -m query --windows 2>/dev/null)"; then
+      if command -v python3 >/dev/null 2>&1; then
+        local yabai_status
+        yabai_status="$(printf '%s' "${yabai_windows}" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print("parse-error")
+    sys.exit(0)
+if not isinstance(data, list) or len(data) < 1:
+    print("no-windows")
+    sys.exit(0)
+if any(isinstance(w, dict) and w.get("has-ax-reference") is True for w in data):
+    print("ok")
+else:
+    print("blind")
+' 2>/dev/null)"
+        case "${yabai_status}" in
+          ok)
+            echo "OK      yabai has accessibility references"
+            ;;
+          blind)
+            echo "FAIL    yabai is blind (no accessibility references) -- dismiss any pending accessibility prompt, then: launchctl kickstart -k gui/501/com.asmvik.yabai"
+            ok=0
+            ;;
+          no-windows)
+            echo "WARN    yabai has accessibility references (no windows to check)"
+            ;;
+          *)
+            echo "WARN    yabai has accessibility references (unexpected output from yabai -m query --windows)"
+            ;;
+        esac
+      else
+        echo "WARN    yabai has accessibility references (python3 not found to parse output)"
+      fi
+    else
+      echo "WARN    yabai has accessibility references (yabai not running)"
+    fi
+  else
+    echo "WARN    yabai has accessibility references (yabai not installed)"
+  fi
+
+  local theme_current_link="${THEME_DIR}/current"
+  if [ -L "${theme_current_link}" ] && [ -f "${theme_current_link}/colors.toml" ]; then
+    echo "OK      gallery theme 'current' resolves to a theme with colors.toml"
+  else
+    echo "WARN    gallery theme 'current' resolves to a theme with colors.toml"
+  fi
+
+  if [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json" ]; then
+    echo "OK      iTerm2 dynamic profile gallery-theme.json exists"
+  else
+    echo "WARN    iTerm2 dynamic profile gallery-theme.json exists (run: gallery theme render)"
+  fi
+
   if [ "${ok}" -eq 1 ]; then
     exit 0
   else

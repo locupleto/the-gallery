@@ -35,6 +35,13 @@ DEFAULT_GRID="6:6:1:1:4:4"
 YABAI_RULE_LABEL="gallery-tui"
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
+# Dynamic profile tools/render-theme.py writes on every theme change. Its
+# "Name" field is read fresh each spawn (rather than hardcoded) so a future
+# renderer change to the profile name is picked up automatically; the
+# constant below is only the fallback when the file is absent or unparsable.
+ITERM_GALLERY_PROFILE_JSON="${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json"
+ITERM_GALLERY_PROFILE_FALLBACK="Gallery"
+
 die() {
   echo "gallery-tui: $*" >&2
   exit 1
@@ -125,6 +132,24 @@ linger() {
 
 # --- the floating window ----------------------------------------------------
 
+# Name of the Gallery iTerm dynamic profile, read fresh from the JSON
+# render-theme.py writes. Empty output means "use the default profile"
+# (file missing, unreadable, or unparsable -- e.g. mid-write).
+gallery_iterm_profile_name() {
+  [ -f "${ITERM_GALLERY_PROFILE_JSON}" ] || return 0
+  python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        doc = json.load(f)
+    name = doc["Profiles"][0]["Name"]
+    if name:
+        print(name)
+except Exception:
+    pass
+' "${ITERM_GALLERY_PROFILE_JSON}" 2>/dev/null || true
+}
+
 # A fresh iTerm window running `gallery-tui run ...`. Needs Automation ->
 # iTerm2 for the caller (one prompt, once), exactly like learn's
 # open_window (cold-iTerm branch included: a cold iTerm restores its own
@@ -138,12 +163,21 @@ spawn_window() {
   # AppleScript itself, or its compiler chokes on the bare backslash.
   local as_cmdline
   as_cmdline="$(printf '%s' "${cmdline}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+
+  local profile_name create_clause
+  profile_name="$(gallery_iterm_profile_name)"
+  if [ -n "${profile_name}" ]; then
+    create_clause="create window with profile \"${profile_name}\" command \"${as_cmdline}\""
+  else
+    create_clause="create window with default profile command \"${as_cmdline}\""
+  fi
+
   if pgrep -xq iTerm2 || pgrep -fq "/iTerm.app/Contents/MacOS/iTerm2"; then
-    osascript -e "tell application \"iTerm2\" to create window with default profile command \"${as_cmdline}\"" >/dev/null
+    osascript -e "tell application \"iTerm2\" to ${create_clause}" >/dev/null
   else
     osascript -e "tell application \"iTerm2\"
         activate
-        create window with default profile command \"${as_cmdline}\"
+        ${create_clause}
     end tell" >/dev/null
   fi
 }
