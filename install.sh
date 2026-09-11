@@ -156,6 +156,11 @@ GALLERY_BLOCK='-- gallery:begin
 require("hs.ipc")
 hs.loadSpoon("Gallery")
 spoon.Gallery:start()
+-- Close every Gallery window, chooser and timer before a reload or quit;
+-- otherwise their native windows outlive the Lua state as untracked orphans.
+hs.shutdownCallback = function()
+  pcall(function() spoon.Gallery:stop() end)
+end
 
 do
   -- Debounced: an install copies several files at once, and reloading on each
