@@ -12,6 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_EPOCH="$(date +%s)"
 HOME_DIR="${HOME}"
 SPOON_SRC="${SCRIPT_DIR}/Gallery.spoon"
 SPOON_DEST="${HOME_DIR}/.hammerspoon/Spoons/Gallery.spoon"
@@ -109,10 +110,14 @@ hs.loadSpoon("Gallery")
 spoon.Gallery:start()
 
 do
+  -- Debounced: an install copies several files at once, and reloading on each
+  -- event leaves the IPC port down for many seconds (or crashes Hammerspoon).
+  local galleryReloadTimer = nil
   local gallerySpoonWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.hammerspoon/", function(files)
     for _, file in ipairs(files) do
       if file:sub(-4) == ".lua" then
-        hs.reload()
+        if galleryReloadTimer then galleryReloadTimer:stop() end
+        galleryReloadTimer = hs.timer.doAfter(1.0, hs.reload)
         break
       end
     end
@@ -143,9 +148,6 @@ else
   echo "[gallery] ${HS_INIT} already references Gallery, leaving it untouched"
 fi
 
-echo "[gallery] reloading Hammerspoon if running"
-if pgrep -x "Hammerspoon" >/dev/null 2>&1; then
-  if command -v hs >/dev/null 2>&1; then
 # --- skhd bindings ----------------------------------------------------------------
 # Copied next to skhdrc, which includes it with `.load "gallery.skhd"` (added by
 # the tiler installer in ai_voice_assistant). skhd is reloaded if it is running.
@@ -159,24 +161,39 @@ else
   echo "[gallery] no ~/.config/skhd; skipping key bindings (install the tiler first)"
 fi
 
-    # hs blocks forever if the running Hammerspoon has not loaded hs.ipc yet
-    # (first install, or a config without the ipc require), so cap the wait and
-    # fall back to a full relaunch, which always picks up init.lua.
-    if [ "${DRY_RUN}" -eq 1 ]; then
-      echo "[dry] hs -c hs.reload() (5s cap) or relaunch Hammerspoon"
-    elif timeout 5 hs -c "hs.reload()" >/dev/null 2>&1; then
-      echo "[gallery] Hammerspoon reloaded"
+# --- Hammerspoon reload -------------------------------------------------------------
+# The init.lua pathwatcher reloads Hammerspoon (debounced) when the Spoon copy above
+# changes, and the Spoon writes ~/.config/gallery/state/ready when it has started.
+# We wait for that stamp rather than probing the IPC port: an hs client killed by
+# a timeout mid-request has been seen to wedge or crash Hammerspoon.
+READY="${CONFIG_DIR}/state/ready"
+stamp_fresh() { [ -f "${READY}" ] && [ "$(cut -d' ' -f1 "${READY}")" -ge "${INSTALL_EPOCH}" ]; }
+if [ "${DRY_RUN}" -eq 1 ]; then
+  echo "[dry] wait for the Gallery ready stamp, else reload or relaunch Hammerspoon"
+elif ! pgrep -x "Hammerspoon" >/dev/null 2>&1; then
+  run open -g -a Hammerspoon
+  echo "[gallery] Hammerspoon started"
+else
+  waited=0
+  while ! stamp_fresh && [ "${waited}" -lt 12 ]; do sleep 1; waited=$((waited + 1)); done
+  if stamp_fresh; then
+    echo "[gallery] Gallery reloaded and ready (${waited}s)"
+  else
+    # Reload through the file watcher, never over IPC: an hs client whose
+    # conversation is cut by the reload hangs forever and can wedge the port.
+    echo "[gallery] no reload observed; touching init.lua to trigger one"
+    touch "${HS_INIT}"
+    waited=0
+    while ! stamp_fresh && [ "${waited}" -lt 12 ]; do sleep 1; waited=$((waited + 1)); done
+    if stamp_fresh; then
+      echo "[gallery] Gallery reloaded and ready (${waited}s after reload request)"
     else
-      echo "[gallery] hs IPC not answering; relaunching Hammerspoon"
+      echo "[gallery] still not ready; relaunching Hammerspoon"
       osascript -e 'tell application "Hammerspoon" to quit' >/dev/null 2>&1 || true
       sleep 2; pkill -x Hammerspoon 2>/dev/null || true; sleep 1
-      open -a Hammerspoon
+      open -g -a Hammerspoon
     fi
-  else
-    run open -g -a Hammerspoon
   fi
-else
-  echo "[gallery] Hammerspoon is not running; start it to pick up changes"
 fi
 
 echo "[gallery] install complete"

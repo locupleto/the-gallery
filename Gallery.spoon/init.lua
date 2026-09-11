@@ -23,8 +23,15 @@ obj.homepage = "https://github.com/locupleto/the-gallery"
 
 obj.pluginDir = os.getenv("HOME") .. "/.config/gallery/plugins"
 obj.logPath = os.getenv("HOME") .. "/Library/Logs/gallery.log"
+-- Written at the end of start(); the installer waits for it instead of probing
+-- the IPC port, because a probe killed mid-request can wedge or crash Hammerspoon.
+obj.readyPath = os.getenv("HOME") .. "/.config/gallery/state/ready"
 obj.plugins = {}
 obj.windows = {}
+-- Keyed by plugin id: the hs.window that was frontmost immediately before
+-- that plugin's panel was shown, captured so focus can be restored to it
+-- on close (see manifest.gallery.panel.restoreFocus).
+obj.previousFocusWindow = {}
 
 --- Append a timestamped line to obj.logPath and print to the Hammerspoon
 --- console. Never raises: a failure to open the log file is silently
@@ -108,23 +115,12 @@ local function pickWindowLevel()
   return nil
 end
 
---- Combine the borderless and utility window masks for a panel-style
---- webview. Returns nil if hs.webview.windowMasks is unavailable.
-local function pickWindowMasks()
-  local ok, masks = pcall(function()
-    local wm = hs.webview and hs.webview.windowMasks
-    if not wm then
-      return nil
-    end
-    local borderless = wm.borderless or 0
-    local utility = wm.utility or 0
-    return borderless | utility
-  end)
-  if ok then
-    return masks
-  end
-  return nil
-end
+--- Default window style mask names (see manifest.gallery.panel.style) and
+--- default focus mode (see manifest.gallery.panel.focus). Kept as named
+--- constants so the gate test harness's `variant` subcommand and this file
+--- agree on what "default" means.
+local DEFAULT_PANEL_STYLE = { "borderless", "utility" }
+local DEFAULT_PANEL_FOCUS = "activate"
 
 --- Scan obj.pluginDir for plugin subdirectories containing manifest.json,
 --- decode and validate each, and populate obj.plugins keyed by id. A
@@ -134,7 +130,18 @@ end
 -- their load cost (measured at about 2.5 s cold) and so their console
 -- banners do not leak into CLI output.
 local function preloadExtensions()
-  for _, name in ipairs({ "hs.webview", "hs.mouse", "hs.screen", "hs.drawing", "hs.canvas", "hs.json", "hs.fs" }) do
+  for _, name in ipairs({
+    "hs.webview",
+    "hs.webview.usercontent",
+    "hs.mouse",
+    "hs.screen",
+    "hs.drawing",
+    "hs.canvas",
+    "hs.json",
+    "hs.fs",
+    "hs.application",
+    "hs.window",
+  }) do
     pcall(require, name)
   end
 end
@@ -143,6 +150,7 @@ function obj:start()
   preloadExtensions()
   self.plugins = {}
   self.windows = self.windows or {}
+  self.previousFocusWindow = self.previousFocusWindow or {}
 
   local dirOk, dirAttr = pcall(hs.fs.attributes, self.pluginDir)
   if not dirOk or not dirAttr or dirAttr.mode ~= "directory" then
@@ -180,6 +188,11 @@ function obj:start()
     log("ERROR", "error scanning plugin directory: " .. tostring(scanErr))
   end
 
+  pcall(function()
+    hs.fs.mkdir(os.getenv("HOME") .. "/.config/gallery/state")
+    local f = io.open(self.readyPath, "w")
+    if f then f:write(string.format("%d %s\n", os.time(), obj.version)); f:close() end
+  end)
   return self
 end
 
@@ -189,6 +202,7 @@ function obj:stop()
     pcall(function() win:delete() end)
     self.windows[id] = nil
   end
+  self.previousFocusWindow = {}
   return self
 end
 
@@ -314,16 +328,77 @@ function obj:open(id)
 
   local path = entry.dir .. "/" .. entryPoint
 
-  local webviewOk, webview = pcall(hs.webview.new, rect)
+  -- JavaScript-to-Lua bridge: a usercontent controller named "gallery" is
+  -- wired into the webview so page JS can call window.gallery.close() and
+  -- window.gallery.log(msg). Built defensively -- if the controller cannot
+  -- be created (or its callback/script cannot be attached) the webview is
+  -- still created without it rather than failing the whole open.
+  local ucc = nil
+  do
+    local uccOk, controller = pcall(function() return hs.webview.usercontent.new("gallery") end)
+    if uccOk and controller then
+      ucc = controller
+
+      local callbackOk, callbackErr = pcall(function()
+        ucc:setCallback(function(message)
+          local body = message and message.body
+          if type(body) ~= "table" then
+            return
+          end
+          if body.action == "close" then
+            self:close(id)
+          elseif body.action == "log" then
+            log("INFO", "[" .. id .. "] " .. tostring(body.message))
+          end
+        end)
+      end)
+      if not callbackOk then
+        log("WARN", "failed to set usercontent callback for " .. id .. ": " .. tostring(callbackErr))
+      end
+
+      local injectOk, injectErr = pcall(function()
+        ucc:injectScript({
+          source = [[
+window.gallery = {
+  close: function () { webkit.messageHandlers.gallery.postMessage({action: "close"}); },
+  log: function (m) { webkit.messageHandlers.gallery.postMessage({action: "log", message: String(m)}); }
+};
+]],
+          injectionTime = "documentStart",
+        })
+      end)
+      if not injectOk then
+        log("WARN", "failed to inject gallery bridge script for " .. id .. ": " .. tostring(injectErr))
+      end
+    else
+      log("WARN", "failed to create usercontent controller for " .. id .. "; JS bridge disabled")
+    end
+  end
+
+  local webviewOk, webview
+  if ucc then
+    webviewOk, webview = pcall(hs.webview.new, rect, {}, ucc)
+  else
+    webviewOk, webview = pcall(hs.webview.new, rect)
+  end
   if not webviewOk or not webview then
     log("ERROR", "failed to create webview for " .. id)
     return "error: could not create window for " .. id
   end
 
-  local masks = pickWindowMasks()
-  if masks then
-    pcall(function() webview:windowStyle(masks) end)
+  -- Window style: manifest.gallery.panel.style is an array of
+  -- hs.webview.windowMasks key names (default {"borderless","utility"}).
+  -- hs.webview:windowStyle accepts that array directly and combines the
+  -- named masks with bitwise-or internally.
+  local styleList = panelCfg.style
+  if type(styleList) ~= "table" or #styleList == 0 then
+    styleList = DEFAULT_PANEL_STYLE
   end
+  local styleOk, styleErr = pcall(function() webview:windowStyle(styleList) end)
+  if not styleOk then
+    log("WARN", "failed to apply window style for " .. id .. ": " .. tostring(styleErr))
+  end
+  local styleDesc = table.concat(styleList, "+")
 
   local level = pickWindowLevel()
   if level then
@@ -348,24 +423,59 @@ function obj:open(id)
   end)
 
   pcall(function() webview:url("file://" .. path) end)
+
+  -- Capture whatever was frontmost right before this panel is shown, so
+  -- obj:close can restore focus to it afterwards (manifest.gallery.panel.restoreFocus).
+  local prevFrontOk, prevFront = pcall(function() return hs.window.frontmostWindow() end)
+  self.previousFocusWindow[id] = (prevFrontOk and prevFront) or nil
+
   pcall(function() webview:show() end)
 
   self.windows[id] = webview
 
-  -- TODO(Phase 1 gate): focus behavior is unverified until Hammerspoon is
-  -- available for testing. hswindow():focus() is the expected path; if it
-  -- proves unreliable in practice, revisit against whatever focus API
-  -- hs.webview exposes at that time.
-  local hsWindowOk, hsWindow = pcall(function() return webview:hswindow() end)
-  if hsWindowOk and hsWindow then
-    pcall(function() hsWindow:focus() end)
+  -- Focus handling: manifest.gallery.panel.focus (default "activate").
+  --   "activate" -- activate the Hammerspoon app, then focus this window.
+  --   "window"   -- focus this window only, do not activate the app.
+  --   "none"     -- do nothing; whatever has focus keeps it.
+  local focusMode = panelCfg.focus
+  if focusMode ~= "activate" and focusMode ~= "window" and focusMode ~= "none" then
+    if focusMode ~= nil then
+      log("WARN", "unknown focus mode '" .. tostring(focusMode) .. "' for " .. id .. "; defaulting to " .. DEFAULT_PANEL_FOCUS)
+    end
+    focusMode = DEFAULT_PANEL_FOCUS
   end
 
-  log("INFO", "opened " .. id)
+  if focusMode == "activate" then
+    pcall(function()
+      local app = hs.application.get("Hammerspoon")
+      if app then
+        app:activate(true)
+      end
+    end)
+    pcall(function()
+      local hsWindow = webview:hswindow()
+      if hsWindow then
+        hsWindow:focus()
+      end
+    end)
+  elseif focusMode == "window" then
+    pcall(function()
+      local hsWindow = webview:hswindow()
+      if hsWindow then
+        hsWindow:focus()
+      end
+    end)
+  end
+  -- focusMode == "none": nothing to do.
+
+  log("INFO", string.format("opened %s style=%s focus=%s", id, styleDesc, focusMode))
   return "opened " .. id
 end
 
---- Close and forget a plugin's open window.
+--- Close and forget a plugin's open window. If
+--- manifest.gallery.panel.restoreFocus is not false, also attempts to
+--- refocus whatever window was frontmost before this plugin's panel was
+--- shown (captured in obj:open).
 function obj:close(id)
   if not id or id == "" then
     return "usage: close <id>"
@@ -378,6 +488,24 @@ function obj:close(id)
 
   pcall(function() win:delete() end)
   self.windows[id] = nil
+
+  local prevWindow = self.previousFocusWindow[id]
+  self.previousFocusWindow[id] = nil
+
+  local entry = self.plugins[id]
+  local panelCfg = (entry and entry.manifest and entry.manifest.gallery and entry.manifest.gallery.panel) or {}
+  if panelCfg.restoreFocus ~= false then
+    if prevWindow then
+      local restoreOk, restoreErr = pcall(function() prevWindow:focus() end)
+      if restoreOk then
+        log("INFO", "restored previous focus after closing " .. id)
+      else
+        log("WARN", "failed to restore previous focus after closing " .. id .. ": " .. tostring(restoreErr))
+      end
+    else
+      log("INFO", "no previous window captured to restore focus to after closing " .. id)
+    end
+  end
 
   log("INFO", "closed " .. id)
   return "closed " .. id

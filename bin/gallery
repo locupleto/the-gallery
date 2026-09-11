@@ -18,19 +18,22 @@ set -euo pipefail
 # Callers such as skhd or launchd may not carry the Homebrew path; hs lives there.
 export PATH="${PATH}:/opt/homebrew/bin:/usr/local/bin:${HOME}/bin"
 
-# Every IPC call is capped: hs blocks forever when Hammerspoon has not loaded
-# hs.ipc (fresh install, broken init.lua), and a hung CLI would wedge skhd.
+# Every IPC call uses the hs tool's own graceful timeout (-t). Never wrap hs in
+# `timeout`: killing the client mid-request leaves Hammerspoon replying to a dead
+# port, which has wedged and once crashed it. A request that lands during a
+# config reload returns "error sending to remote" within a second; retry once.
 HS_TIMEOUT="${GALLERY_HS_TIMEOUT:-10}"
 hs_call() {
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "${HS_TIMEOUT}" hs -c "$1"
-  else
-    hs -c "$1" &
-    local pid=$! waited=0
-    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "${HS_TIMEOUT}" ]; do sleep 1; waited=$((waited+1)); done
-    if kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null; echo "hs IPC timed out after ${HS_TIMEOUT}s" >&2; return 124; fi
-    wait "$pid"
-  fi
+  local out attempt
+  for attempt in 1 2; do
+    out="$(hs -t "${HS_TIMEOUT}" -q -c "$1" 2>&1)" || true
+    case "${out}" in
+      "error sending to remote"*|"error: can't access Hammerspoon message port"*)
+        [ "${attempt}" -eq 1 ] && sleep 1.5 && continue
+        printf '%s\n' "${out}" >&2; return 124 ;;
+    esac
+    printf '%s\n' "${out}" | grep -v '^-- ' ; return 0
+  done
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -100,7 +103,9 @@ cmd_toggle() {
 
 cmd_reload() {
   require_hs
-  hs_call "hs.reload()" || echo "Hammerspoon did not answer; open -a Hammerspoon to relaunch" >&2
+  # Reload via the init.lua pathwatcher (debounced in init.lua); asking over IPC
+  # can hang the client when the reload cuts the conversation.
+  touch "${HOME}/.hammerspoon/init.lua" && echo "reload requested (watch ~/Library/Logs/gallery.log)"
 }
 
 cmd_log() {
