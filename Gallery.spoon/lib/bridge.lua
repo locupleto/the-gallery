@@ -47,6 +47,23 @@
 
 local M = {}
 
+--- Registry of currently-attached bridges, keyed by plugin id:
+---   M.open[id] = { webview = <hs.webview>, bridge = <bridge instance> }
+--- Maintained by bridge.attach()/bridge.dispose() below (added on attach,
+--- removed on dispose). Exists so a caller that only has a reference to
+--- this loaded copy of lib/bridge.lua -- not to lib/panel.lua's or
+--- lib/overlay.lua's own module-private bookkeeping -- can still discover
+--- which webviews currently have a live bridge attached (e.g. for a
+--- theme-reload re-inject). Note that lib/panel.lua and lib/overlay.lua
+--- each dofile this file independently (see the selfDir() comment in
+--- both), so each gets its own M table and therefore its own M.open --
+--- init.lua's theme-reload iterates ctx.windows/Overlay.overlays directly
+--- instead for exactly this reason; M.open remains most useful to a
+--- caller that already holds the same Bridge module instance panel.lua
+--- or overlay.lua loaded (or one that dofiles this file itself for
+--- introspection, e.g. a future test).
+M.open = {}
+
 -- JS-facing concurrency cap on gallery.exec(); does not apply to the
 -- bridge's own internal polling tasks (yabai queries), which are capped
 -- structurally instead (see spacesInFlight in M.new).
@@ -129,6 +146,7 @@ local function buildInjectedScript(version, theme)
   // else in the page renders (this script runs at document start).
   try {
     var styleEl = document.createElement("style");
+    styleEl.id = "gallery-theme";
     var css = ":root{";
     for (var key in THEME) {
       if (key === "name") continue;
@@ -492,6 +510,7 @@ function M.new(ctx, id, dir)
 
   function bridge.attach(webview)
     webviewRef = webview
+    M.open[id] = { webview = webview, bridge = bridge }
   end
 
   --- Stop every timer this bridge instance owns. Idempotent -- safe to
@@ -502,6 +521,9 @@ function M.new(ctx, id, dir)
     stopTimer("spaces")
     stopTimer("metrics")
     webviewRef = nil
+    if M.open[id] and M.open[id].bridge == bridge then
+      M.open[id] = nil
+    end
   end
 
   -- dir is accepted per the contract signature but unused today; kept

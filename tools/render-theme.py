@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""render-theme.py -- render the active Gallery theme into every consumer
+this repo knows about: a CSS custom-property sheet, a JSON token dump, an
+iTerm2 dynamic profile, and a shell fragment (also consumed by the crystal
+widgets).
+
+Reads ~/.config/gallery/themes/current/colors.toml (the `current` symlink
+Gallery.spoon and `gallery theme set` manage) and writes:
+
+  ~/.config/gallery/state/theme.css
+  ~/.config/gallery/state/theme.json
+  ~/.config/gallery/state/theme.sh
+  ~/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json
+
+stdlib only -- no third-party TOML parser, since the upstream files this
+repo vendors (see tools/vendor-omarchy-themes.sh) are a flat `key = "value"`
+TOML with no tables, arrays, or multi-line strings, which is trivial to
+parse by hand and keeps this script dependency-free on any Python 3.
+
+Two colors.toml shapes are understood, because upstream Omarchy's actual
+schema (checked against basecamp/omarchy, all 22 themes, 2026-09) differs
+from a flat 16-slot ANSI palette:
+
+  - Omarchy's real schema: mode, accent, selection, muted, background,
+    dark_background, darker_background, lighter_background, foreground,
+    dark_foreground, light_foreground, bright_foreground, red, yellow,
+    orange, green, cyan, blue, magenta, brown, bright_red, bright_yellow,
+    bright_green, bright_cyan, bright_blue, bright_magenta. No cursor key,
+    no color0..color15, no light.mode file -- light/dark is the `mode` key.
+  - A hand-authored theme following the flat contract this repo also
+    accepts: accent, cursor, foreground, background, selection_foreground,
+    selection_background, color0..color15, plus an optional empty
+    light.mode file next to colors.toml instead of a `mode` key.
+
+Every derived token below prefers a literal key if the file has it, and
+otherwise computes it from Omarchy's real keys -- so both shapes render
+identically.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+CONFIG_DIR = Path(os.environ.get("GALLERY_CONFIG_DIR", str(Path.home() / ".config" / "gallery")))
+THEMES_DIR = CONFIG_DIR / "themes"
+CURRENT_LINK = THEMES_DIR / "current"
+STATE_DIR = CONFIG_DIR / "state"
+ITERM_DYNAMIC_PROFILES_DIR = (
+    Path.home() / "Library" / "Application Support" / "iTerm2" / "DynamicProfiles"
+)
+ITERM_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-theme.json"
+
+ANSI_NAMES = [
+    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+    "bright_black", "bright_red", "bright_green", "bright_yellow",
+    "bright_blue", "bright_magenta", "bright_cyan", "bright_white",
+]
+
+
+def parse_flat_toml(text: str) -> dict:
+    """Parse the flat `key = "value"` TOML colors.toml uses. No tables, no
+    arrays, no multi-line strings -- just comments, blank lines, and
+    `key = "value"` (or bare/numeric) assignments."""
+    result: dict[str, str] = {}
+    for lineno, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        # Strip an inline comment that starts after the value (only safe
+        # once we know the value isn't itself a quoted string containing '#').
+        if value.startswith('"') and value.endswith('"') and len(value) >= 2:
+            value = value[1:-1]
+        elif value.startswith("'") and value.endswith("'") and len(value) >= 2:
+            value = value[1:-1]
+        else:
+            if "#" in value:
+                value = value.split("#", 1)[0].strip()
+        result[key] = value
+    return result
+
+
+def hex_to_rgb_int(value: str) -> tuple[int, int, int]:
+    v = value.strip().lstrip("#")
+    if len(v) == 3:
+        v = "".join(c * 2 for c in v)
+    if len(v) != 6:
+        raise ValueError(f"not a #rrggbb color: {value!r}")
+    return int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16)
+
+
+def hex_to_rgb_float(value: str) -> tuple[float, float, float]:
+    r, g, b = hex_to_rgb_int(value)
+    return r / 255.0, g / 255.0, b / 255.0
+
+
+def resolve_current_theme_dir() -> Path:
+    if not CURRENT_LINK.exists():
+        sys.exit(
+            f"render-theme: no current theme: {CURRENT_LINK} does not exist "
+            "(run 'gallery theme set <name>' first)"
+        )
+    resolved = CURRENT_LINK.resolve()
+    if not resolved.is_dir():
+        sys.exit(f"render-theme: current theme target is not a directory: {resolved}")
+    return resolved
+
+
+def theme_name_from_dir(theme_dir: Path) -> str:
+    # Prefer the symlink's immediate target name (not the fully resolved
+    # real path) so the reported name matches what `gallery theme set` used,
+    # even if the themes dir itself is reached through another symlink.
+    try:
+        target = os.readlink(CURRENT_LINK)
+        return Path(target).name
+    except OSError:
+        return theme_dir.name
+
+
+def build_tokens(raw: dict, theme_dir: Path) -> tuple[dict, bool]:
+    """Return (tokens, light) where tokens is the flat dict of every raw
+    key (minus `mode`) plus the normalized contract keys (cursor,
+    selection_foreground, selection_background, color0..color15)."""
+
+    def pick(*keys, default=None):
+        for k in keys:
+            if k in raw and raw[k]:
+                return raw[k]
+        return default
+
+    background = pick("background", default="#000000")
+    foreground = pick("foreground", default="#ffffff")
+    accent = pick("accent", default=foreground)
+
+    mode = raw.get("mode")
+    if mode is not None:
+        light = mode.strip().lower() == "light"
+    else:
+        light = (theme_dir / "light.mode").exists()
+
+    tokens = {k: v for k, v in raw.items() if k != "mode"}
+
+    tokens.setdefault("accent", accent)
+    tokens.setdefault("background", background)
+    tokens.setdefault("foreground", foreground)
+    tokens["cursor"] = pick("cursor", "accent", default=accent)
+    tokens["selection_background"] = pick(
+        "selection_background", "selection", "background", default=background
+    )
+    tokens["selection_foreground"] = pick(
+        "selection_foreground", "foreground", default=foreground
+    )
+
+    color_fallbacks = {
+        "color0": ("dark_background", "background"),
+        "color1": ("red",),
+        "color2": ("green",),
+        "color3": ("yellow",),
+        "color4": ("blue",),
+        "color5": ("magenta",),
+        "color6": ("cyan",),
+        "color7": ("foreground",),
+        "color8": ("muted", "dark_foreground"),
+        "color9": ("bright_red", "red"),
+        "color10": ("bright_green", "green"),
+        "color11": ("bright_yellow", "yellow"),
+        "color12": ("bright_blue", "blue"),
+        "color13": ("bright_magenta", "magenta"),
+        "color14": ("bright_cyan", "cyan"),
+        "color15": ("bright_foreground", "foreground"),
+    }
+    for color_key, fallback_keys in color_fallbacks.items():
+        if color_key in raw and raw[color_key]:
+            continue
+        tokens[color_key] = pick(*fallback_keys, default=foreground)
+
+    return tokens, light
+
+
+def css_var_name(key: str) -> str:
+    return "--gallery-" + key.replace("_", "-")
+
+
+def render_css(tokens: dict) -> str:
+    lines = [":root {"]
+    for key, value in tokens.items():
+        lines.append(f"  {css_var_name(key)}:{value};")
+    lines.append(f"  {css_var_name('muted')}:{tokens['color8']};")
+    lines.append(f"  {css_var_name('danger')}:{tokens['color1']};")
+    lines.append(f"  {css_var_name('success')}:{tokens['color2']};")
+    lines.append(f"  {css_var_name('warning')}:{tokens['color3']};")
+    lines.append(f"  {css_var_name('info')}:{tokens['color4']};")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def render_json(tokens: dict, name: str, light: bool) -> str:
+    payload = dict(tokens)
+    payload["name"] = name
+    payload["light"] = light
+    payload["muted"] = tokens["color8"]
+    payload["danger"] = tokens["color1"]
+    payload["success"] = tokens["color2"]
+    payload["warning"] = tokens["color3"]
+    payload["info"] = tokens["color4"]
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def render_shell(tokens: dict, name: str) -> str:
+    def q(value: str) -> str:
+        return "'" + value.replace("'", "'\\''") + "'"
+
+    lines = [
+        "# Generated by tools/render-theme.py -- do not edit by hand.",
+        f"export GALLERY_THEME_NAME={q(name)}",
+        f"export GALLERY_BG={q(tokens['background'])}",
+        f"export GALLERY_FG={q(tokens['foreground'])}",
+        f"export GALLERY_ACCENT={q(tokens['accent'])}",
+        f"export GALLERY_MUTED={q(tokens['color8'])}",
+    ]
+    for i in range(16):
+        lines.append(f"export GALLERY_COLOR{i}={q(tokens[f'color{i}'])}")
+
+    r, g, b = hex_to_rgb_int(tokens["accent"])
+    lines.append(f"export CRYSTAL_BAR_COLOR='rgba({r},{g},{b},1.0)'")
+    return "\n".join(lines) + "\n"
+
+
+def iterm_color_dict(hex_value: str) -> dict:
+    r, g, b = hex_to_rgb_float(hex_value)
+    return {
+        "Red Component": r,
+        "Green Component": g,
+        "Blue Component": b,
+        "Alpha Component": 1.0,
+        "Color Space": "sRGB",
+    }
+
+
+def render_iterm_profile(tokens: dict, name: str) -> str:
+    profile = {
+        "Name": "Gallery",
+        "Guid": "gallery-theme",
+        "Background Color": iterm_color_dict(tokens["background"]),
+        "Foreground Color": iterm_color_dict(tokens["foreground"]),
+        "Cursor Color": iterm_color_dict(tokens["cursor"]),
+        "Cursor Text Color": iterm_color_dict(tokens["background"]),
+        "Selection Color": iterm_color_dict(tokens["selection_background"]),
+        "Selected Text Color": iterm_color_dict(tokens["selection_foreground"]),
+        "Use Separate Colors for Light and Dark Mode": False,
+    }
+    for i in range(16):
+        profile[f"Ansi {i} Color"] = iterm_color_dict(tokens[f"color{i}"])
+
+    doc = {"Profiles": [profile]}
+    return json.dumps(doc, indent=2, sort_keys=True) + "\n"
+
+
+def write_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+
+
+def main(argv: list[str]) -> int:
+    print_only = "--print" in argv
+
+    theme_dir = resolve_current_theme_dir()
+    colors_path = theme_dir / "colors.toml"
+    if not colors_path.is_file():
+        sys.exit(f"render-theme: no colors.toml in current theme dir: {theme_dir}")
+
+    raw = parse_flat_toml(colors_path.read_text())
+    name = theme_name_from_dir(theme_dir)
+    tokens, light = build_tokens(raw, theme_dir)
+
+    if print_only:
+        payload = dict(tokens)
+        payload["name"] = name
+        payload["light"] = light
+        for k, v in sorted(payload.items()):
+            print(f"{k} = {v}")
+        return 0
+
+    write_file(STATE_DIR / "theme.css", render_css(tokens))
+    write_file(STATE_DIR / "theme.json", render_json(tokens, name, light))
+    write_file(STATE_DIR / "theme.sh", render_shell(tokens, name))
+    write_file(ITERM_PROFILE_PATH, render_iterm_profile(tokens, name))
+
+    print(f"rendered theme '{name}' ({'light' if light else 'dark'})")
+    print(f"  {STATE_DIR / 'theme.css'}")
+    print(f"  {STATE_DIR / 'theme.json'}")
+    print(f"  {STATE_DIR / 'theme.sh'}")
+    print(f"  {ITERM_PROFILE_PATH}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

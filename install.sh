@@ -19,6 +19,13 @@ SPOON_DEST="${HOME_DIR}/.hammerspoon/Spoons/Gallery.spoon"
 PLUGINS_SRC="${SCRIPT_DIR}/plugins"
 PLUGINS_DEST="${HOME_DIR}/.config/gallery/plugins"
 CONFIG_DIR="${HOME_DIR}/.config/gallery"
+THEMES_SRC="${SCRIPT_DIR}/themes"
+THEMES_DEST="${CONFIG_DIR}/themes"
+THEME_HOOKS_SRC="${SCRIPT_DIR}/tools/hooks"
+THEME_HOOKS_DEST="${CONFIG_DIR}/hooks/theme-set.d"
+RENDER_TOOL_SRC="${SCRIPT_DIR}/tools/render-theme.py"
+RENDER_TOOL_DEST="${CONFIG_DIR}/bin/render-theme.py"
+DEFAULT_THEME="tokyo-night"
 BIN_SRC="${SCRIPT_DIR}/bin/gallery"
 BIN_DEST="${HOME_DIR}/bin/gallery"
 HS_INIT="${HOME_DIR}/.hammerspoon/init.lua"
@@ -97,6 +104,35 @@ run rsync -a "${PLUGINS_SRC}/" "${PLUGINS_DEST}/"
 
 echo "[gallery] ensuring config directories exist"
 run mkdir -p "${CONFIG_DIR}/feed" "${CONFIG_DIR}/themes" "${CONFIG_DIR}/hooks"
+
+echo "[gallery] installing themes to ${THEMES_DEST}"
+run mkdir -p "${THEMES_DEST}"
+# No --delete: user-authored themes may already live under THEMES_DEST, and
+# the `current` symlink (also under THEMES_DEST) must never be touched here.
+run rsync -a --exclude 'current' "${THEMES_SRC}/" "${THEMES_DEST}/"
+
+echo "[gallery] installing theme renderer to ${RENDER_TOOL_DEST}"
+run mkdir -p "$(dirname "${RENDER_TOOL_DEST}")"
+run cp "${RENDER_TOOL_SRC}" "${RENDER_TOOL_DEST}"
+run chmod +x "${RENDER_TOOL_DEST}"
+
+echo "[gallery] installing theme-set hook examples to ${THEME_HOOKS_DEST}"
+run mkdir -p "${THEME_HOOKS_DEST}"
+if [ -d "${THEME_HOOKS_SRC}" ]; then
+  for hook in "${THEME_HOOKS_SRC}"/*; do
+    [ -f "${hook}" ] || continue
+    run install -m 755 "${hook}" "${THEME_HOOKS_DEST}/$(basename "${hook}")"
+  done
+fi
+
+if [ ! -e "${THEMES_DEST}/current" ]; then
+  if [ -d "${THEMES_DEST}/${DEFAULT_THEME}" ]; then
+    echo "[gallery] no current theme set, pointing 'current' at ${DEFAULT_THEME}"
+    run ln -s "${DEFAULT_THEME}" "${THEMES_DEST}/current"
+  else
+    echo "[gallery] no current theme set, and default theme '${DEFAULT_THEME}' is not installed; leaving 'current' unset" >&2
+  fi
+fi
 
 echo "[gallery] installing CLI to ${BIN_DEST}"
 run mkdir -p "${HOME_DIR}/bin"

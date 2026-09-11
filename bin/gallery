@@ -16,6 +16,11 @@
 #   gallery remove <id> [--yes]
 #   gallery clone <id> <new-id>
 #   gallery validate <dir>
+#   gallery theme list
+#   gallery theme current
+#   gallery theme set <name>
+#   gallery theme render
+#   gallery theme next
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -31,6 +36,12 @@ PLUGIN_DIR="${CONFIG_DIR}/plugins"
 STAGING_DIR="${CONFIG_DIR}/staging"
 REMOVED_DIR="${CONFIG_DIR}/removed"
 GALLERY_JSON="${CONFIG_DIR}/gallery.json"
+THEME_DIR="${CONFIG_DIR}/themes"
+THEME_HOOKS_DIR="${CONFIG_DIR}/hooks/theme-set.d"
+# render-theme.py is installed onto the boot volume by install.sh (see the
+# rationale comment there re: TCC and the external volume this repo lives
+# on); fall back to the repo-relative copy for an uninstalled dev checkout.
+RENDER_TOOL_INSTALLED="${CONFIG_DIR}/bin/render-theme.py"
 
 # Every IPC call uses the hs tool's own graceful timeout (-t). Never wrap hs in
 # `timeout`: killing the client mid-request leaves Hammerspoon replying to a dead
@@ -52,6 +63,7 @@ hs_call() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="${HOME}/Library/Logs/gallery.log"
+RENDER_TOOL_REPO="${SCRIPT_DIR}/../tools/render-theme.py"
 
 usage() {
   cat >&2 << 'EOF'
@@ -71,6 +83,11 @@ commands:
   remove <id> [--yes]             disable and remove a plugin
   clone <id> <new-id>             duplicate an installed plugin under a new id
   validate <dir>                  validate a plugin manifest directory
+  theme list                      list installed themes (marks current, light)
+  theme current                   print the active theme name
+  theme set <name>                switch the active theme and re-render it
+  theme render                    re-run the renderers for the active theme
+  theme next                      switch to the next theme alphabetically
   reload                          request a Hammerspoon config reload
   log                             tail the Gallery log
   doctor                          check the local Gallery install
@@ -622,6 +639,237 @@ with open(path, "w") as f:
   fi
 }
 
+# --- theme verbs ------------------------------------------------------------
+
+# theme_current_name -- prints the basename of the theme `current` points at,
+# or nothing if `current` is missing/not a symlink.
+theme_current_name() {
+  if [ -L "${THEME_DIR}/current" ]; then
+    basename "$(readlink "${THEME_DIR}/current")"
+  fi
+}
+
+# theme_is_light <dir> -- a theme is "light" if it ships an empty light.mode
+# file (the flat contract this repo also accepts) or its colors.toml has
+# mode = "light" (upstream Omarchy's actual convention as of 2026-09).
+theme_is_light() {
+  local dir="$1"
+  if [ -f "${dir}/light.mode" ]; then
+    return 0
+  fi
+  [ -f "${dir}/colors.toml" ] || return 1
+  grep -Eq '^[[:space:]]*mode[[:space:]]*=[[:space:]]*"light"[[:space:]]*$' "${dir}/colors.toml"
+}
+
+# theme_names -- newline-separated, alphabetically sorted list of installed
+# theme names (directories under THEME_DIR, excluding the `current` symlink).
+theme_names() {
+  local dir name list=""
+  for dir in "${THEME_DIR}"/*/; do
+    [ -d "${dir}" ] || continue
+    name="$(basename "${dir}")"
+    [ "${name}" = "current" ] && continue
+    list="${list}${name}
+"
+  done
+  [ -n "${list}" ] && printf '%s' "${list}" | sort
+}
+
+find_render_tool() {
+  if [ -f "${RENDER_TOOL_INSTALLED}" ]; then
+    printf '%s\n' "${RENDER_TOOL_INSTALLED}"
+  elif [ -f "${RENDER_TOOL_REPO}" ]; then
+    printf '%s\n' "${RENDER_TOOL_REPO}"
+  else
+    return 1
+  fi
+}
+
+run_theme_render() {
+  local tool
+  if ! tool="$(find_render_tool)"; then
+    echo "gallery: render-theme.py not found (installed under ${RENDER_TOOL_INSTALLED} or in a repo checkout); run install.sh" >&2
+    return 1
+  fi
+  command -v python3 >/dev/null 2>&1 || { echo "gallery: python3 not found on PATH" >&2; return 1; }
+  python3 "${tool}"
+}
+
+# theme_set_notify <name> -- runs the renderers, every executable hook in
+# THEME_HOOKS_DIR (in name order, with the theme name as $1), then asks
+# Hammerspoon to reload the theme over IPC. Used by both `theme set` and
+# `theme next`.
+theme_set_notify() {
+  local name="$1"
+
+  if ! run_theme_render; then
+    echo "gallery: theme renderers failed for ${name}" >&2
+  fi
+
+  if [ -d "${THEME_HOOKS_DIR}" ]; then
+    local hook
+    for hook in "${THEME_HOOKS_DIR}"/*; do
+      [ -f "${hook}" ] && [ -x "${hook}" ] || continue
+      echo "running hook: $(basename "${hook}")"
+      if ! "${hook}" "${name}"; then
+        echo "gallery: hook failed: $(basename "${hook}")" >&2
+      fi
+    done
+  fi
+
+  local rout
+  if rout="$(ipc_call theme-reload)"; then
+    case "${rout}" in
+      "unknown verb:"*)
+        echo "gallery: Spoon does not yet support 'theme-reload' -- skipping (${rout})" >&2
+        ;;
+      *)
+        printf '%s\n' "${rout}"
+        ;;
+    esac
+  else
+    echo "gallery: failed to reach Hammerspoon for theme-reload" >&2
+  fi
+}
+
+cmd_theme_list() {
+  local current names
+  current="$(theme_current_name)"
+  names="$(theme_names)"
+  if [ -z "${names}" ]; then
+    echo "no themes installed"
+    return 0
+  fi
+  local name marker line
+  while IFS= read -r name; do
+    [ -n "${name}" ] || continue
+    marker=""
+    if [ "${name}" = "${current}" ]; then
+      marker="current"
+    fi
+    if theme_is_light "${THEME_DIR}/${name}"; then
+      if [ -n "${marker}" ]; then marker="${marker}, light"; else marker="light"; fi
+    fi
+    if [ -n "${marker}" ]; then
+      line="${name} (${marker})"
+    else
+      line="${name}"
+    fi
+    printf '%s\n' "${line}"
+  done <<< "${names}"
+}
+
+cmd_theme_current() {
+  local current
+  current="$(theme_current_name)"
+  if [ -z "${current}" ]; then
+    echo "gallery: no current theme set (run 'gallery theme set <name>')" >&2
+    exit 1
+  fi
+  echo "${current}"
+}
+
+cmd_theme_set() {
+  local name="${1:?usage: gallery theme set <name>}"
+  if ! valid_id "${name}"; then
+    echo "gallery: invalid theme name: ${name}" >&2
+    exit 1
+  fi
+
+  local dir="${THEME_DIR}/${name}"
+  if [ ! -d "${dir}" ]; then
+    echo "gallery: no such theme: ${name} (looked in ${dir})" >&2
+    exit 1
+  fi
+  if [ ! -f "${dir}/colors.toml" ]; then
+    echo "gallery: theme ${name} has no colors.toml" >&2
+    exit 1
+  fi
+
+  mkdir -p "${THEME_DIR}"
+
+  # Atomic replace: symlink a temp name, then mv it over `current`, so there
+  # is never a moment with a missing or half-written `current` link. -h is
+  # required here: plain `mv -f` treats an existing `current` that is itself
+  # a symlink to a directory as that directory and moves the temp link
+  # *inside* it instead of replacing the `current` link (a BSD/macOS mv
+  # quirk); -h tells mv not to follow `current` and replace it in place.
+  local tmp_link
+  tmp_link="$(mktemp -u "${THEME_DIR}/.current.XXXXXXXX")"
+  ln -s "${name}" "${tmp_link}"
+  mv -fh "${tmp_link}" "${THEME_DIR}/current"
+
+  echo "theme set: ${name}"
+  theme_set_notify "${name}"
+}
+
+cmd_theme_render() {
+  local current
+  current="$(theme_current_name)"
+  if [ -z "${current}" ]; then
+    echo "gallery: no current theme set (run 'gallery theme set <name>' first)" >&2
+    exit 1
+  fi
+  run_theme_render
+}
+
+cmd_theme_next() {
+  local current names
+  current="$(theme_current_name)"
+  names="$(theme_names)"
+  if [ -z "${names}" ]; then
+    echo "gallery: no themes installed" >&2
+    exit 1
+  fi
+
+  local name prev="" next="" first_name=""
+  while IFS= read -r name; do
+    [ -n "${name}" ] || continue
+    [ -z "${first_name}" ] && first_name="${name}"
+    if [ "${prev}" = "${current}" ]; then
+      next="${name}"
+      break
+    fi
+    prev="${name}"
+  done <<< "${names}"
+
+  if [ -z "${next}" ]; then
+    next="${first_name}"
+  fi
+
+  cmd_theme_set "${next}"
+}
+
+cmd_theme() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    list)
+      cmd_theme_list
+      ;;
+    current)
+      cmd_theme_current
+      ;;
+    set)
+      cmd_theme_set "${1:-}"
+      ;;
+    render)
+      cmd_theme_render
+      ;;
+    next)
+      cmd_theme_next
+      ;;
+    "")
+      echo "usage: gallery theme <list|current|set|render|next>" >&2
+      exit 1
+      ;;
+    *)
+      echo "gallery: unknown theme subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 cmd_reload() {
   require_hs
   # Reload via the init.lua pathwatcher (debounced in init.lua); asking over IPC
@@ -766,6 +1014,9 @@ case "${command}" in
     ;;
   validate)
     cmd_validate "${1:-}"
+    ;;
+  theme)
+    cmd_theme "$@"
     ;;
   reload)
     cmd_reload

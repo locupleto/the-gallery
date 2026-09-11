@@ -37,6 +37,7 @@ obj.license = "MIT"
 obj.homepage = "https://github.com/locupleto/the-gallery"
 
 obj.pluginDir = os.getenv("HOME") .. "/.config/gallery/plugins"
+obj.themesDir = os.getenv("HOME") .. "/.config/gallery/themes"
 -- Written at the end of start(); the installer waits for it instead of probing
 -- the IPC port, because a probe killed mid-request can wedge or crash Hammerspoon.
 obj.readyPath = os.getenv("HOME") .. "/.config/gallery/state/ready"
@@ -69,6 +70,7 @@ end
 local Log = dofile(resourcePath("lib/log.lua"))
 local Manifest = dofile(resourcePath("lib/manifest.lua"))
 local State = dofile(resourcePath("lib/state.lua"))
+local Theme = dofile(resourcePath("lib/theme.lua"))
 local Panel = dofile(resourcePath("lib/panel.lua"))
 local Menu = dofile(resourcePath("lib/menu.lua"))
 local Overlay = dofile(resourcePath("lib/overlay.lua"))
@@ -110,6 +112,20 @@ local function tableContains(t, value)
     end
   end
   return false
+end
+
+--- hs.json.encode(v) raises for a bare scalar (confirmed by hand, same
+--- gotcha lib/bridge.lua's own encodeJson documents) -- wrap it in a
+--- 1-element array and strip the brackets, so a plain Lua string still
+--- goes through hs.json's own escaping rather than reimplementing it.
+--- Used only to embed the re-inject script's CSS text as a JS string
+--- literal (see obj:themeReload).
+local function encodeJsonScalar(value)
+  local ok, wrapped = pcall(hs.json.encode, { value })
+  if not ok then
+    return false, wrapped
+  end
+  return true, wrapped:sub(2, -2)
 end
 
 --- A plugin's primary interactive kind, in priority order panel > overlay
@@ -191,6 +207,15 @@ function obj:start()
   loadPlugins(self)
   self.state = State.load(self.statePath)
 
+  local themeOk, themeResult = pcall(Theme.load, self.themesDir)
+  if themeOk and type(themeResult) == "table" then
+    self.theme = themeResult
+  else
+    log("WARN", "failed to load theme, falling back to default: " .. tostring(themeResult))
+    self.theme = Theme.defaultTokens()
+  end
+  log("INFO", "loaded theme " .. tostring(self.theme.name))
+
   -- Background kinds are scheduled last, once both self.plugins and
   -- self.state exist (Service/Feed.rescan consult self:isEnabled, which
   -- reads self.state).
@@ -232,6 +257,24 @@ function obj:isEnabled(id)
   return State.isEnabled(self.state, id, isFirstParty(id))
 end
 
+--- "<name> light=<bool>" for the currently-loaded theme. A plain local
+--- function rather than an obj:theme() method: self.theme is also the
+--- DATA field lib/bridge.lua reads as ctx.theme (the token table itself,
+--- set in start() and replaced by obj:themeReload()) -- a method stored
+--- under that same key would collide with, and be silently clobbered by,
+--- that data as soon as start() ran (confirmed by hand: self:theme()
+--- raised "attempt to call a table value" once self.theme held real
+--- tokens). Called directly (themeSummary(self)) from obj:ipc below
+--- instead, which sidesteps the collision entirely since it is never
+--- stored on obj/self at all.
+local function themeSummary(self)
+  local t = self.theme
+  if type(t) ~= "table" then
+    t = Theme.defaultTokens()
+  end
+  return string.format("%s light=%s", tostring(t.name), tostring(t.light and true or false))
+end
+
 --- Dispatch an IPC verb from the `gallery` CLI. Always returns a string,
 --- even on error, and never raises out of this function.
 function obj:ipc(verb, id)
@@ -260,6 +303,12 @@ function obj:ipc(verb, id)
       return self:servicesStatus()
     elseif verb == "feed" then
       return self:feed(id)
+    elseif verb == "theme" then
+      return themeSummary(self)
+    elseif verb == "theme-json" then
+      return self:themeJson()
+    elseif verb == "theme-reload" then
+      return self:themeReload()
     else
       return "unknown verb: " .. tostring(verb)
     end
@@ -549,6 +598,84 @@ function obj:feed(id)
     return "no feed"
   end
   return encoded
+end
+
+--- The currently-loaded theme's tokens, as JSON.
+function obj:themeJson()
+  local t = self.theme
+  if type(t) ~= "table" then
+    t = Theme.defaultTokens()
+  end
+  return Theme.json(t)
+end
+
+--- Re-read the current theme from self.themesDir, replace self.theme (the
+--- same table lib/bridge.lua reads as ctx.theme for every NEW panel/
+--- overlay it builds), and live-reinject it into every currently OPEN
+--- panel and overlay webview: the injected #gallery-theme <style> element's
+--- text is replaced, window.gallery.theme is updated, and a "gallery:theme"
+--- CustomEvent is dispatched on window so a page can react (see
+--- plugins/gallery.hello/index.html's listener). Iterates ctx.windows
+--- (panel webviews, keyed by id) and Overlay.overlays (each entry's
+--- .webview) directly rather than lib/bridge.lua's own M.open registry --
+--- lib/panel.lua and lib/overlay.lua each dofile lib/bridge.lua
+--- independently (see that file's own selfDir() comments), so they end up
+--- with two SEPARATE Bridge module instances and therefore two separate
+--- M.open tables; self.windows and Overlay.overlays are each already a
+--- single shared instance for their whole kind (init.lua dofiles
+--- lib/panel.lua and lib/overlay.lua exactly once each), so reaching
+--- through them here is simpler and more robust than plumbing either
+--- module's private Bridge instance back out. Returns the new theme's
+--- name (the count is logged, not returned, per the verify step's
+--- expectation that this verb answers with just the name).
+function obj:themeReload()
+  local loadOk, newTheme = pcall(Theme.load, self.themesDir)
+  if not loadOk or type(newTheme) ~= "table" then
+    log("ERROR", "theme-reload: failed to load theme: " .. tostring(newTheme))
+    return "error: failed to load theme"
+  end
+
+  self.theme = newTheme
+
+  local cssOk, css = pcall(Theme.cssVariables, newTheme)
+  if not cssOk or type(css) ~= "string" then
+    css = ":root{}"
+  end
+  local themeJson = Theme.json(newTheme)
+  local cssJsonOk, cssJsonEncoded = encodeJsonScalar(css)
+  if not cssJsonOk then
+    cssJsonEncoded = "\"\""
+  end
+
+  local script = table.concat({
+    "(function(){try{",
+    "var el=document.getElementById('gallery-theme');",
+    "var css=", cssJsonEncoded, ";",
+    "if(el){el.textContent=css;}",
+    "var theme=", themeJson, ";",
+    "if(window.gallery){window.gallery.theme=theme;}",
+    "window.dispatchEvent(new CustomEvent('gallery:theme',{detail:theme}));",
+    "}catch(e){}})();",
+  })
+
+  local count = 0
+  for _, webview in pairs(self.windows) do
+    local evalOk = pcall(function() webview:evaluateJavaScript(script) end)
+    if evalOk then
+      count = count + 1
+    end
+  end
+  for _, entry in pairs(Overlay.overlays) do
+    if entry and entry.webview then
+      local evalOk = pcall(function() entry.webview:evaluateJavaScript(script) end)
+      if evalOk then
+        count = count + 1
+      end
+    end
+  end
+
+  log("INFO", "theme-reload: " .. tostring(newTheme.name) .. " reinjected into " .. count .. " webview(s)")
+  return tostring(newTheme.name)
 end
 
 return obj

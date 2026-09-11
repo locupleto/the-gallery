@@ -245,6 +245,17 @@
       }
       renderTheme();
 
+      // A theme-reload (see Gallery.spoon/init.lua's obj:themeReload)
+      // re-injects the --gallery-* CSS custom properties, updates
+      // window.gallery.theme, and dispatches this event on window so an
+      // already-open panel can pick up the new theme live rather than
+      // needing to be closed and reopened.
+      window.addEventListener("gallery:theme", function (event) {
+        renderTheme();
+        var name = (event.detail && event.detail.name) || (window.gallery && window.gallery.theme && window.gallery.theme.name) || "?";
+        safeLog("gallery:theme event received (theme=" + name + ")");
+      });
+
       // ---- gallery.exec: "run uname" ----------------------------------
       var execButton = document.getElementById("execButton");
       var execResult = document.getElementById("execResult");

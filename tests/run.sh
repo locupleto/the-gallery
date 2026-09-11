@@ -70,6 +70,14 @@ if ! printf '%s\n' "${manifest_out}" | grep -q "^PASS "; then
 fi
 say "manifest_test.lua OK"
 
+say "running tests/theme_test.lua through hs"
+theme_out="$(hs -t 30 -q "${SCRIPT_DIR}/theme_test.lua")"
+printf '%s\n' "${theme_out}"
+if ! printf '%s\n' "${theme_out}" | grep -q "^PASS "; then
+  fail "theme_test.lua did not report PASS"
+fi
+say "theme_test.lua OK"
+
 say "~/bin/gallery status"
 if ! "${HOME}/bin/gallery" status; then
   fail "gallery status failed"
