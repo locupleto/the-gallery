@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.learn",
+  "name": "Learn",
+  "version": "0.1.0",
+  "kinds": ["tui"],
+  "entryPoints": {},
+  "gallery": {
+    "tui": {
+      "command": "~/.config/skhd/learn",
+      "args": ["menu"]
+    }
+  }
+}

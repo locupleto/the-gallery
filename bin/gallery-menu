@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+#
+# gallery-menu -- fzf-based menu runner for `menu` kind plugins, run inside
+# a gallery-tui window (see bin/gallery-tui) instead of a Hammerspoon
+# hs.chooser. Reads manifest.gallery.menu.source exactly like
+# Gallery.spoon/lib/menu.lua does, but resolves items and runs the chosen
+# action in shell/python3 rather than Lua.
+#
+# Usage:
+#   gallery-menu <plugin-id>
+#
+set -euo pipefail
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
+die() {
+  echo "gallery-menu: $*" >&2
+  exit 1
+}
+
+[ $# -eq 1 ] || die "usage: gallery-menu <plugin-id>"
+ID="$1"
+
+PLUGIN_ROOT="${GALLERY_PLUGIN_DIR:-${HOME}/.config/gallery/plugins}"
+MANIFEST="${PLUGIN_ROOT}/${ID}/manifest.json"
+
+[ -f "${MANIFEST}" ] || die "no manifest at ${MANIFEST}"
+command -v python3 >/dev/null 2>&1 || die "python3 not found on PATH"
+command -v fzf >/dev/null 2>&1 || die "fzf is not installed (brew install fzf)"
+
+ITEMS_JSON="$(mktemp -t gallery-menu-items)"
+PREP_OUT="$(mktemp -t gallery-menu-prep)"
+cleanup() { rm -f "${ITEMS_JSON}" "${PREP_OUT}"; }
+trap cleanup EXIT
+
+# --- resolve the menu's items -----------------------------------------------
+# Prints "NAME\n" then one "text<TAB>subText" line per item (fzf's feed);
+# also writes the full item list (including each item's action) to
+# ITEMS_JSON so the chosen line can be mapped back to its action below
+# without re-running a "command" source (which may be slow, or not
+# idempotent).
+python3 - "${MANIFEST}" "${ITEMS_JSON}" > "${PREP_OUT}" <<'PYEOF'
+import json
+import os
+import subprocess
+import sys
+
+manifest_path, items_out_path = sys.argv[1], sys.argv[2]
+HOME = os.path.expanduser("~")
+
+
+def expand(v):
+    if isinstance(v, str):
+        if v.startswith("~/"):
+            v = HOME + v[1:]
+        elif v == "~":
+            v = HOME
+        v = v.replace("$HOME", HOME)
+    return v
+
+
+try:
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+except Exception as e:
+    print(f"gallery-menu: failed to read manifest: {e}", file=sys.stderr)
+    manifest = {}
+
+name = manifest.get("name") or manifest.get("id") or "menu"
+gallery_cfg = manifest.get("gallery") if isinstance(manifest.get("gallery"), dict) else {}
+menu_cfg = gallery_cfg.get("menu") if isinstance(gallery_cfg.get("menu"), dict) else {}
+source = menu_cfg.get("source") if isinstance(menu_cfg.get("source"), dict) else {}
+
+items = []
+stype = source.get("type")
+if stype == "static":
+    raw = source.get("items")
+    if isinstance(raw, list):
+        items = [it for it in raw if isinstance(it, dict)]
+elif stype == "command":
+    command = expand(source.get("command"))
+    args = [expand(a) for a in (source.get("args") or []) if isinstance(a, str)]
+    if isinstance(command, str) and command:
+        try:
+            proc = subprocess.run(
+                [command] + args, capture_output=True, text=True, timeout=30, check=False
+            )
+            for line in proc.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    print(f"gallery-menu: skipping non-JSON source line: {line}", file=sys.stderr)
+                    continue
+                if isinstance(obj, dict):
+                    items.append(obj)
+        except Exception as e:
+            print(f"gallery-menu: source command failed: {e}", file=sys.stderr)
+else:
+    print(f"gallery-menu: unknown or missing menu source type: {stype!r}", file=sys.stderr)
+
+with open(items_out_path, "w", encoding="utf-8") as f:
+    json.dump(items, f)
+
+print(name)
+for it in items:
+    text = str(it.get("text", "")).replace("\t", " ").replace("\n", " ")
+    sub = str(it.get("subText", "")).replace("\t", " ").replace("\n", " ")
+    print(f"{text}\t{sub}")
+PYEOF
+
+NAME="$(head -n 1 "${PREP_OUT}")"
+[ -n "${NAME}" ] || NAME="${ID}"
+
+set +e
+SELECTED="$(tail -n +2 "${PREP_OUT}" | fzf --height=100% --layout=reverse --border=rounded \
+  --prompt="${NAME} > " --header='Enter runs, Esc closes' \
+  --delimiter=$'\t' --with-nth=1,2)"
+rc=$?
+set -e
+
+# Esc / interrupt / no selection: close cleanly.
+if [ "${rc}" -ne 0 ] || [ -z "${SELECTED}" ]; then
+  exit 0
+fi
+
+# --- run the chosen item's action -------------------------------------------
+python3 - "${ITEMS_JSON}" "${SELECTED}" <<'PYEOF'
+import json
+import os
+import subprocess
+import sys
+
+items_path, selected = sys.argv[1], sys.argv[2]
+HOME = os.path.expanduser("~")
+
+
+def expand(v):
+    if isinstance(v, str):
+        if v.startswith("~/"):
+            v = HOME + v[1:]
+        elif v == "~":
+            v = HOME
+        v = v.replace("$HOME", HOME)
+    return v
+
+
+parts = selected.split("\t", 1)
+text = parts[0] if len(parts) > 0 else ""
+sub = parts[1] if len(parts) > 1 else ""
+
+try:
+    with open(items_path, encoding="utf-8") as f:
+        items = json.load(f)
+except Exception:
+    items = []
+
+match = None
+for it in items:
+    it_text = str(it.get("text", "")).replace("\t", " ").replace("\n", " ")
+    it_sub = str(it.get("subText", "")).replace("\t", " ").replace("\n", " ")
+    if it_text == text and it_sub == sub:
+        match = it
+        break
+
+if not match:
+    sys.exit(0)
+
+action = match.get("action")
+if not isinstance(action, dict):
+    sys.exit(0)
+
+atype = action.get("type")
+if atype == "exec":
+    command = expand(action.get("command"))
+    args = [expand(a) for a in (action.get("args") or []) if isinstance(a, str)]
+    if isinstance(command, str) and command:
+        try:
+            subprocess.Popen(
+                [command] + args,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            print(f"gallery-menu: exec action failed: {e}", file=sys.stderr)
+elif atype == "open":
+    url = action.get("url")
+    if isinstance(url, str) and url:
+        subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+elif atype == "ipc":
+    verb = action.get("verb")
+    plugin_id = action.get("id")
+    if isinstance(verb, str) and verb:
+        gallery_bin = os.path.join(HOME, "bin", "gallery")
+        cmd = [gallery_bin, verb]
+        if isinstance(plugin_id, str) and plugin_id:
+            cmd.append(plugin_id)
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            print(f"gallery-menu: ipc action failed: {e}", file=sys.stderr)
+else:
+    print(f"gallery-menu: unknown action type: {atype!r}", file=sys.stderr)
+PYEOF

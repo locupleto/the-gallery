@@ -26,6 +26,7 @@ M.KNOWN_KINDS = {
   ["menu"] = true,
   ["service"] = true,
   ["bar"] = true,
+  ["tui"] = true,
 }
 
 -- The live plugin directory: any manifest scanned from here could in
@@ -140,6 +141,16 @@ function M.validate(manifest, dir)
           table.insert(warnings, "Omarchy QML entry point has no macOS renderer: " .. entryPoint)
         end
       end
+    end
+  end
+
+  -- A tui-kind plugin has no entry point file (it runs a shell command in
+  -- an iTerm2 window instead -- see bin/gallery-tui); what it must declare
+  -- is manifest.gallery.tui.command.
+  if kindsOk and tableContains(kinds, "tui") then
+    local tuiCfg = manifest.gallery and manifest.gallery.tui
+    if type(tuiCfg) ~= "table" or type(tuiCfg.command) ~= "string" or tuiCfg.command == "" then
+      table.insert(errors, "tui kind requires gallery.tui.command (non-empty string)")
     end
   end
 

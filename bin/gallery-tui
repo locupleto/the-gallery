@@ -1,0 +1,315 @@
+#!/usr/bin/env bash
+#
+# gallery-tui -- put any shell command on screen in a floating, centred
+# iTerm2 window, managed by yabai float/grid rules, with no Hammerspoon
+# involved at all.
+#
+# Mechanism generalised from ~/.config/skhd/learn (see its open_window,
+# own_window, float_me, linger and set_title functions -- that script is
+# not modified, only its pattern is copied here): `open` spawns a fresh
+# iTerm2 window via osascript running `gallery-tui run ...` inside itself;
+# that in-window process sets its own terminal title to "Gallery: <title>"
+# (via the OSC 0 escape sequence), which both a yabai rule (float,
+# centred, unmanaged) and this script's own `yabai -m query --windows`
+# lookups key off to find/focus/close the window later. Hammerspoon is
+# never in the loop -- a `tui` kind plugin is pure shell + iTerm2 + yabai,
+# which is exactly why it can be used even when the Gallery Spoon is not
+# running (see Gallery.spoon/init.lua's tui shim, which just shells out to
+# `gallery`/`gallery-tui` for the same reason).
+#
+# Usage:
+#   gallery-tui open   <title> [--grid R:C:X:Y:W:H] -- <command> [args...]
+#   gallery-tui run    <title> [--display N] [--grid G] -- <command> [args...]
+#   gallery-tui close  <title>
+#   gallery-tui toggle <title> [--grid G] -- <command> [args...]
+#   gallery-tui status <title>
+#
+set -euo pipefail
+
+# iTerm starts our window's command with a bare PATH: make Homebrew (and
+# fzf/glow/btop/etc under it) visible before anything else on PATH.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
+TITLE_PREFIX="Gallery"
+DEFAULT_GRID="6:6:1:1:4:4"
+YABAI_RULE_LABEL="gallery-tui"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+die() {
+  echo "gallery-tui: $*" >&2
+  exit 1
+}
+
+# Expand a leading "~" and any literal "$HOME" occurrence in a manifest-
+# supplied command or argument (manifests are JSON, so "$HOME" in them is
+# never a real shell expansion -- it has to be done here).
+expand_home() {
+  local s="$1"
+  case "${s}" in
+    "~") s="${HOME}" ;;
+    "~/"*) s="${HOME}/${s#\~/}" ;;
+  esac
+  s="${s//\$HOME/${HOME}}"
+  printf '%s' "${s}"
+}
+
+set_title() { printf '\033]0;%s\007' "${TITLE_PREFIX}: $1"; }
+
+# --- yabai plumbing (see ~/.config/skhd/learn for the original) ------------
+
+focused_display() {
+  command -v yabai >/dev/null 2>&1 || return 0
+  yabai -m query --displays --display 2>/dev/null \
+    | sed -n 's/^[[:space:]]*"index":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1
+}
+
+# Our own window's yabai record, found by the title set_title gave it --
+# never by focus (a cold or slow iTerm may not have focused the new window
+# yet). One JSON object per line, empty until the title has propagated.
+own_window() {
+  local name="$1"
+  yabai -m query --windows 2>/dev/null | tr -d '\n' | sed 's/},[[:space:]]*{/}\
+{/g' | grep -E "\"app\":[[:space:]]*\"iTerm2\"" | grep -F "\"title\":" | grep -F "${TITLE_PREFIX}: ${name}\"" | head -1
+}
+
+window_id() {
+  printf '%s' "$1" | sed -n 's/.*"id":[[:space:]]*\([0-9][0-9]*\).*/\1/p'
+}
+
+# Idempotently install the float/grid rule for every Gallery-titled iTerm
+# window. Removed and re-added each time so a changed --grid takes effect
+# on the next open. Silently skipped if yabai is not installed.
+ensure_yabai_rule() {
+  command -v yabai >/dev/null 2>&1 || return 0
+  local grid="${1:-${DEFAULT_GRID}}"
+  yabai -m rule --remove "${YABAI_RULE_LABEL}" >/dev/null 2>&1 || true
+  yabai -m rule --add label="${YABAI_RULE_LABEL}" app="^iTerm2$" title="^${TITLE_PREFIX}: " manage=off "grid=${grid}" >/dev/null 2>&1 || true
+}
+
+# The belt to the yabairc-style rule's brace: floats/centres/focuses our
+# own window (found by title, never by focus) and parks it on the right
+# display. Silently skipped if yabai is not installed.
+float_me() {
+  command -v yabai >/dev/null 2>&1 || return 0
+  local name="$1" grid="${2:-${DEFAULT_GRID}}" disp="${3:-}"
+  local w="" id i
+  i=0
+  while [ "${i}" -lt 40 ]; do          # a cold iTerm restores its windows first
+    w="$(own_window "${name}" || true)"
+    [ -n "${w}" ] && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ -n "${w}" ] || return 0
+  id="$(window_id "${w}")"
+  [ -n "${id}" ] || return 0
+  if [ -n "${disp}" ]; then
+    yabai -m window "${id}" --display "${disp}" >/dev/null 2>&1 || true
+  fi
+  if printf '%s' "${w}" | grep -q '"is-floating":[[:space:]]*false'; then
+    yabai -m window "${id}" --toggle float >/dev/null 2>&1 || true
+  fi
+  yabai -m window "${id}" --grid "${grid}" >/dev/null 2>&1 || true
+  yabai -m window "${id}" --focus >/dev/null 2>&1 || true
+}
+
+# iTerm complains "a session ended very soon after starting" when a window
+# closes within a few seconds -- so an early-failing command still lingers
+# to the three-second mark before this process exits.
+_t0=$(date +%s)
+linger() {
+  local dt=$(( $(date +%s) - _t0 ))
+  [ "${dt}" -lt 3 ] && sleep $(( 3 - dt ))
+  return 0
+}
+
+# --- the floating window ----------------------------------------------------
+
+# A fresh iTerm window running `gallery-tui run ...`. Needs Automation ->
+# iTerm2 for the caller (one prompt, once), exactly like learn's
+# open_window (cold-iTerm branch included: a cold iTerm restores its own
+# windows first, so ours is made to activate and follow).
+spawn_window() {
+  local cmdline
+  cmdline="$(printf '%q ' "${SELF}" "$@")"
+  # %q escapes for bash (e.g. a title with a space becomes "Foo\ Bar");
+  # embedding that inside an AppleScript double-quoted string literal
+  # additionally needs every backslash and double quote escaped for
+  # AppleScript itself, or its compiler chokes on the bare backslash.
+  local as_cmdline
+  as_cmdline="$(printf '%s' "${cmdline}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+  if pgrep -xq iTerm2; then
+    osascript -e "tell application \"iTerm2\" to create window with default profile command \"${as_cmdline}\"" >/dev/null
+  else
+    osascript -e "tell application \"iTerm2\"
+        activate
+        create window with default profile command \"${as_cmdline}\"
+    end tell" >/dev/null
+  fi
+}
+
+focus_if_open() {
+  local name="$1" w id
+  w="$(own_window "${name}" 2>/dev/null || true)"
+  [ -n "${w}" ] || return 1
+  id="$(window_id "${w}")"
+  [ -n "${id}" ] && yabai -m window "${id}" --focus >/dev/null 2>&1 || true
+  return 0
+}
+
+cmd_open() {
+  local title="${1:?usage: gallery-tui open <title> [--grid R:C:X:Y:W:H] -- <command> [args...]}"
+  shift
+  local grid="${DEFAULT_GRID}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --grid)
+        grid="${2:?--grid requires a value}"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        die "unexpected argument before --: $1"
+        ;;
+    esac
+  done
+  [ $# -ge 1 ] || die "usage: gallery-tui open <title> [--grid G] -- <command> [args...]"
+
+  # Already open? Focus it and we are done -- no new window.
+  if focus_if_open "${title}"; then
+    exit 0
+  fi
+
+  ensure_yabai_rule "${grid}"
+
+  local disp
+  disp="$(focused_display)"
+
+  # shellcheck disable=SC2086 # intentional: an empty $disp contributes no args at all
+  spawn_window run "${title}" ${disp:+--display "${disp}"} --grid "${grid}" -- "$@"
+}
+
+cmd_run() {
+  local title="${1:?usage: gallery-tui run <title> [--display N] [--grid G] -- <command> [args...]}"
+  shift
+  local disp="" grid="${DEFAULT_GRID}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --display)
+        disp="${2:?--display requires a value}"
+        shift 2
+        ;;
+      --grid)
+        grid="${2:?--grid requires a value}"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        die "unexpected argument before --: $1"
+        ;;
+    esac
+  done
+  [ $# -ge 1 ] || die "usage: gallery-tui run <title> ... -- <command> [args...]"
+
+  trap linger EXIT
+  set_title "${title}"
+  float_me "${title}" "${grid}" "${disp}"
+
+  local raw_command="$1"
+  shift
+  local command
+  command="$(expand_home "${raw_command}")"
+
+  # Expand ~ / $HOME in every remaining argument, rebuilding "$@" in place
+  # (no bash arrays here: the default macOS /bin/bash is 3.2, which errors
+  # on an empty array under `set -u`).
+  local n=$# i a
+  n=$#
+  i=0
+  while [ "${i}" -lt "${n}" ]; do
+    a="$(expand_home "$1")"
+    shift
+    set -- "$@" "${a}"
+    i=$((i + 1))
+  done
+
+  local resolved=""
+  case "${command}" in
+    */*)
+      [ -x "${command}" ] && resolved="${command}"
+      ;;
+    *)
+      resolved="$(command -v -- "${command}" 2>/dev/null || true)"
+      ;;
+  esac
+
+  if [ -z "${resolved}" ]; then
+    echo "gallery-tui: command not found or not executable: ${command}" >&2
+    sleep 3
+    exit 1
+  fi
+
+  exec "${resolved}" "$@"
+}
+
+cmd_close() {
+  local title="${1:?usage: gallery-tui close <title>}"
+  local w="" id=""
+  if command -v yabai >/dev/null 2>&1; then
+    w="$(own_window "${title}" 2>/dev/null || true)"
+    [ -n "${w}" ] && id="$(window_id "${w}")"
+  fi
+  if [ -z "${id}" ]; then
+    echo "not open: ${title}"
+    exit 0
+  fi
+  yabai -m window "${id}" --close >/dev/null 2>&1 || true
+  echo "closed: ${title}"
+  exit 0
+}
+
+cmd_toggle() {
+  local title="${1:?usage: gallery-tui toggle <title> [--grid G] -- <command> [args...]}"
+  shift
+  local w=""
+  if command -v yabai >/dev/null 2>&1; then
+    w="$(own_window "${title}" 2>/dev/null || true)"
+  fi
+  if [ -n "${w}" ]; then
+    cmd_close "${title}"
+  else
+    cmd_open "${title}" "$@"
+  fi
+}
+
+cmd_status() {
+  local title="${1:?usage: gallery-tui status <title>}"
+  local w=""
+  if command -v yabai >/dev/null 2>&1; then
+    w="$(own_window "${title}" 2>/dev/null || true)"
+  fi
+  if [ -n "${w}" ]; then
+    echo "open"
+    exit 0
+  fi
+  echo "closed"
+  exit 1
+}
+
+[ $# -ge 1 ] || die "usage: gallery-tui <open|run|close|toggle|status> <title> ..."
+sub="$1"
+shift
+case "${sub}" in
+  open) cmd_open "$@" ;;
+  run) cmd_run "$@" ;;
+  close) cmd_close "$@" ;;
+  toggle) cmd_toggle "$@" ;;
+  status) cmd_status "$@" ;;
+  *) die "unknown subcommand: ${sub}" ;;
+esac

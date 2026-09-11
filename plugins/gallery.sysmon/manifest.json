@@ -2,16 +2,14 @@
   "schemaVersion": 1,
   "id": "gallery.sysmon",
   "name": "System Monitor",
-  "version": "0.0.1",
-  "kinds": ["panel"],
-  "entryPoints": {
-    "panel": "index.html"
-  },
+  "version": "0.1.0",
+  "kinds": ["tui"],
+  "entryPoints": {},
   "gallery": {
-    "panel": {
-      "width": 720,
-      "height": 460,
-      "transparent": false
+    "tui": {
+      "command": "/opt/homebrew/bin/btop",
+      "args": [],
+      "grid": "6:6:1:1:4:4"
     }
   }
 }

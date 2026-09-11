@@ -30,6 +30,10 @@ BIN_SRC="${SCRIPT_DIR}/bin/gallery"
 BIN_DEST="${HOME_DIR}/bin/gallery"
 HS_BIN_SRC="${SCRIPT_DIR}/bin/gallery-hs"
 HS_BIN_DEST="${HOME_DIR}/bin/gallery-hs"
+TUI_BIN_SRC="${SCRIPT_DIR}/bin/gallery-tui"
+TUI_BIN_DEST="${HOME_DIR}/bin/gallery-tui"
+MENU_BIN_SRC="${SCRIPT_DIR}/bin/gallery-menu"
+MENU_BIN_DEST="${HOME_DIR}/bin/gallery-menu"
 HS_INIT="${HOME_DIR}/.hammerspoon/init.lua"
 
 DRY_RUN=0
@@ -86,6 +90,7 @@ do_uninstall() {
   else
     echo "[gallery] no CLI installed at ${HS_BIN_DEST}"
   fi
+  run rm -f "${TUI_BIN_DEST}" "${MENU_BIN_DEST}"
 
   echo "[gallery] leaving ${CONFIG_DIR} in place"
   echo "[gallery] leaving ${HS_INIT} in place -- Gallery load block was not removed automatically."
@@ -108,7 +113,12 @@ run rsync -a --delete "${SPOON_SRC}/" "${SPOON_DEST}/"
 
 echo "[gallery] installing plugins to ${PLUGINS_DEST}"
 run mkdir -p "${PLUGINS_DEST}"
-run rsync -a "${PLUGINS_SRC}/" "${PLUGINS_DEST}/"
+# Per-plugin --delete so files a plugin no longer ships (an old index.html,
+# say) do not linger; third-party plugins living beside ours are untouched.
+for plugin_dir in "${PLUGINS_SRC}"/*/; do
+  [ -d "${plugin_dir}" ] || continue
+  run rsync -a --delete "${plugin_dir}" "${PLUGINS_DEST}/$(basename "${plugin_dir}")/"
+done
 
 echo "[gallery] ensuring config directories exist"
 run mkdir -p "${CONFIG_DIR}/feed" "${CONFIG_DIR}/themes" "${CONFIG_DIR}/hooks"
@@ -150,6 +160,11 @@ run chmod +x "${BIN_DEST}"
 echo "[gallery] installing hs watchdog CLI to ${HS_BIN_DEST}"
 run cp "${HS_BIN_SRC}" "${HS_BIN_DEST}"
 run chmod +x "${HS_BIN_DEST}"
+
+echo "[gallery] installing terminal-window helpers to ${TUI_BIN_DEST}, ${MENU_BIN_DEST}"
+run cp "${TUI_BIN_SRC}" "${TUI_BIN_DEST}"
+run cp "${MENU_BIN_SRC}" "${MENU_BIN_DEST}"
+run chmod +x "${TUI_BIN_DEST}" "${MENU_BIN_DEST}"
 
 GALLERY_BLOCK='-- gallery:begin
 -- hs.ipc must be loaded or the hs command-line tool blocks forever.

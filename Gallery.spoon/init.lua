@@ -129,18 +129,21 @@ local function encodeJsonScalar(value)
   return true, wrapped:sub(2, -2)
 end
 
---- A plugin's primary interactive kind, in priority order panel > overlay
---- > menu -- the one open/close/toggle act on. Returns nil for a plugin
---- with only non-interactive kinds (service, bar-widget, bar).
+--- A plugin's primary interactive kind, in priority order tui > panel >
+--- overlay > menu -- the one open/close/toggle act on. Returns nil for a
+--- plugin with only non-interactive kinds (service, bar-widget, bar).
 local function primaryInteractiveKind(manifest)
   local kinds = manifest and manifest.kinds
   -- A plugin with several interactive kinds may say which one `open` means
-  -- (manifest.gallery.primaryKind); otherwise panel > overlay > menu.
+  -- (manifest.gallery.primaryKind); otherwise tui > panel > overlay > menu.
   local hint = manifest and manifest.gallery and manifest.gallery.primaryKind
-  if hint and tableContains(kinds, hint) and (hint == "panel" or hint == "overlay" or hint == "menu") then
+  if hint and tableContains(kinds, hint)
+    and (hint == "tui" or hint == "panel" or hint == "overlay" or hint == "menu") then
     return hint
   end
-  if tableContains(kinds, "panel") then
+  if tableContains(kinds, "tui") then
+    return "tui"
+  elseif tableContains(kinds, "panel") then
     return "panel"
   elseif tableContains(kinds, "overlay") then
     return "overlay"
@@ -156,7 +159,7 @@ end
 --- from a menu action (`gallery open gallery.learn panel`).
 local function resolveKind(manifest, kind)
   if kind ~= nil and kind ~= "" then
-    if (kind == "panel" or kind == "overlay" or kind == "menu")
+    if (kind == "tui" or kind == "panel" or kind == "overlay" or kind == "menu")
       and manifest and tableContains(manifest.kinds, kind) then
       return kind
     end
@@ -431,13 +434,27 @@ function obj:listJson()
   return encoded
 end
 
---- Open a plugin's primary interactive kind (panel > overlay > menu; see
---- primaryInteractiveKind). Refuses unknown, errored, and disabled
---- plugins; a plugin with only non-interactive kinds (service,
+--- tui-kind plugins are handled entirely by the `gallery` CLI itself
+--- (gallery-tui + yabai/iTerm2 -- no Hammerspoon involved; see bin/gallery's
+--- route_open_close_toggle and bin/gallery-tui). obj:open/close/toggle
+--- only reach this branch when someone calls the Spoon's IPC directly for
+--- a tui plugin (e.g. `hs -c "spoon.Gallery:ipc('open', id, 'tui')"`)
+--- instead of going through `gallery open <id>`; it just shells back out
+--- to the same CLI, fire-and-forget, so the mechanism is identical either
+--- way.
+local function shellOutTui(verb, id)
+  pcall(function()
+    hs.task.new(os.getenv("HOME") .. "/bin/gallery", function() end, { verb, id, "tui" }):start()
+  end)
+end
+
+--- Open a plugin's primary interactive kind (tui > panel > overlay >
+--- menu; see primaryInteractiveKind). Refuses unknown, errored, and
+--- disabled plugins; a plugin with only non-interactive kinds (service,
 --- bar-widget) reports "no interactive kind".
 function obj:open(id, kind)
   if not id or id == "" then
-    return "usage: open <id> [panel|overlay|menu]"
+    return "usage: open <id> [panel|overlay|menu|tui]"
   end
 
   local entry = self.plugins[id]
@@ -457,7 +474,10 @@ function obj:open(id, kind)
   if kindErr then
     return kindErr .. ": " .. id
   end
-  if kind == "panel" then
+  if kind == "tui" then
+    shellOutTui("open", id)
+    return "opened tui: " .. id
+  elseif kind == "panel" then
     return Panel.open(self, id)
   elseif kind == "overlay" then
     return Overlay.open(self, id)
@@ -475,7 +495,7 @@ end
 --- returning "not open: <id>" rather than erroring.
 function obj:close(id, kind)
   if not id or id == "" then
-    return "usage: close <id> [panel|overlay|menu]"
+    return "usage: close <id> [panel|overlay|menu|tui]"
   end
 
   local entry = self.plugins[id]
@@ -489,7 +509,10 @@ function obj:close(id, kind)
     kind = nil
   end
 
-  if kind == "panel" then
+  if kind == "tui" then
+    shellOutTui("close", id)
+    return "closed tui: " .. id
+  elseif kind == "panel" then
     return Panel.close(self, id)
   elseif kind == "overlay" then
     return Overlay.close(self, id)
@@ -507,7 +530,7 @@ end
 --- is this plugin's primary interactive kind.
 function obj:toggle(id, kind)
   if not id or id == "" then
-    return "usage: toggle <id> [panel|overlay|menu]"
+    return "usage: toggle <id> [panel|overlay|menu|tui]"
   end
 
   local entry = self.plugins[id]
@@ -519,6 +542,14 @@ function obj:toggle(id, kind)
     end
   else
     kind = nil
+  end
+
+  if kind == "tui" then
+    -- Hammerspoon has no visibility into a tui plugin's open/closed state
+    -- (that lives in yabai/iTerm2, tracked by gallery-tui); the CLI's own
+    -- toggle already does the open-if-not-open-else-close dance itself.
+    shellOutTui("toggle", id)
+    return "toggled tui: " .. id
   end
 
   local isOpen

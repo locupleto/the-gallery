@@ -3,12 +3,17 @@
 # gallery -- thin CLI over the Hammerspoon IPC command for The Gallery Spoon.
 # Modelled on Omarchy 4's `omarchy plugin` CLI.
 #
+# open/close/toggle resolve the plugin's manifest first: a `tui` or `menu`
+# kind plugin is handled entirely in bash (gallery-tui/gallery-menu, no
+# Hammerspoon involved -- see those scripts); panel/overlay still go over
+# the Hammerspoon IPC call (run_ipc/hs_call) below, unchanged.
+#
 # Usage:
 #   gallery status
 #   gallery list [--json]
-#   gallery open <id>
-#   gallery close <id>
-#   gallery toggle <id>
+#   gallery open <id> [panel|overlay|menu|tui]
+#   gallery close <id> [panel|overlay|menu|tui]
+#   gallery toggle <id> [panel|overlay|menu|tui]
 #   gallery enable <id>
 #   gallery disable <id>
 #   gallery add <git-url> [--enable] [--yes]
@@ -70,7 +75,7 @@ usage: gallery <command> [args]
 commands:
   status                          show Gallery status
   list [--json]                   list installed plugins
-  open <id> [kind]                open a plugin (kind: panel|overlay|menu)
+  open <id> [kind]                open a plugin (kind: panel|overlay|menu|tui)
   close <id> [kind]               close a plugin
   toggle <id> [kind]              toggle a plugin open/closed
   enable <id>                     enable a plugin
@@ -149,8 +154,8 @@ run_ipc() {
     fi
     if [ -n "${kind}" ]; then
       case "${kind}" in
-        panel|overlay|menu) ;;
-        *) echo "gallery: invalid kind: ${kind} (panel|overlay|menu)" >&2; exit 1 ;;
+        panel|overlay|menu|tui) ;;
+        *) echo "gallery: invalid kind: ${kind} (panel|overlay|menu|tui)" >&2; exit 1 ;;
       esac
       ipc_call "${verb}" "${id}" "${kind}"
     else
@@ -158,6 +163,232 @@ run_ipc() {
     fi
   else
     ipc_call "${verb}"
+  fi
+}
+
+# --- tui/menu: handled locally (no Hammerspoon), everything else over IPC --
+#
+# open/close/toggle need to know a plugin's *effective* kind before they can
+# decide whether to route to gallery-tui/gallery-menu (tui, menu) or over
+# IPC (panel, overlay), same priority order as Gallery.spoon/init.lua's
+# resolveKind/primaryInteractiveKind: an explicit kind argument wins
+# outright; otherwise manifest.gallery.primaryKind if it names a declared
+# kind, else the first of tui > panel > overlay > menu that the manifest
+# declares.
+#
+# PY_RESOLVE_KIND prints NUL-separated fields so the bash reader below
+# never has to fight IFS word-splitting or bash's (3.2-era) empty-array
+# handling: effective-kind, name, tui.grid, tui.command, then zero or more
+# tui.args. A missing/unreadable manifest or missing python3 yields an
+# empty effective-kind, which tells the caller to fall back to the
+# original IPC passthrough untouched.
+read -r -d '' PY_RESOLVE_KIND <<'PYEOF' || true
+import json, sys
+
+manifest_path = sys.argv[1]
+kind_arg = sys.argv[2] if len(sys.argv) > 2 else ""
+
+
+def emit(fields):
+    out = sys.stdout.buffer
+    for f in fields:
+        out.write(str(f).encode("utf-8", "surrogateescape"))
+        out.write(b"\x00")
+
+
+try:
+    with open(manifest_path, encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    emit(["", "", "", ""])
+    sys.exit(0)
+
+kinds = data.get("kinds")
+if not isinstance(kinds, list):
+    kinds = []
+gallery = data.get("gallery")
+if not isinstance(gallery, dict):
+    gallery = {}
+name = data.get("name")
+if not isinstance(name, str) or not name:
+    name = data.get("id") if isinstance(data.get("id"), str) else ""
+
+
+def has(k):
+    return k in kinds
+
+
+if kind_arg:
+    eff = kind_arg
+else:
+    primary = gallery.get("primaryKind")
+    if primary in ("tui", "panel", "overlay", "menu") and has(primary):
+        eff = primary
+    elif has("tui"):
+        eff = "tui"
+    elif has("panel"):
+        eff = "panel"
+    elif has("overlay"):
+        eff = "overlay"
+    elif has("menu"):
+        eff = "menu"
+    else:
+        eff = ""
+
+grid = ""
+command = ""
+args = []
+if eff == "tui":
+    tui = gallery.get("tui")
+    if not isinstance(tui, dict):
+        tui = {}
+    if isinstance(tui.get("grid"), str):
+        grid = tui.get("grid")
+    if isinstance(tui.get("command"), str):
+        command = tui.get("command")
+    if isinstance(tui.get("args"), list):
+        args = [str(a) for a in tui.get("args")]
+
+emit([eff, name, grid, command] + args)
+PYEOF
+
+# resolve_helper_bin <name> -- find gallery-tui / gallery-menu next to this
+# script first (dev checkout), falling back to the installed copy in
+# ~/bin, same pattern as hs_call's gallery-hs resolution above.
+resolve_helper_bin() {
+  local name="$1"
+  local candidate="${SCRIPT_DIR}/${name}"
+  if [ -x "${candidate}" ]; then
+    printf '%s' "${candidate}"
+  else
+    printf '%s' "${HOME}/bin/${name}"
+  fi
+}
+
+# is_disabled <id> -- true if id is listed in gallery.json's disabled[].
+# Missing gallery.json or python3 means "not disabled" (nothing to refuse).
+is_disabled() {
+  local id="$1"
+  command -v python3 >/dev/null 2>&1 || return 1
+  [ -f "${GALLERY_JSON}" ] || return 1
+  python3 -c '
+import json, sys
+path, target = sys.argv[1], sys.argv[2]
+try:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(1)
+disabled = data.get("disabled")
+sys.exit(0 if isinstance(disabled, list) and target in disabled else 1)
+' "${GALLERY_JSON}" "${id}"
+}
+
+# run_gallery_tui <verb> <gallery_tui_bin> <name> <id> <gallery-tui args...>
+# Invokes gallery-tui and translates its output into the same style of
+# result line the Spoon's kind modules return ("opened <id>", "closed
+# <id>", "not open: <id>") -- by id, not by the window title (name).
+run_gallery_tui() {
+  local verb="$1" gallery_tui="$2" name="$3" id="$4"
+  shift 4
+  local out="" rc=0
+  out="$("${gallery_tui}" "${verb}" "${name}" "$@" 2>&1)" || rc=$?
+
+  case "${verb}" in
+    open)
+      if [ "${rc}" -eq 0 ]; then
+        echo "opened ${id}"
+      else
+        echo "gallery: ${out}" >&2
+        return "${rc}"
+      fi
+      ;;
+    close)
+      if [ "${rc}" -ne 0 ]; then
+        echo "gallery: ${out}" >&2
+        return "${rc}"
+      fi
+      case "${out}" in
+        "closed:"*) echo "closed ${id}" ;;
+        "not open:"*) echo "not open: ${id}" ;;
+        *) echo "closed ${id}" ;;
+      esac
+      ;;
+    toggle)
+      if [ "${rc}" -ne 0 ]; then
+        echo "gallery: ${out}" >&2
+        return "${rc}"
+      fi
+      case "${out}" in
+        "closed:"*) echo "closed ${id}" ;;
+        *) echo "opened ${id}" ;;
+      esac
+      ;;
+  esac
+  return 0
+}
+
+# route_open_close_toggle <verb> <id> <kind-arg>
+# Resolves the plugin's effective kind and, for tui/menu, handles the
+# whole open/close/toggle locally via gallery-tui (no Hammerspoon
+# involved). Returns 2 to tell the caller to fall back to the original
+# run_ipc passthrough unchanged -- used both for panel/overlay and for
+# every case this function cannot resolve on its own (no manifest, no
+# python3, GALLERY_PLUGIN_DIR pointing nowhere useful, etc).
+route_open_close_toggle() {
+  local verb="$1" id="$2" kind_arg="$3"
+  local plugin_dir="${GALLERY_PLUGIN_DIR:-${PLUGIN_DIR}}"
+  local manifest="${plugin_dir}/${id}/manifest.json"
+
+  command -v python3 >/dev/null 2>&1 || return 2
+  [ -f "${manifest}" ] || return 2
+
+  local eff="" name="" grid="" tui_command="" n=0
+  set --
+  while IFS= read -r -d '' field; do
+    n=$((n + 1))
+    case "${n}" in
+      1) eff="${field}" ;;
+      2) name="${field}" ;;
+      3) grid="${field}" ;;
+      4) tui_command="${field}" ;;
+      *) set -- "$@" "${field}" ;;
+    esac
+  done < <(python3 -c "${PY_RESOLVE_KIND}" "${manifest}" "${kind_arg}" 2>/dev/null)
+  # "$@" now holds manifest.gallery.tui.args (zero or more).
+
+  case "${eff}" in
+    tui|menu) ;;
+    *) return 2 ;;
+  esac
+
+  [ -n "${name}" ] || name="${id}"
+
+  if is_disabled "${id}"; then
+    echo "not enabled: ${id}"
+    return 0
+  fi
+
+  local gallery_tui
+  gallery_tui="$(resolve_helper_bin gallery-tui)"
+
+  if [ "${eff}" = "tui" ]; then
+    if [ "${verb}" = "close" ]; then
+      # gallery-tui close only ever needs the title -- no need to gate a
+      # close on gallery.tui.command being present.
+      run_gallery_tui "${verb}" "${gallery_tui}" "${name}" "${id}"
+    elif [ -z "${tui_command}" ]; then
+      echo "gallery: ${id}: tui plugin has no gallery.tui.command" >&2
+      return 1
+    elif [ -n "${grid}" ]; then
+      run_gallery_tui "${verb}" "${gallery_tui}" "${name}" "${id}" --grid "${grid}" -- "${tui_command}" "$@"
+    else
+      run_gallery_tui "${verb}" "${gallery_tui}" "${name}" "${id}" -- "${tui_command}" "$@"
+    fi
+  else
+    local gallery_menu
+    gallery_menu="$(resolve_helper_bin gallery-menu)"
+    run_gallery_tui "${verb}" "${gallery_tui}" "${name}" "${id}" -- "${gallery_menu}" "${id}"
   fi
 }
 
@@ -203,18 +434,51 @@ cmd_list() {
 }
 
 cmd_open() {
-  local id="${1:?usage: gallery open <id> [panel|overlay|menu]}"
-  run_ipc open "${id}" "${2:-}"
+  local id="${1:?usage: gallery open <id> [panel|overlay|menu|tui]}"
+  local kind="${2:-}"
+  if ! valid_id "${id}"; then
+    echo "gallery: invalid id: ${id}" >&2
+    exit 1
+  fi
+  local rc=0
+  route_open_close_toggle open "${id}" "${kind}" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    run_ipc open "${id}" "${kind}"
+    return
+  fi
+  return "${rc}"
 }
 
 cmd_close() {
-  local id="${1:?usage: gallery close <id> [panel|overlay|menu]}"
-  run_ipc close "${id}" "${2:-}"
+  local id="${1:?usage: gallery close <id> [panel|overlay|menu|tui]}"
+  local kind="${2:-}"
+  if ! valid_id "${id}"; then
+    echo "gallery: invalid id: ${id}" >&2
+    exit 1
+  fi
+  local rc=0
+  route_open_close_toggle close "${id}" "${kind}" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    run_ipc close "${id}" "${kind}"
+    return
+  fi
+  return "${rc}"
 }
 
 cmd_toggle() {
-  local id="${1:?usage: gallery toggle <id> [panel|overlay|menu]}"
-  run_ipc toggle "${id}" "${2:-}"
+  local id="${1:?usage: gallery toggle <id> [panel|overlay|menu|tui]}"
+  local kind="${2:-}"
+  if ! valid_id "${id}"; then
+    echo "gallery: invalid id: ${id}" >&2
+    exit 1
+  fi
+  local rc=0
+  route_open_close_toggle toggle "${id}" "${kind}" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    run_ipc toggle "${id}" "${kind}"
+    return
+  fi
+  return "${rc}"
 }
 
 cmd_enable() {
@@ -945,6 +1209,46 @@ cmd_doctor() {
     echo "OK      ${GALLERY_JSON} exists"
   else
     echo "MISSING ${GALLERY_JSON} exists (informational; written once the Spoon persists state)"
+  fi
+
+  # tui/menu kind plugins run in iTerm2 via gallery-tui, no Hammerspoon
+  # involved -- checked here regardless of whether any installed plugin
+  # currently uses those kinds.
+  if [ -d "/Applications/iTerm.app" ]; then
+    echo "OK      iTerm2.app present"
+  else
+    echo "MISSING iTerm2.app present"
+    ok=0
+  fi
+
+  local gallery_tui
+  gallery_tui="$(resolve_helper_bin gallery-tui)"
+  if [ -x "${gallery_tui}" ]; then
+    echo "OK      gallery-tui installed (${gallery_tui})"
+  else
+    echo "MISSING gallery-tui installed"
+    ok=0
+  fi
+
+  # fzf/glow/btop are used by individual tui/menu plugins (the menu kind's
+  # fzf runner, and common tui commands) but are not required by Gallery
+  # itself -- warn, do not fail.
+  if command -v fzf >/dev/null 2>&1; then
+    echo "OK      fzf on PATH"
+  else
+    echo "WARN    fzf on PATH (needed by menu-kind plugins; brew install fzf)"
+  fi
+
+  if command -v glow >/dev/null 2>&1; then
+    echo "OK      glow on PATH"
+  else
+    echo "WARN    glow on PATH (used by some tui-kind plugins; brew install glow)"
+  fi
+
+  if command -v btop >/dev/null 2>&1; then
+    echo "OK      btop on PATH"
+  else
+    echo "WARN    btop on PATH (used by some tui-kind plugins; brew install btop)"
   fi
 
   if command -v hs >/dev/null 2>&1; then

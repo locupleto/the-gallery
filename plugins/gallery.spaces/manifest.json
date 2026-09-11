@@ -2,16 +2,14 @@
   "schemaVersion": 1,
   "id": "gallery.spaces",
   "name": "Spaces Overview",
-  "version": "0.0.1",
-  "kinds": ["overlay"],
-  "entryPoints": {
-    "overlay": "index.html"
-  },
+  "version": "0.1.0",
+  "kinds": ["tui"],
+  "entryPoints": {},
   "gallery": {
-    "overlay": {
-      "display": "cursor",
-      "dismiss": "any-key",
-      "focus": "none"
+    "tui": {
+      "command": "~/.config/gallery/plugins/gallery.spaces/spaces.sh",
+      "args": [],
+      "grid": "6:6:1:1:4:4"
     }
   }
 }
