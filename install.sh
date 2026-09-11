@@ -197,6 +197,13 @@ if [ -f "${QML_BIN_SRC}" ]; then
   # built on first run (gallery-qml itself, or `gallery-qml --setup`) so
   # install.sh stays fast and does not need network access every time.
   echo "[gallery] qml-venv is not created by install.sh -- it is built on first run of any qml plugin (or: gallery-qml --setup)"
+  # Ship the Dock icon for the Gallery.app wrapper that gallery-qml builds
+  # around the qml host (so the Dock shows "Gallery" + icon, not
+  # "python3.12" + a blank document). The bundle itself is assembled lazily
+  # by gallery-qml once the venv exists.
+  if [ -f "${SCRIPT_DIR}/assets/Gallery.icns" ]; then
+    run cp "${SCRIPT_DIR}/assets/Gallery.icns" "${CONFIG_DIR}/Gallery.icns"
+  fi
 else
   echo "[gallery] no bin/gallery-qml in this checkout yet -- skipping (a qml-kind plugin will not run until it is added)"
 fi

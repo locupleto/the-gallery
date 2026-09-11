@@ -10,6 +10,15 @@
 # via uv, using a uv-managed Python (never Homebrew's) per this repo's
 # standing rule for Gallery venvs.
 #
+# The host is launched *through* a minimal Gallery.app bundle so macOS shows
+# a proper name ("Gallery") and icon in the Dock instead of the generic
+# "python3.12" / blank-document fallback that a bare interpreter process
+# gets. The bundle's MacOS executable is a symlink to the venv's Python; a
+# copy of the venv's pyvenv.cfg plus a `lib` symlink inside Contents/ let
+# Python still resolve the venv's site-packages even though the executable
+# path now lives inside the bundle (which is what gives it the bundle
+# identity). See ensure_bundle below.
+#
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:${PATH}:/usr/local/bin"
@@ -17,6 +26,8 @@ export PATH="/opt/homebrew/bin:${PATH}:/usr/local/bin"
 CONFIG_DIR="${HOME}/.config/gallery"
 VENV_DIR="${CONFIG_DIR}/qml-venv"
 VENV_PY="${VENV_DIR}/bin/python"
+BUNDLE="${CONFIG_DIR}/Gallery.app"
+BUNDLE_EXE="${BUNDLE}/Contents/MacOS/Gallery"
 
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 # Resolve symlinks so an installed copy under ~/bin still finds its own
@@ -54,6 +65,69 @@ ensure_venv() {
   uv pip install --python "${VENV_PY}" pyside6 >&2
 }
 
+# Locate the app icon: installed copy first, then a dev checkout's assets/.
+find_icns() {
+  if [ -f "${CONFIG_DIR}/Gallery.icns" ]; then
+    printf '%s' "${CONFIG_DIR}/Gallery.icns"
+  elif [ -f "${SCRIPT_DIR}/../assets/Gallery.icns" ]; then
+    printf '%s' "${SCRIPT_DIR}/../assets/Gallery.icns"
+  fi
+}
+
+# Build (or refresh) the Gallery.app wrapper. Idempotent and cheap: the
+# pyvenv.cfg copy and the lib/python symlinks are always re-pointed so the
+# bundle tracks the live venv (e.g. after a Python upgrade), while the
+# Info.plist and icon are only written when missing.
+ensure_bundle() {
+  local contents="${BUNDLE}/Contents"
+  mkdir -p "${contents}/MacOS" "${contents}/Resources"
+
+  # Executable: a symlink to the venv Python. Its path lives inside the
+  # bundle, which is what gives the process the Gallery.app identity.
+  ln -sfn "${VENV_PY}" "${BUNDLE_EXE}"
+
+  # venv resolution: Python looks for pyvenv.cfg next to the invoked
+  # executable and one directory up (Contents/), and derives site-packages
+  # from that location -- so a copy of the cfg here plus a lib symlink into
+  # the real venv makes PySide6 importable.
+  cp -f "${VENV_DIR}/pyvenv.cfg" "${contents}/pyvenv.cfg"
+  ln -sfn "${VENV_DIR}/lib" "${contents}/lib"
+
+  local icns; icns="$(find_icns)"
+  if [ -n "${icns}" ]; then
+    cp -f "${icns}" "${contents}/Resources/Gallery.icns"
+  fi
+
+  if [ ! -f "${contents}/Info.plist" ]; then
+    cat > "${contents}/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>              <string>Gallery</string>
+  <key>CFBundleDisplayName</key>       <string>Gallery</string>
+  <key>CFBundleExecutable</key>        <string>Gallery</string>
+  <key>CFBundleIdentifier</key>        <string>org.ottosson.gallery</string>
+  <key>CFBundleIconFile</key>          <string>Gallery</string>
+  <key>CFBundlePackageType</key>       <string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key> <string>6.0</string>
+  <key>CFBundleShortVersionString</key> <string>1.0</string>
+  <key>CFBundleVersion</key>           <string>1.0</string>
+  <key>NSHighResolutionCapable</key>   <true/>
+  <key>LSApplicationCategoryType</key> <string>public.app-category.utilities</string>
+  <key>NSPrincipalClass</key>          <string>NSApplication</string>
+</dict>
+</plist>
+PLIST
+  fi
+}
+
 ensure_venv
+
+# The bundle is a Dock-cosmetics wrapper: if anything about building it
+# fails, fall back to launching the bare interpreter so plugins still run.
+if ensure_bundle 2>/dev/null && [ -x "${BUNDLE_EXE}" ]; then
+  exec "${BUNDLE_EXE}" "${QML_DIR}/host.py" "$@"
+fi
 
 exec "${VENV_PY}" "${QML_DIR}/host.py" "$@"

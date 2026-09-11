@@ -288,6 +288,10 @@ def main(argv=None):
         pass
 
     app = QGuiApplication(sys.argv[:1])
+    # Dock/menu identity. The real name + icon come from the Gallery.app
+    # bundle the host is launched through (see bin/gallery-qml); this keeps
+    # the name consistent when run unbundled (e.g. a dev checkout).
+    app.setApplicationName("Gallery")
 
     _close_filter = _CloseShortcutFilter(app)
     app.installEventFilter(_close_filter)
