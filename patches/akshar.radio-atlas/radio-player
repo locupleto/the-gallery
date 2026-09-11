@@ -1,0 +1,600 @@
+#!/usr/bin/env bash
+# Gallery macOS patch for akshar.radio-atlas 0.1.9:
+#  - process_start_time(): /proc/$pid/stat (field 22, start time) does
+#    not exist on macOS. Replaced with `ps -o state=,lstart= -p <pid>`
+#    (BSD ps), converting the human-readable start timestamp to epoch
+#    seconds with `date -j -f` so it still round-trips through the same
+#    "^[0-9]+$" checks in player_alive()/write_player_pid() unchanged,
+#    and still rejects a zombie (`Z` state) the way the upstream awk
+#    filter did. This is what makes player_alive() immune to a stale pid
+#    file pointing at an unrelated process that later reused the same
+#    pid -- same purpose as upstream, macOS-native mechanism.
+#  - stat -c '%s' (GNU coreutils) -> stat -f '%z' (BSD stat), two sites.
+#  - list_outputs(): upstream shells out to `pactl -f json list sinks`
+#    (PipeWire's control CLI, absent on macOS -- see PATCH-NOTES.md for
+#    what this degrades: no output picker, no AirPlay/RAOP sink list).
+#    Returns an empty `{"outputs":[]}` so the QML output picker renders
+#    "no outputs" instead of erroring; set_output() and the `--audio-
+#    device` mpv flag are consequently unreachable in normal use (no
+#    output ever validates), which is the intended degraded behavior.
+#  - play_station(): `setsid` (util-linux) is absent on macOS; without it
+#    mpv's launch failed outright ("setsid: command not found") during
+#    testing. Replaced with a one-line perl `POSIX::setsid()` + `exec`,
+#    which is exactly what setsid(1) itself does (fork only if already a
+#    process group leader, otherwise setsid()+exec in place) -- same PID,
+#    same new session/process-group semantics that terminate_tracked_
+#    player()'s `kill -- "-$pid"` relies on to reap the whole mpv tree.
+set -euo pipefail
+umask 077
+
+: "${XDG_RUNTIME_DIR:?Radio Atlas requires XDG_RUNTIME_DIR}"
+runtime_dir="$XDG_RUNTIME_DIR/omarchy-radio-atlas"
+data_root=${XDG_DATA_HOME:-$HOME/.local/share}
+state_dir="$data_root/radio-atlas"
+state_file="$state_dir/state.json"
+socket="$runtime_dir/mpv.sock"
+playlist="$runtime_dir/playlist.m3u"
+queue_file="$runtime_dir/playlist.json"
+selection_file="$runtime_dir/play-selection.json"
+status_file="$runtime_dir/status.json"
+pid_file="$runtime_dir/player.pid"
+proxy_socket="$runtime_dir/proxy.sock"
+generation_file="$runtime_dir/player.generation"
+log_file="$runtime_dir/mpv.log"
+max_json_bytes=4194304
+max_ipc_bytes=65536
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+fetch_path=${RADIO_ATLAS_FETCH_PATH:-$script_dir/radio-fetch}
+state_path="$script_dir/radio-state"
+status_script="$script_dir/radio-status.lua"
+version=$(jq -r '.version' "$script_dir/manifest.json")
+user_agent="Radio Atlas/$version (https://github.com/AksharP5/omarchy-radio-atlas)"
+install -d -m 700 "$runtime_dir" "$state_dir"
+exec 8>"$runtime_dir/player.lock"
+
+process_start_time() {
+  local pid=$1
+  local state lstart
+  state=$(ps -o state= -p "$pid" 2>/dev/null) || return 1
+  [[ -n $state ]] || return 1
+  [[ $state != Z* ]] || return 1
+  lstart=$(ps -o lstart= -p "$pid" 2>/dev/null) || return 1
+  [[ -n $lstart ]] || return 1
+  lstart="${lstart#"${lstart%%[![:space:]]*}"}"
+  lstart="${lstart%"${lstart##*[![:space:]]}"}"
+  date -j -f '%a %b %e %T %Y' "$lstart" +%s 2>/dev/null
+}
+
+player_alive() {
+  local pid expected_start actual_start
+  [[ -s $pid_file ]] || return 1
+  read -r pid expected_start < "$pid_file" || return 1
+  [[ $pid =~ ^[0-9]+$ && $expected_start =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  actual_start=$(process_start_time "$pid") || return 1
+  [[ $actual_start == "$expected_start" ]]
+}
+
+write_player_pid() {
+  local pid=$1
+  local start_time temporary
+  start_time=$(process_start_time "$pid")
+  temporary=$(mktemp "$runtime_dir/player.XXXXXX")
+  printf '%s %s\n' "$pid" "$start_time" > "$temporary"
+  mv "$temporary" "$pid_file"
+}
+
+cleanup_dead_player() {
+  player_alive && return
+  rm -f "$pid_file" "$proxy_socket" "$socket"
+}
+
+terminate_tracked_player() {
+  local pid
+  player_alive || return 0
+  read -r pid _ < "$pid_file"
+  kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 100); do
+    player_alive || break
+    sleep 0.02
+  done
+  if player_alive; then
+    kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    for _ in $(seq 1 50); do
+      player_alive || break
+      sleep 0.02
+    done
+  fi
+  player_alive && return 1
+  cleanup_dead_player
+}
+
+player_generation() {
+  local generation=0
+  if [[ -s $generation_file ]]; then
+    read -r generation < "$generation_file" || generation=0
+  fi
+  [[ $generation =~ ^[0-9]+$ ]] || generation=0
+  printf '%s\n' "$generation"
+}
+
+cancel_pending_plays() {
+  local generation temporary
+  generation=$(player_generation)
+  temporary=$(mktemp "$runtime_dir/generation.XXXXXX")
+  printf '%s\n' "$((generation + 1))" > "$temporary"
+  mv "$temporary" "$generation_file"
+}
+
+playable_filter='def playable:
+    (.url | type == "string")
+    and (.url | test("^https?://"; "i"))
+    and (.url | test("[\\r\\n]") | not);'
+
+configured_volume() {
+  local volume
+  volume=$("$state_path" get 2>/dev/null \
+    | jq -r '(.volume // 70) | tonumber | round | if . < 0 then 0 elif . > 100 then 100 else . end') \
+    || volume=70
+  printf '%s\n' "$volume"
+}
+
+persist_volume() {
+  local volume=$1
+  "$state_path" volume "$volume" >/dev/null
+}
+configured_output() {
+  local output
+  output=$("$state_path" get 2>/dev/null \
+    | jq -r '(.output // "") | if (type == "string" and test("^([A-Za-z0-9._:+-]{0,160})$")) then . else "" end') \
+    || output=""
+  printf '%s\n' "$output"
+}
+
+write_status() {
+  local state=$1
+  local temporary
+  if (( $(printf '%s' "$state" | wc -c) > max_ipc_bytes )); then
+    echo 'Radio player returned an oversized status' >&2
+    return 4
+  fi
+  temporary=$(mktemp "$runtime_dir/status.XXXXXX")
+  printf '%s\n' "$state" > "$temporary"
+  mv "$temporary" "$status_file"
+  printf '%s\n' "$state"
+}
+
+send_command() {
+  local payload=$1
+  local request_id=9001
+  local response
+  [[ -S $socket ]] || return 1
+  payload=$(jq -c --argjson requestId "$request_id" '. + {request_id: $requestId}' <<< "$payload") || return 1
+  response=$(printf '%s\n' "$payload" \
+    | socat -T 1 - "UNIX-CONNECT:$socket" 2>/dev/null \
+    | head -c "$((max_ipc_bytes + 1))") || return 1
+  (( $(printf '%s' "$response" | wc -c) <= max_ipc_bytes )) || return 1
+  jq -e --argjson requestId "$request_id" \
+    'select(.request_id == $requestId and .error == "success")' \
+    <<< "$response" >/dev/null 2>&1
+}
+
+status() {
+  if [[ ! -S $socket ]]; then
+    cleanup_dead_player
+    write_status "$(jq -cn --argjson volume "$(configured_volume)" --arg output "$(configured_output)" '{running:false,paused:false,muted:false,title:"",playlistPosition:-1,playlistCount:0,volume:$volume,output:$output,loaded:false,station:{}}')"
+    return
+  fi
+
+  local response
+  response=$(
+    printf '%s\n' \
+      '{"command":["get_property","pause"],"request_id":1}' \
+      '{"command":["get_property","media-title"],"request_id":2}' \
+      '{"command":["get_property","playlist-pos"],"request_id":3}' \
+      '{"command":["get_property","playlist-count"],"request_id":4}' \
+      '{"command":["get_property","volume"],"request_id":5}' \
+      '{"command":["get_property","mute"],"request_id":6}' \
+      '{"command":["get_property","audio-device"],"request_id":7}' \
+      '{"command":["get_property","user-data/radio-atlas-failure"],"request_id":8}' \
+      | socat -T 1 - "UNIX-CONNECT:$socket" 2>/dev/null \
+      | head -c "$((max_ipc_bytes + 1))" || true
+  )
+  if (( $(printf '%s' "$response" | wc -c) > max_ipc_bytes )); then
+    response=""
+  fi
+
+  if ! jq -e 'select(.request_id == 1)' <<< "$response" >/dev/null 2>&1; then
+    cleanup_dead_player
+    write_status "$(jq -cn --argjson volume "$(configured_volume)" --arg output "$(configured_output)" '{running:false,paused:false,muted:false,title:"",playlistPosition:-1,playlistCount:0,volume:$volume,output:$output,loaded:false,station:{}}')"
+    return
+  fi
+
+  local position station loaded station_uuid loaded_uuid failure
+  failure=$(jq -sc '[.[] | select(.request_id == 8 and .error == "success") | .data
+    | select(type == "object" and (.position | type == "number")
+      and (.message | type == "string") and (.detail | type == "string"))][0] // null' <<< "$response")
+  position=$(jq -r 'select(.request_id == 3) | .data' <<< "$response" | head -n 1)
+  if [[ $failure != null ]]; then
+    position=$(jq -r '.position' <<< "$failure")
+  fi
+  station='{}'
+  if [[ $position =~ ^[0-9]+$ ]] && valid_runtime_array "$queue_file"; then
+    station=$(jq -c --argjson position "$position" '
+      (.[$position] // {})
+      | {
+          uuid: (if (.uuid | type) == "string" then .uuid[:64] else "" end),
+          name: (if (.name | type) == "string" then .name[:160] else "" end),
+          country: (if (.country | type) == "string" then .country[:100] else "" end),
+          countryCode: (if (.countryCode | type) == "string" then .countryCode[:2] else "" end),
+          latitude: (if (.latitude | type) == "number" then .latitude else null end),
+          longitude: (if (.longitude | type) == "number" then .longitude else null end)
+        }
+    ' "$queue_file" 2>/dev/null || printf '{}')
+  fi
+  loaded=false
+  station_uuid=$(jq -r '.uuid // ""' <<< "$station")
+  if [[ -n $station_uuid && -s $status_file ]] \
+    && (( $(stat -f '%z' -- "$status_file") <= max_ipc_bytes )); then
+    loaded_uuid=$(jq -r 'select(.loaded == true) | .station.uuid // ""' "$status_file" 2>/dev/null || true)
+    [[ $loaded_uuid == "$station_uuid" ]] && loaded=true
+  fi
+
+  [[ $failure == null ]] || loaded=false
+  write_status "$(jq -sc --argjson station "$station" --argjson loaded "$loaded" \
+    --argjson failure "$failure" '{
+    running: true,
+    paused: ($failure != null or ([.[] | select(.request_id == 1) | .data][0] // false)),
+    muted: ([.[] | select(.request_id == 6) | .data][0] // false),
+    title: (([.[] | select(.request_id == 2) | .data][0] // "")
+      | if type == "string" then gsub("[\\r\\n\\t]"; " ")[:512] else "" end),
+    playlistPosition: ($failure.position // [.[] | select(.request_id == 3) | .data][0] // -1),
+    playlistCount: ([.[] | select(.request_id == 4) | .data][0] // 0),
+    volume: ([.[] | select(.request_id == 5) | .data][0] // 70),
+    output: (([.[] | select(.request_id == 7) | .data][0] // "")
+      | if type == "string" then (if . == "auto" then "" else sub("^pipewire/"; "") end) else "" end),
+    loaded: $loaded,
+    error: ($failure.message // ""),
+    errorDetail: ($failure.detail // ""),
+    station: $station
+  }' <<< "$response")"
+}
+
+set_volume() {
+  local volume=${1:-}
+  [[ $volume =~ ^[0-9]+$ ]] || { echo 'Volume must be an integer from 0 to 100' >&2; exit 2; }
+  (( volume >= 0 && volume <= 100 )) || { echo 'Volume must be an integer from 0 to 100' >&2; exit 2; }
+  "$state_path" get >/dev/null
+  local command
+  command=$(jq -cn --argjson volume "$volume" '{command:["set_property","volume",$volume]}')
+  if [[ -S $socket ]] && ! send_command "$command"; then
+    status >/dev/null
+    if [[ -S $socket ]]; then
+      echo 'Radio volume could not be changed' >&2
+      exit 4
+    fi
+  fi
+  persist_volume "$volume"
+  status
+}
+
+player_command() {
+  local payload=$1
+  if ! send_command "$payload"; then
+    status >/dev/null
+    echo 'Radio player is unavailable' >&2
+    exit 4
+  fi
+  status
+}
+
+stop_player() {
+  cancel_pending_plays
+  if [[ ! -S $socket ]]; then
+    if ! terminate_tracked_player; then
+      echo 'Radio player could not be stopped' >&2
+      exit 4
+    fi
+    status
+    return
+  fi
+
+  if ! send_command '{"command":["quit"]}'; then
+    if ! terminate_tracked_player; then
+      echo 'Radio player could not be stopped' >&2
+      exit 4
+    fi
+    status
+    return
+  fi
+
+  for _ in $(seq 1 100); do
+    if [[ ! -S $socket ]] && ! player_alive; then
+      break
+    fi
+    sleep 0.02
+  done
+  if { [[ -S $socket ]] || player_alive; } && ! terminate_tracked_player; then
+    echo 'Radio player could not be stopped' >&2
+    exit 4
+  fi
+  status
+}
+
+adjust_volume() {
+  local delta=$1
+  local current
+  current=$(status | jq -r '.volume | round')
+  local next=$((current + delta))
+  (( next < 0 )) && next=0
+  (( next > 100 )) && next=100
+  set_volume "$next"
+}
+
+list_outputs() {
+  # macOS has no PipeWire/pactl, so there is no sink list to query -- and
+  # no per-app output routing mpv could use even if there were one (see
+  # PATCH-NOTES.md). Reporting a plain empty list (success, not an error)
+  # matches how upstream renders zero sinks: the QML output picker shows
+  # "no outputs" instead of surfacing a failure banner.
+  printf '%s\n' '{"outputs":[]}'
+}
+
+set_output() {
+  local requested=${1-}
+  if [[ -n $requested ]]; then
+    [[ $requested =~ ^[A-Za-z0-9._:+-]{1,160}$ ]] || {
+      echo 'Unknown audio output' >&2
+      exit 2
+    }
+    local available
+    available=$(list_outputs)
+    jq -e --arg requested "$requested" 'any(.outputs[]; .id == $requested)' \
+      <<< "$available" >/dev/null || {
+      echo 'Unknown audio output' >&2
+      exit 3
+    }
+  fi
+
+  "$state_path" get >/dev/null
+  if [[ -S $socket ]]; then
+    local device command
+    device=auto
+    [[ -z $requested ]] || device="pipewire/$requested"
+    command=$(jq -cn --arg device "$device" '{command:["set_property","audio-device",$device]}')
+    if ! send_command "$command"; then
+      status >/dev/null
+      if [[ -S $socket ]]; then
+        echo 'Audio output could not be changed' >&2
+        exit 4
+      fi
+    fi
+  fi
+  "$state_path" output "$requested" >/dev/null
+  status
+}
+
+source_stations() {
+  local scope=$1
+  case "$scope" in
+    world)
+      valid_runtime_array "$runtime_dir/world.json" \
+        && cat "$runtime_dir/world.json"
+      ;;
+    favorites)
+      "$state_path" get | jq -c '.favorites // []'
+      ;;
+    recent)
+      "$state_path" get | jq -c '.recent // []'
+      ;;
+    results)
+      valid_runtime_array "$runtime_dir/results.json" \
+        && cat "$runtime_dir/results.json"
+      ;;
+    selection)
+      valid_runtime_array "$selection_file" \
+        && cat "$selection_file"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+valid_runtime_array() {
+  local path=$1
+  [[ -s $path ]] \
+    && (( $(stat -f '%z' -- "$path") <= max_json_bytes )) \
+    && jq -e -s 'length == 1 and (.[0] | type == "array" and length <= 500)' \
+      "$path" >/dev/null 2>&1
+}
+
+refresh_saved_stations() {
+  local source_file=$1
+  local uuids refreshed
+  uuids=$(jq -r 'map(.uuid) | join(",")' "$source_file")
+  [[ -n $uuids ]] || return 0
+
+  refreshed=$(mktemp "$runtime_dir/refreshed.XXXXXX")
+  if "$fetch_path" resolve "$uuids" > "$refreshed"; then
+    jq -c --slurpfile refreshed "$refreshed" '
+      ($refreshed[0] | INDEX(.uuid)) as $byUuid
+      | map($byUuid[.uuid] // .)
+    ' "$source_file" > "$source_file.next"
+    mv "$source_file.next" "$source_file"
+  fi
+  rm -f "$refreshed"
+}
+
+play_station() {
+  local uuid=$1
+  local scope=${2:-results}
+  local source_file starting_generation
+  starting_generation=$(player_generation)
+  source_file=$(mktemp "$runtime_dir/source.XXXXXX")
+  if ! source_stations "$scope" > "$source_file"; then
+    rm -f "$source_file"
+    echo 'Station data is unavailable or invalid' >&2
+    exit 3
+  fi
+
+  if [[ $scope == favorites || $scope == recent ]]; then
+    refresh_saved_stations "$source_file"
+  fi
+
+  if ! jq -e --arg uuid "$uuid" "$playable_filter
+    any(.[];
+      .uuid == \$uuid
+      and playable)" "$source_file" >/dev/null; then
+    rm -f "$source_file"
+    echo 'Station is unavailable or has an unsafe stream URL' >&2
+    exit 3
+  fi
+
+  local temporary_playlist temporary_queue
+  temporary_playlist=$(mktemp "$runtime_dir/playlist.XXXXXX")
+  temporary_queue=$(mktemp "$runtime_dir/queue.XXXXXX")
+  jq -c --arg uuid "$uuid" \
+    "$playable_filter
+    [.[] | select(playable)] as \$rows
+    | (first(range(0; \$rows | length) as \$index
+        | select(\$rows[\$index].uuid == \$uuid) | \$index)) as \$position
+    | (\$rows[\$position:] + \$rows[:\$position])" \
+    "$source_file" > "$temporary_queue"
+  {
+    printf '#EXTM3U\n'
+    jq -r '
+      .[]
+      | "#EXTINF:-1," + (.name | gsub("[\\r\\n]"; " ")), .url
+    ' "$temporary_queue"
+  } > "$temporary_playlist"
+  rm -f "$source_file"
+
+  flock -x 8
+  if [[ $(player_generation) != "$starting_generation" ]]; then
+    rm -f "$temporary_playlist" "$temporary_queue"
+    echo 'Radio playback was canceled' >&2
+    exit 4
+  fi
+
+  local load_command
+  load_command=$(jq -cn --arg path "$temporary_playlist" '{command:["loadlist",$path,"replace"]}')
+  if ! send_command "$load_command"; then
+    status >/dev/null
+    if [[ -S $socket ]] || player_alive; then
+      rm -f "$temporary_playlist" "$temporary_queue"
+      echo 'Radio player could not load this station' >&2
+      exit 4
+    fi
+    mv "$temporary_queue" "$queue_file"
+    mv "$temporary_playlist" "$playlist"
+    local -a player_arguments=(
+      mpv
+      --no-video
+      --force-window=no
+      --audio-display=no
+      --idle=yes
+      --loop-playlist=inf
+      --cache-secs=20
+      --demuxer-max-bytes=8MiB
+      --demuxer-max-back-bytes=2MiB
+      --network-timeout=30
+      --load-unsafe-playlists=no
+      --volume="$(configured_volume)"
+      --volume-max=100
+      --input-ipc-server="$socket"
+      --script="$status_script"
+      --playlist="$playlist"
+      --no-terminal
+      --really-quiet
+    )
+    local selected_output
+    selected_output=$(configured_output)
+    if [[ -n $selected_output ]]; then
+      player_arguments+=(--audio-device="pipewire/$selected_output")
+    fi
+    RADIO_ATLAS_STATUS_FILE="$status_file" \
+    RADIO_ATLAS_QUEUE_FILE="$queue_file" \
+    /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec failed: $!\n"' \
+      "$script_dir/radio-session" "${player_arguments[@]}" \
+      > "$log_file" 2>&1 8>&- &
+    local player_pid=$!
+    if ! write_player_pid "$player_pid"; then
+      kill -- "-$player_pid" 2>/dev/null || kill "$player_pid" 2>/dev/null || true
+      wait "$player_pid" 2>/dev/null || true
+      rm -f "$proxy_socket" "$socket"
+      echo 'Radio player could not start' >&2
+      exit 4
+    fi
+
+    for _ in $(seq 1 150); do
+      [[ -S $socket ]] && break
+      sleep 0.02
+    done
+    if [[ ! -S $socket ]]; then
+      terminate_tracked_player || true
+      wait "$player_pid" 2>/dev/null || true
+      rm -f "$pid_file" "$proxy_socket" "$socket"
+      echo 'Radio player could not start' >&2
+      exit 4
+    fi
+  else
+    mv "$temporary_queue" "$queue_file"
+    mv "$temporary_playlist" "$playlist"
+    send_command '{"command":["script-message","radio-atlas-reload"]}' \
+      || { echo 'Radio player could not refresh its station queue' >&2; exit 4; }
+  fi
+
+  if [[ $uuid =~ ^[0-9A-Fa-f-]{20,}$ ]]; then
+    curl --fail --silent --max-time 4 --proto '=https' \
+      --user-agent "$user_agent" \
+      "https://all.api.radio-browser.info/json/url/$uuid" >/dev/null 2>&1 8>&- &
+  fi
+
+  status
+}
+
+action=${1:-status}
+[[ $action == play || $action == outputs ]] || flock -x 8
+case "$action" in
+  play)
+    play_station "${2:-}" "${3:-results}"
+    ;;
+  toggle)
+    player_command '{"command":["script-message","radio-atlas-toggle"]}'
+    ;;
+  next)
+    player_command '{"command":["playlist-next","force"]}'
+    ;;
+  previous)
+    player_command '{"command":["playlist-prev","force"]}'
+    ;;
+  mute)
+    player_command '{"command":["cycle","mute"]}'
+    ;;
+  volume)
+    set_volume "${2:-}"
+    ;;
+  volume-up)
+    adjust_volume 5
+    ;;
+  volume-down)
+    adjust_volume -5
+    ;;
+  outputs)
+    list_outputs
+    ;;
+  output)
+    set_output "${2-}"
+    ;;
+  stop)
+    stop_player
+    ;;
+  status)
+    status
+    ;;
+  *)
+    echo "Unknown action: $action" >&2
+    exit 2
+    ;;
+esac

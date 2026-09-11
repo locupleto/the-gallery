@@ -37,7 +37,7 @@ from PySide6.QtCore import (  # noqa: E402
     qInstallMessageHandler,
 )
 import signal as _signal  # noqa: E402
-from PySide6.QtGui import QColor, QCursor, QGuiApplication  # noqa: E402
+from PySide6.QtGui import QFont, QFontDatabase, QColor, QCursor, QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 from PySide6.QtQuick import QQuickWindow  # noqa: E402
 
@@ -148,6 +148,32 @@ def resolve_background_color(root):
     return QColor(theme_bg or FALLBACK_BACKGROUND)
 
 
+NERD_FONT_CANDIDATES = (
+    "JetBrainsMono Nerd Font",
+    "Hack Nerd Font",
+    "MesloLGM Nerd Font",
+    "MesloLGL Nerd Font",
+    "CaskaydiaCove Nerd Font",
+    "FiraCode Nerd Font",
+)
+
+
+def install_font_substitutions():
+    """Omarchy's Style.fontFamily is the fontconfig alias "monospace", which
+    on Omarchy resolves to a Nerd Font; its plugins draw icons from the
+    private-use glyphs of that font. On macOS Qt maps "monospace" to Menlo,
+    which has no such glyphs, so icons render as boxes. Route the alias to
+    an installed Nerd Font instead ($GALLERY_FONT wins)."""
+    families = set(QFontDatabase.families())
+    wanted = [os.environ.get("GALLERY_FONT", "")] + list(NERD_FONT_CANDIDATES)
+    for family in wanted:
+        if family and family in families:
+            for alias in ("monospace", "Monospace", "mono"):
+                QFont.insertSubstitution(alias, family)
+            return family
+    return None
+
+
 def invoke_open_if_present(root):
     """Best-effort: many Omarchy "panel"-kind plugins (Radio Atlas among
     them) gate their real UI behind an open()/show() call the shell issues
@@ -221,6 +247,12 @@ def main(argv=None):
 
     app = QGuiApplication(sys.argv[:1])
 
+    chosen_font = install_font_substitutions()
+
+    if chosen_font:
+
+        print(f"gallery-qml: monospace -> {chosen_font}", file=sys.stderr)
+
     # `gallery close`/pkill send SIGTERM to the pid in our pidfile. Python's
     # default SIGTERM handling would just kill the process without running
     # aboutToQuit (so cleanup() -- unlinking the pidfile, killing our
@@ -281,9 +313,58 @@ def main(argv=None):
 
         invoke_open_if_present(root)
 
-    center_on_cursor_screen(window)
-    window.show()
-    install_escape_to_close(window, app)
+    def plugin_windows():
+        """Visible top-level windows the plugin created itself (Radio Atlas
+        opens its own FloatingWindow from open()); never our wrapper."""
+        return [
+            w for w in QGuiApplication.allWindows()
+            if w is not window and w.isVisible() and w.parent() is None
+               and isinstance(w, QQuickWindow)
+        ]
+
+    def adopt(plugin_window):
+        # The plugin's own window becomes THE Gallery window: same title
+        # convention (the CLI and yabai key off "Gallery: <Name>"), centred,
+        # Escape-to-close; the empty wrapper stays hidden.
+        plugin_window.setTitle(f"Gallery: {args.title}")
+        center_on_cursor_screen(plugin_window)
+        install_escape_to_close(plugin_window, app)
+        if window.isVisible():
+            window.hide()
+
+    adopted = {"done": False}
+
+    def poll_plugin_windows():
+        if adopted["done"]:
+            return
+        found = plugin_windows()
+        if found:
+            adopted["done"] = True
+            adopt(found[0])
+
+    is_wrapper = not isinstance(root, QQuickWindow)
+    if is_wrapper:
+        # Give a plugin that opens its own window a moment to do so before
+        # the wrapper is shown at all (avoids a doubled window), then keep
+        # watching for a while in case it opens late (after a fetch, say).
+        poll_plugin_windows()
+        if not adopted["done"]:
+            center_on_cursor_screen(window)
+            window.show()
+            install_escape_to_close(window, app)
+        watch = QTimer(); watch.setInterval(100)
+        ticks = {"n": 0}
+        def _tick():
+            ticks["n"] += 1
+            poll_plugin_windows()
+            if adopted["done"] or ticks["n"] > 50:
+                watch.stop()
+        watch.timeout.connect(_tick)
+        watch.start()
+    else:
+        center_on_cursor_screen(window)
+        window.show()
+        install_escape_to_close(window, app)
     # QGuiApplication quits on its own when the last window closes; wiring
     # QQuickWindow.closing to a Python slot instead raises a TypeError in
     # PySide6 (QQuickCloseEvent* is not convertible) on every close.

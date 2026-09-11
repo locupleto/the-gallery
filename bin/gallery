@@ -502,7 +502,8 @@ qml_pid_alive() {
 ensure_gallery_qml_yabai_rule() {
   command -v yabai >/dev/null 2>&1 || return 0
   yabai -m rule --remove gallery-qml >/dev/null 2>&1 || true
-  yabai -m rule --add label=gallery-qml title="^Gallery: " manage=off grid=6:6:1:1:4:4 >/dev/null 2>&1 || true
+  # No grid: a QML plugin sizes its own window (the host centres it).
+  yabai -m rule --add label=gallery-qml title="^Gallery: " manage=off >/dev/null 2>&1 || true
 }
 
 # qml_focus_window <title> -- find a window with this exact title via

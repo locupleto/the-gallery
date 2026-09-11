@@ -57,3 +57,19 @@ This is a dumb file overlay, not a real patch format (no diffing, no
 context, no partial-file hunks) -- keep a patched file's provenance
 documented in a comment at its top (upstream path, why it needed
 replacing, date) since there is nothing else here to record that.
+
+## Example: `akshar.radio-atlas`
+
+[Radio Atlas](https://github.com/AksharP5/omarchy-radio-atlas) (a `qml`-
+kind plugin: a rotatable globe of live internet radio) ships several
+Linux-only helper scripts -- `hyprctl` window rules, `bubblewrap`/
+`setpriv` process sandboxing, `pactl`/PipeWire audio routing, `getent`/
+`ip route`, GNU-only `stat`/bash features. `patches/akshar.radio-atlas/`
+replaces exactly those helpers with macOS equivalents (BSD `stat`, `dig`,
+`ps`+`date`, a Perl `setsid` shim, etc.) while leaving the plugin's QML
+and mpv playback logic untouched. See
+`patches/akshar.radio-atlas/PATCH-NOTES.md` for the full per-file
+breakdown, the Homebrew formulae it needs (`bash mpv socat jq`), and what
+is knowingly degraded on macOS (no audio-output picker/AirPlay routing,
+no MPRIS media keys, and mpv's network sandboxing becomes advisory
+rather than kernel-enforced since bubblewrap has no macOS equivalent).

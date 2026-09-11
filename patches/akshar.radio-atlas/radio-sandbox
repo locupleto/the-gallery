@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Gallery macOS patch for akshar.radio-atlas 0.1.9: upstream prefixes the
+# socat bridge with `setpriv --pdeathsig TERM`, which util-linux ships and
+# macOS does not -- there is no direct BSD equivalent (macOS has no
+# per-process "die when my parent dies" signal to set from a plain CLI).
+# The pdeathsig was upstream's backstop in case its caller (radio-session,
+# itself started under `setsid` inside `bwrap --die-with-parent`) got
+# killed uncleanly; on macOS radio-session (also patched) already traps
+# EXIT/INT/TERM and kills this process's pid on the way out, so dropping
+# just the `setpriv` prefix and keeping the socat bridge itself intact
+# loses only that one extra safety net, not the bridge's function.
+set -euo pipefail
+
+proxy_socket=$1
+shift
+bridge_pid=""
+
+cleanup() {
+  local exit_code=$?
+  trap - EXIT INT TERM
+  [[ -z $bridge_pid ]] || kill "$bridge_pid" 2>/dev/null || true
+  [[ -z $bridge_pid ]] || wait "$bridge_pid" 2>/dev/null || true
+  exit "$exit_code"
+}
+trap cleanup EXIT INT TERM
+
+socat TCP4-LISTEN:18765,bind=127.0.0.1,reuseaddr,fork,max-children=32 \
+  UNIX-CONNECT:"$proxy_socket" >/dev/null 2>&1 &
+bridge_pid=$!
+for _ in $(seq 1 100); do
+  if (: > /dev/tcp/127.0.0.1/18765) 2>/dev/null; then
+    break
+  fi
+  kill -0 "$bridge_pid" 2>/dev/null || break
+  sleep 0.02
+done
+kill -0 "$bridge_pid" 2>/dev/null
+
+export http_proxy=http://127.0.0.1:18765
+export https_proxy=$http_proxy
+export HTTP_PROXY=$http_proxy
+export HTTPS_PROXY=$http_proxy
+export no_proxy=
+export NO_PROXY=
+"$@"
