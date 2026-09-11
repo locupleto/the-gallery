@@ -147,6 +147,8 @@ say "bridge_test.lua OK"
 
 say "running tests/tui_test.sh"; "${SCRIPT_DIR}/tui_test.sh" || fail "tui_test.sh failed"
 
+say "running tests/qml_test.sh"; "${SCRIPT_DIR}/qml_test.sh" || fail "qml_test.sh failed"
+
 say "running tests/import_test.sh"; "${SCRIPT_DIR}/import_test.sh" || fail "import_test.sh failed"
 
 say "all checks passed"

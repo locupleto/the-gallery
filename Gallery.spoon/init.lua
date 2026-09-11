@@ -157,15 +157,59 @@ end
 --- explicit `kind` (must be one the manifest declares) wins over the
 --- primary kind, so a multi-kind plugin can be opened as e.g. its panel
 --- from a menu action (`gallery open gallery.learn panel`).
+---
+--- Also recognises "qml" as an explicit kind value in its own right, and
+--- -- regardless of how a "panel" or "overlay" kind was arrived at
+--- (explicit, manifest.gallery.primaryKind, or the tui>panel>overlay>menu
+--- ladder in primaryInteractiveKind) -- reports "qml" instead of it
+--- whenever that kind's entry point is a .qml file (Manifest.
+--- isQmlEntryPoint): an unmodified Omarchy plugin runs under the
+--- Quickshell-for-macOS host (bin/gallery-qml), not a native Gallery
+--- panel/overlay. This is the full priority order documented in
+--- bin/gallery's own PY_RESOLVE_KIND, which mirrors this function exactly
+--- for the CLI's own (non-Hammerspoon) routing of tui/menu/qml kinds:
+--- explicit kind > primaryKind > tui > qml > panel > overlay > menu.
 local function resolveKind(manifest, kind)
-  if kind ~= nil and kind ~= "" then
+  local resolved
+  if kind == "qml" then
+    resolved = "qml"
+  elseif kind ~= nil and kind ~= "" then
     if (kind == "tui" or kind == "panel" or kind == "overlay" or kind == "menu")
       and manifest and tableContains(manifest.kinds, kind) then
-      return kind
+      resolved = kind
+    else
+      return nil, "kind '" .. tostring(kind) .. "' not declared"
     end
-    return nil, "kind '" .. tostring(kind) .. "' not declared"
+  else
+    resolved = primaryInteractiveKind(manifest)
   end
-  return primaryInteractiveKind(manifest)
+
+  if (resolved == "panel" or resolved == "overlay") and Manifest.isQmlEntryPoint(manifest, resolved) then
+    return "qml"
+  end
+  return resolved
+end
+
+--- Display form of manifest.kinds for `gallery list`/listJson: identical
+--- to the raw array except that a "panel" or "overlay" entry backed by a
+--- .qml file (Manifest.isQmlEntryPoint) reads as "qml" instead, since
+--- that is what actually opens it (bin/gallery-qml, not a native Gallery
+--- panel/overlay) -- see resolveKind above for the same substitution
+--- applied to open/close/toggle routing.
+local function displayKinds(manifest)
+  local kinds = manifest and manifest.kinds
+  if type(kinds) ~= "table" then
+    return {}
+  end
+  local out = {}
+  for _, kind in ipairs(kinds) do
+    if (kind == "panel" or kind == "overlay") and Manifest.isQmlEntryPoint(manifest, kind) then
+      table.insert(out, "qml")
+    else
+      table.insert(out, kind)
+    end
+  end
+  return out
 end
 
 --- Preload the hs.* extensions Gallery depends on. Extensions are loaded
@@ -400,15 +444,20 @@ function obj:list()
     else
       state = "disabled"
     end
-    local kinds = table.concat(manifest.kinds or {}, ",")
+    local kinds = table.concat(displayKinds(manifest), ",")
     table.insert(lines, string.format("%s\t%s\t%s\t%s", tostring(entry.id), tostring(manifest.version or ""), kinds, state))
   end
   table.sort(lines)
   return table.concat(lines, "\n")
 end
 
---- JSON array of {id,name,version,kinds,enabled,errored,errors,warnings,dir}
---- for every scanned plugin.
+--- JSON array of
+--- {id,name,version,kinds,displayKinds,enabled,errored,errors,warnings,dir}
+--- for every scanned plugin. `kinds` is the raw manifest array (unchanged,
+--- for anything that wants the literal declared kinds); `displayKinds` is
+--- the same array with a qml-backed panel/overlay read as "qml" -- see
+--- displayKinds() above -- which is what `gallery list`'s plain-text
+--- output also shows.
 function obj:listJson()
   local out = {}
   for _, entry in ipairs(self.pluginList) do
@@ -419,6 +468,7 @@ function obj:listJson()
       name = manifest.name,
       version = manifest.version,
       kinds = manifest.kinds or {},
+      displayKinds = displayKinds(manifest),
       enabled = (not errored) and self:isEnabled(entry.id) or false,
       errored = errored,
       errors = entry.errors or {},
@@ -445,6 +495,19 @@ end
 local function shellOutTui(verb, id)
   pcall(function()
     hs.task.new(os.getenv("HOME") .. "/bin/gallery", function() end, { verb, id, "tui" }):start()
+  end)
+end
+
+--- qml-kind plugins (unmodified Omarchy plugins run under bin/gallery-qml)
+--- are, like tui, handled entirely by the `gallery` CLI itself -- pure
+--- bash, a pidfile, and yabai, no Hammerspoon involved (see bin/gallery's
+--- route_open_close_toggle/route_qml). Same fire-and-forget shell-out as
+--- shellOutTui, for the same reason: this is only ever reached when
+--- something calls the Spoon's IPC directly for a qml-resolved plugin
+--- instead of going through `gallery open <id>`.
+local function shellOutQml(verb, id)
+  pcall(function()
+    hs.task.new(os.getenv("HOME") .. "/bin/gallery", function() end, { verb, id, "qml" }):start()
   end)
 end
 
@@ -477,6 +540,9 @@ function obj:open(id, kind)
   if kind == "tui" then
     shellOutTui("open", id)
     return "opened tui: " .. id
+  elseif kind == "qml" then
+    shellOutQml("open", id)
+    return "opened qml: " .. id
   elseif kind == "panel" then
     return Panel.open(self, id)
   elseif kind == "overlay" then
@@ -512,6 +578,9 @@ function obj:close(id, kind)
   if kind == "tui" then
     shellOutTui("close", id)
     return "closed tui: " .. id
+  elseif kind == "qml" then
+    shellOutQml("close", id)
+    return "closed qml: " .. id
   elseif kind == "panel" then
     return Panel.close(self, id)
   elseif kind == "overlay" then
@@ -550,6 +619,11 @@ function obj:toggle(id, kind)
     -- toggle already does the open-if-not-open-else-close dance itself.
     shellOutTui("toggle", id)
     return "toggled tui: " .. id
+  elseif kind == "qml" then
+    -- Same story as tui: open/closed state lives in a pidfile tracked by
+    -- bin/gallery's own route_qml, not anything Hammerspoon can see.
+    shellOutQml("toggle", id)
+    return "toggled qml: " .. id
   end
 
   local isOpen

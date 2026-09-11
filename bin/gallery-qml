@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+#
+# gallery-qml -- launcher for the PySide6 Quickshell-shim host that loads
+# unmodified Omarchy QML plugins (see qml/host.py, qml/shim/, qml/vendor/).
+#
+# Usage:
+#   gallery-qml <plugin-dir> [entry.qml] --title "<Name>" [--width W --height H]
+#
+# Creates (once) and reuses a dedicated venv at ~/.config/gallery/qml-venv
+# via uv, using a uv-managed Python (never Homebrew's) per this repo's
+# standing rule for Gallery venvs.
+#
+set -euo pipefail
+
+export PATH="/opt/homebrew/bin:${PATH}:/usr/local/bin"
+
+CONFIG_DIR="${HOME}/.config/gallery"
+VENV_DIR="${CONFIG_DIR}/qml-venv"
+VENV_PY="${VENV_DIR}/bin/python"
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+# Resolve symlinks so an installed copy under ~/bin still finds its own
+# qml/ next to the *real* script location first.
+while [ -L "${SCRIPT_PATH}" ]; do
+  LINK_TARGET="$(readlink "${SCRIPT_PATH}")"
+  case "${LINK_TARGET}" in
+    /*) SCRIPT_PATH="${LINK_TARGET}" ;;
+    *) SCRIPT_PATH="$(dirname "${SCRIPT_PATH}")/${LINK_TARGET}" ;;
+  esac
+done
+SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
+
+if [ -d "${SCRIPT_DIR}/../qml" ]; then
+  QML_DIR="$(cd "${SCRIPT_DIR}/../qml" && pwd)"
+elif [ -d "${CONFIG_DIR}/qml" ]; then
+  QML_DIR="${CONFIG_DIR}/qml"
+else
+  echo "gallery-qml: could not find qml/ next to ${SCRIPT_DIR} or at ${CONFIG_DIR}/qml" >&2
+  exit 1
+fi
+
+ensure_venv() {
+  if [ -x "${VENV_PY}" ]; then
+    return
+  fi
+  command -v uv >/dev/null 2>&1 || {
+    echo "gallery-qml: uv not found on PATH (expected /opt/homebrew/bin/uv)" >&2
+    exit 1
+  }
+  echo "gallery-qml: creating venv at ${VENV_DIR} (uv-managed Python 3.12)..." >&2
+  uv python install 3.12 >&2
+  uv venv --python 3.12 --managed-python "${VENV_DIR}" >&2
+  echo "gallery-qml: installing PySide6..." >&2
+  uv pip install --python "${VENV_PY}" pyside6 >&2
+}
+
+ensure_venv
+
+exec "${VENV_PY}" "${QML_DIR}/host.py" "$@"

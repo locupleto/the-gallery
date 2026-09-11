@@ -248,14 +248,35 @@ do
 end
 
 do
+  -- A .qml entry point is fully supported (runs under bin/gallery-qml,
+  -- the Quickshell-for-macOS host) -- no error, and specifically no
+  -- longer any "no macOS renderer" warning (that warning predates
+  -- gallery-qml's existence).
   local dir = TMP_ROOT .. "/qml"
   mkdirp(dir)
   writeFile(dir .. "/Panel.qml", "")
-  local _, warnings = Manifest.validate({
+  local errors, warnings = Manifest.validate({
     schemaVersion = 1, id = "a", name = "A", version = "0.1",
     kinds = { "panel" }, entryPoints = { panel = "Panel.qml" },
   }, dir)
-  check("warning: .qml entry point has no macOS renderer", listContains(warnings, "no macOS renderer"), joined(warnings))
+  check("qml entry point: no errors", #errors == 0, joined(errors))
+  check("qml entry point: no warnings", #warnings == 0, joined(warnings))
+end
+
+do
+  -- The camelCase "barWidget" entryPoints key (real Omarchy convention,
+  -- see the Radio Atlas fixture below) is accepted for the hyphenated
+  -- "bar-widget" kind in both consistency-check directions.
+  local dir = TMP_ROOT .. "/bar-widget-camel"
+  mkdirp(dir)
+  writeFile(dir .. "/BarWidget.qml", "")
+  local errors, warnings = Manifest.validate({
+    schemaVersion = 1, id = "a", name = "A", version = "0.1",
+    kinds = { "bar-widget" }, entryPoints = { barWidget = "BarWidget.qml" },
+  }, dir)
+  check("bar-widget/barWidget alias: no errors", #errors == 0, joined(errors))
+  check("bar-widget/barWidget alias: no 'has no entry point' warning", not listContains(warnings, "has no entry point"), joined(warnings))
+  check("bar-widget/barWidget alias: no 'not listed in kinds' warning", not listContains(warnings, "not listed in kinds"), joined(warnings))
 end
 
 do
@@ -283,7 +304,9 @@ do
 end
 
 --------------------------------------------------------------------------
--- 4. The Omarchy Basecamp fixture validates with warnings only.
+-- 4. The Omarchy Basecamp fixture validates cleanly (no errors, no
+--    warnings -- a .qml entry point behind a known kind is no longer
+--    flagged; see the qml-entry-point tests above).
 --------------------------------------------------------------------------
 do
   local fixtureDir = TESTS_DIR .. "fixtures/omarchy-basecamp"
@@ -292,8 +315,26 @@ do
   if readOk and manifest then
     local errors, warnings = Manifest.validate(manifest, fixtureDir)
     check("omarchy fixture: no errors", #errors == 0, joined(errors))
-    check("omarchy fixture: has warnings", #warnings > 0)
-    check("omarchy fixture: warns about .qml renderer", listContains(warnings, "no macOS renderer"), joined(warnings))
+    check("omarchy fixture: no warnings", #warnings == 0, joined(warnings))
+  end
+end
+
+--------------------------------------------------------------------------
+-- 4b. The Omarchy Radio Atlas fixture (real upstream manifest shape,
+--     camelCase "barWidget" entry point key included, plus keepLoaded/
+--     author/license/description/homepage/repository/keywords/barWidget
+--     top-level fields a plugin.json validator has no business warning
+--     about) validates with zero errors and no entry-point warnings.
+--------------------------------------------------------------------------
+do
+  local fixtureDir = TESTS_DIR .. "fixtures/omarchy-radio-atlas"
+  local readOk, manifest = pcall(hs.json.read, fixtureDir .. "/manifest.json")
+  check("radio-atlas fixture: manifest reads", readOk and manifest ~= nil)
+  if readOk and manifest then
+    local errors, warnings = Manifest.validate(manifest, fixtureDir)
+    check("radio-atlas fixture: no errors", #errors == 0, joined(errors))
+    check("radio-atlas fixture: no warnings", #warnings == 0, joined(warnings))
+    check("radio-atlas fixture: effective kind is qml (panel entry point)", Manifest.isQmlEntryPoint(manifest, "panel"))
   end
 end
 

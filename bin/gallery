@@ -43,6 +43,10 @@ REMOVED_DIR="${CONFIG_DIR}/removed"
 GALLERY_JSON="${CONFIG_DIR}/gallery.json"
 THEME_DIR="${CONFIG_DIR}/themes"
 THEME_HOOKS_DIR="${CONFIG_DIR}/hooks/theme-set.d"
+# Installed by install.sh from this repo's patches/ directory -- see that
+# directory's own README.md for the mechanism (macOS replacements for a
+# plugin's own files, applied on top of the installed plugin dir).
+PATCHES_DIR="${CONFIG_DIR}/patches"
 # render-theme.py is installed onto the boot volume by install.sh (see the
 # rationale comment there re: TCC and the external volume this repo lives
 # on); fall back to the repo-relative copy for an uninstalled dev checkout.
@@ -85,6 +89,7 @@ commands:
   update [id]                     pull latest commits for git-managed plugin(s)
   remove <id> [--yes]             disable and remove a plugin
   clone <id> <new-id>             duplicate an installed plugin under a new id
+  patch <id>                      reapply ~/.config/gallery/patches/<id> over the installed plugin
   validate <dir>                  validate a plugin manifest directory
   theme list                      list installed themes (marks current, light)
   theme current                   print the active theme name
@@ -166,22 +171,31 @@ run_ipc() {
   fi
 }
 
-# --- tui/menu: handled locally (no Hammerspoon), everything else over IPC --
+# --- tui/menu/qml: handled locally (no Hammerspoon), everything else over --
+# --- IPC ---------------------------------------------------------------
 #
 # open/close/toggle need to know a plugin's *effective* kind before they can
-# decide whether to route to gallery-tui/gallery-menu (tui, menu) or over
-# IPC (panel, overlay), same priority order as Gallery.spoon/init.lua's
-# resolveKind/primaryInteractiveKind: an explicit kind argument wins
-# outright; otherwise manifest.gallery.primaryKind if it names a declared
-# kind, else the first of tui > panel > overlay > menu that the manifest
-# declares.
+# decide whether to route to gallery-tui/gallery-menu/gallery-qml (tui,
+# menu, qml) or over IPC (panel, overlay), same priority order as
+# Gallery.spoon/init.lua's resolveKind/primaryInteractiveKind: an explicit
+# kind argument wins outright; otherwise manifest.gallery.primaryKind if it
+# names a declared kind, else the first of tui > panel > overlay > menu
+# that the manifest declares -- EXCEPT that once "panel" or "overlay" is
+# chosen by any of those paths, it is reported as "qml" instead whenever
+# that kind's entryPoints value ends in ".qml": an unmodified Omarchy
+# plugin (unlike our own kinds, which never ship a .qml entry point) runs
+# under the Quickshell-for-macOS host (bin/gallery-qml), not a native
+# Gallery panel/overlay. That is the "qml" step in the doc'd priority
+# order (explicit kind > primaryKind > tui > qml > panel > overlay >
+# menu): it only ever fires in place of a panel/overlay that would
+# otherwise have been chosen.
 #
 # PY_RESOLVE_KIND prints NUL-separated fields so the bash reader below
 # never has to fight IFS word-splitting or bash's (3.2-era) empty-array
-# handling: effective-kind, name, tui.grid, tui.command, then zero or more
-# tui.args. A missing/unreadable manifest or missing python3 yields an
-# empty effective-kind, which tells the caller to fall back to the
-# original IPC passthrough untouched.
+# handling: effective-kind, name, tui.grid, tui.command, qml-entry-point,
+# then zero or more tui.args. A missing/unreadable manifest or missing
+# python3 yields an empty effective-kind, which tells the caller to fall
+# back to the original IPC passthrough untouched.
 read -r -d '' PY_RESOLVE_KIND <<'PYEOF' || true
 import json, sys
 
@@ -200,7 +214,7 @@ try:
     with open(manifest_path, encoding="utf-8") as fh:
         data = json.load(fh)
 except Exception:
-    emit(["", "", "", ""])
+    emit(["", "", "", "", ""])
     sys.exit(0)
 
 kinds = data.get("kinds")
@@ -209,6 +223,9 @@ if not isinstance(kinds, list):
 gallery = data.get("gallery")
 if not isinstance(gallery, dict):
     gallery = {}
+entryPoints = data.get("entryPoints")
+if not isinstance(entryPoints, dict):
+    entryPoints = {}
 name = data.get("name")
 if not isinstance(name, str) or not name:
     name = data.get("id") if isinstance(data.get("id"), str) else ""
@@ -216,6 +233,16 @@ if not isinstance(name, str) or not name:
 
 def has(k):
     return k in kinds
+
+
+def qml_entry_for(k):
+    # Omarchy manifests only ever put a .qml file behind "panel" or
+    # "overlay"; a non-string/non-.qml entry point (or none at all) means
+    # this kind is not qml-backed.
+    ep = entryPoints.get(k)
+    if isinstance(ep, str) and ep.endswith(".qml"):
+        return ep
+    return ""
 
 
 if kind_arg:
@@ -235,6 +262,20 @@ else:
     else:
         eff = ""
 
+# Whatever chose "panel"/"overlay" above (explicit, primaryKind, or the
+# ladder), a .qml entry point behind it means "qml" instead.
+qml_entry = ""
+if eff in ("panel", "overlay"):
+    qml_entry = qml_entry_for(eff)
+    if qml_entry:
+        eff = "qml"
+elif eff == "qml":
+    # Caller passed kind_arg="qml" explicitly (e.g. the Spoon shelling back
+    # out to `gallery <verb> <id> qml` -- see shellOutQml in init.lua):
+    # find the entry point ourselves rather than trusting the caller to
+    # have known which of panel/overlay carries it.
+    qml_entry = qml_entry_for("panel") or qml_entry_for("overlay")
+
 grid = ""
 command = ""
 args = []
@@ -249,7 +290,7 @@ if eff == "tui":
     if isinstance(tui.get("args"), list):
         args = [str(a) for a in tui.get("args")]
 
-emit([eff, name, grid, command] + args)
+emit([eff, name, grid, command, qml_entry] + args)
 PYEOF
 
 # resolve_helper_bin <name> -- find gallery-tui / gallery-menu next to this
@@ -262,6 +303,34 @@ resolve_helper_bin() {
     printf '%s' "${candidate}"
   else
     printf '%s' "${HOME}/bin/${name}"
+  fi
+}
+
+# apply_patches <id> -- copies every file under
+# ~/.config/gallery/patches/<id>/ over the installed plugin dir
+# ~/.config/gallery/plugins/<id>/, preserving exec bits, and prints "applied
+# N patch file(s) for <id>" (N=0 is not printed -- most plugins have no
+# patch directory at all). Used by both `gallery add` (after cloning) and
+# `gallery update` (after pulling), and directly by `gallery patch <id>`.
+# Never raises: a missing patches dir or destination is simply a no-op.
+apply_patches() {
+  local id="$1"
+  local src="${PATCHES_DIR}/${id}"
+  local dest="${PLUGIN_DIR}/${id}"
+
+  [ -d "${src}" ] || return 0
+  [ -d "${dest}" ] || return 0
+
+  local count=0 rel
+  while IFS= read -r -d '' file; do
+    rel="${file#"${src}"/}"
+    mkdir -p "$(dirname "${dest}/${rel}")"
+    cp -p "${file}" "${dest}/${rel}"
+    count=$((count + 1))
+  done < <(find "${src}" -type f -print0)
+
+  if [ "${count}" -gt 0 ]; then
+    echo "applied ${count} patch file(s) for ${id}"
   fi
 }
 
@@ -329,12 +398,12 @@ run_gallery_tui() {
 }
 
 # route_open_close_toggle <verb> <id> <kind-arg>
-# Resolves the plugin's effective kind and, for tui/menu, handles the
-# whole open/close/toggle locally via gallery-tui (no Hammerspoon
-# involved). Returns 2 to tell the caller to fall back to the original
-# run_ipc passthrough unchanged -- used both for panel/overlay and for
-# every case this function cannot resolve on its own (no manifest, no
-# python3, GALLERY_PLUGIN_DIR pointing nowhere useful, etc).
+# Resolves the plugin's effective kind and, for tui/menu/qml, handles the
+# whole open/close/toggle locally (no Hammerspoon involved). Returns 2 to
+# tell the caller to fall back to the original run_ipc passthrough
+# unchanged -- used both for panel/overlay and for every case this
+# function cannot resolve on its own (no manifest, no python3,
+# GALLERY_PLUGIN_DIR pointing nowhere useful, etc).
 route_open_close_toggle() {
   local verb="$1" id="$2" kind_arg="$3"
   local plugin_dir="${GALLERY_PLUGIN_DIR:-${PLUGIN_DIR}}"
@@ -343,7 +412,7 @@ route_open_close_toggle() {
   command -v python3 >/dev/null 2>&1 || return 2
   [ -f "${manifest}" ] || return 2
 
-  local eff="" name="" grid="" tui_command="" n=0
+  local eff="" name="" grid="" tui_command="" qml_entry="" n=0
   set --
   while IFS= read -r -d '' field; do
     n=$((n + 1))
@@ -352,13 +421,14 @@ route_open_close_toggle() {
       2) name="${field}" ;;
       3) grid="${field}" ;;
       4) tui_command="${field}" ;;
+      5) qml_entry="${field}" ;;
       *) set -- "$@" "${field}" ;;
     esac
   done < <(python3 -c "${PY_RESOLVE_KIND}" "${manifest}" "${kind_arg}" 2>/dev/null)
   # "$@" now holds manifest.gallery.tui.args (zero or more).
 
   case "${eff}" in
-    tui|menu) ;;
+    tui|menu|qml) ;;
     *) return 2 ;;
   esac
 
@@ -367,6 +437,11 @@ route_open_close_toggle() {
   if is_disabled "${id}"; then
     echo "not enabled: ${id}"
     return 0
+  fi
+
+  if [ "${eff}" = "qml" ]; then
+    route_qml "${verb}" "${id}" "${plugin_dir}/${id}" "${name}" "${qml_entry}"
+    return $?
   fi
 
   local gallery_tui
@@ -390,6 +465,160 @@ route_open_close_toggle() {
     gallery_menu="$(resolve_helper_bin gallery-menu)"
     run_gallery_tui "${verb}" "${gallery_tui}" "${name}" "${id}" -- "${gallery_menu}" "${id}"
   fi
+}
+
+# --- qml: unmodified Omarchy plugins run under bin/gallery-qml, no --------
+# --- Hammerspoon involved (pure bash + a pidfile + yabai, same spirit as --
+# --- the tui kind above) --------------------------------------------------
+#
+# QML_STATE_DIR mirrors gallery-qml's own pidfile location
+# (~/.config/gallery/state/qml/<title-slug>.pid); the slug is computed the
+# same way here as gallery-qml computes it from its own --title argument
+# (the manifest's `name`, not the "Gallery: " prefixed window title) --
+# lowercased, every non-alphanumeric character replaced with "-", one for
+# one (no collapsing of runs, no trimming) -- so the two never disagree
+# about where the pidfile lives.
+QML_STATE_DIR="${CONFIG_DIR}/state/qml"
+
+qml_slug() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]/-/g'
+}
+
+qml_pidfile() {
+  printf '%s/%s.pid' "${QML_STATE_DIR}" "$(qml_slug "$1")"
+}
+
+qml_pid_alive() {
+  local pid="$1"
+  [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+
+# ensure_gallery_qml_yabai_rule -- idempotent float/centre rule for every
+# Gallery-titled Qt window (the qml-kind twin of gallery-tui's own
+# ensure_yabai_rule, which this deliberately does not touch -- no app
+# filter here, since these are not iTerm2 windows). Removed and re-added
+# each call so it is always present and current. Silently skipped if
+# yabai is not installed.
+ensure_gallery_qml_yabai_rule() {
+  command -v yabai >/dev/null 2>&1 || return 0
+  yabai -m rule --remove gallery-qml >/dev/null 2>&1 || true
+  yabai -m rule --add label=gallery-qml title="^Gallery: " manage=off grid=6:6:1:1:4:4 >/dev/null 2>&1 || true
+}
+
+# qml_focus_window <title> -- find a window with this exact title via
+# yabai and focus it. Returns 1 (no-op) if yabai is missing or no such
+# window is found.
+qml_focus_window() {
+  local title="$1"
+  command -v yabai >/dev/null 2>&1 || return 1
+  local id
+  id="$(yabai -m query --windows 2>/dev/null | python3 -c '
+import json, sys
+title = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for w in data:
+    if isinstance(w, dict) and w.get("title") == title:
+        print(w.get("id"))
+        sys.exit(0)
+sys.exit(1)
+' "${title}" 2>/dev/null)" || return 1
+  [ -n "${id}" ] || return 1
+  yabai -m window "${id}" --focus >/dev/null 2>&1 || true
+  return 0
+}
+
+# qml_kill <pid> -- TERM, then KILL after ~2s if it is still alive.
+qml_kill() {
+  local pid="$1"
+  kill -TERM "${pid}" 2>/dev/null || return 0
+  local i=0
+  while [ "${i}" -lt 20 ]; do
+    qml_pid_alive "${pid}" || return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -KILL "${pid}" 2>/dev/null || true
+}
+
+# qml_launch <this-plugin-dir> <name> <entry> -- resolves gallery-qml next
+# to this script first (dev checkout), falling back to ~/bin (see
+# resolve_helper_bin), ensures the yabai float rule, and launches it
+# detached: the pidfile it writes on start is what future open/close/
+# toggle calls key off, and it exits on its own once the window closes.
+qml_launch() {
+  local this_plugin_dir="$1" name="$2" entry="$3"
+  local gallery_qml
+  gallery_qml="$(resolve_helper_bin gallery-qml)"
+  if [ ! -x "${gallery_qml}" ]; then
+    echo "gallery: gallery-qml not found (looked for ${gallery_qml})" >&2
+    return 1
+  fi
+  ensure_gallery_qml_yabai_rule
+  mkdir -p "${QML_STATE_DIR}"
+  local log="${HOME}/Library/Logs/gallery-qml.log"
+  if [ -n "${entry}" ]; then
+    nohup "${gallery_qml}" "${this_plugin_dir}" "${entry}" --title "${name}" >/dev/null 2>>"${log}" &
+  else
+    nohup "${gallery_qml}" "${this_plugin_dir}" --title "${name}" >/dev/null 2>>"${log}" &
+  fi
+  disown
+}
+
+# route_qml <verb> <id> <this-plugin-dir> <name> <entry> -- the whole
+# open/close/toggle dance for a qml-kind plugin, mirroring the result
+# lines the tui path prints ("opened <id>", "closed <id>", "not open:
+# <id>") so bin/gallery's own callers (and skhd) cannot tell the
+# difference.
+route_qml() {
+  local verb="$1" id="$2" this_plugin_dir="$3" name="$4" entry="$5"
+
+  local pidfile pid="" running=0
+  pidfile="$(qml_pidfile "${name}")"
+  if [ -f "${pidfile}" ]; then
+    pid="$(cat "${pidfile}" 2>/dev/null || true)"
+  fi
+  if qml_pid_alive "${pid}"; then
+    running=1
+  elif [ -n "${pid}" ]; then
+    rm -f "${pidfile}" 2>/dev/null || true
+  fi
+
+  case "${verb}" in
+    open)
+      if [ "${running}" -eq 1 ]; then
+        qml_focus_window "Gallery: ${name}"
+      else
+        qml_launch "${this_plugin_dir}" "${name}" "${entry}" || return 1
+      fi
+      echo "opened ${id}"
+      ;;
+    close)
+      if [ "${running}" -eq 1 ]; then
+        qml_kill "${pid}"
+        rm -f "${pidfile}" 2>/dev/null || true
+        echo "closed ${id}"
+      else
+        echo "not open: ${id}"
+      fi
+      ;;
+    toggle)
+      if [ "${running}" -eq 1 ]; then
+        qml_kill "${pid}"
+        rm -f "${pidfile}" 2>/dev/null || true
+        echo "closed ${id}"
+      else
+        qml_launch "${this_plugin_dir}" "${name}" "${entry}" || return 1
+        echo "opened ${id}"
+      fi
+      ;;
+    *)
+      echo "gallery: route_qml: unknown verb: ${verb}" >&2
+      return 1
+      ;;
+  esac
 }
 
 cmd_status() {
@@ -648,6 +877,8 @@ sys.stdout.write(pid)
 
   echo "installed ${id} -> ${dest}"
 
+  apply_patches "${id}"
+
   local rout
   if rout="$(ipc_call rescan)"; then
     case "${rout}" in
@@ -726,6 +957,7 @@ cmd_update() {
       continue
     fi
     echo "updated ${id}"
+    apply_patches "${id}"
   done
 
   if [ -n "${target}" ] && [ "${any}" -eq 0 ]; then
@@ -840,6 +1072,23 @@ cmd_remove() {
   else
     echo "gallery: failed to reach Hammerspoon for rescan" >&2
   fi
+}
+
+cmd_patch() {
+  local id="${1:?usage: gallery patch <id>}"
+  if ! valid_id "${id}"; then
+    echo "gallery: invalid id: ${id}" >&2
+    exit 1
+  fi
+  if [ ! -d "${PLUGIN_DIR}/${id}" ]; then
+    echo "gallery: no such plugin: ${id}" >&2
+    exit 1
+  fi
+  if [ ! -d "${PATCHES_DIR}/${id}" ]; then
+    echo "gallery: no patches for ${id} (looked in ${PATCHES_DIR}/${id})" >&2
+    exit 1
+  fi
+  apply_patches "${id}"
 }
 
 cmd_clone() {
@@ -1340,6 +1589,35 @@ else:
     echo "WARN    iTerm2 dynamic profile gallery-theme.json exists (run: gallery theme render)"
   fi
 
+  # qml kind: the shim host and its venv are set up on first run of any qml
+  # plugin (or `gallery-qml --setup`), not by install.sh -- see install.sh's
+  # own comment on why. Their absence is a WARN, not a failure: a Mac that
+  # never runs a qml plugin does not need any of this.
+  local qml_host="${CONFIG_DIR}/qml/host.py"
+  if [ -f "${qml_host}" ]; then
+    echo "OK      ${qml_host} exists"
+  else
+    echo "WARN    ${qml_host} exists (run install.sh, then any qml plugin once)"
+  fi
+
+  local qml_venv_py="${CONFIG_DIR}/qml-venv/bin/python3"
+  if [ -x "${qml_venv_py}" ]; then
+    if "${qml_venv_py}" -c 'import PySide6' >/dev/null 2>&1; then
+      echo "OK      qml-venv can import PySide6"
+    else
+      echo "WARN    qml-venv can import PySide6 (venv exists but PySide6 is missing)"
+    fi
+  else
+    echo "WARN    qml-venv python exists (first run creates it: gallery toggle <a qml plugin>, or gallery-qml --setup)"
+  fi
+
+  local omarchy_theme_link="${HOME}/.config/omarchy/current/theme"
+  if [ -e "${omarchy_theme_link}" ]; then
+    echo "OK      ${omarchy_theme_link} resolves"
+  else
+    echo "WARN    ${omarchy_theme_link} resolves (run install.sh)"
+  fi
+
   if [ "${ok}" -eq 1 ]; then
     exit 0
   else
@@ -1399,6 +1677,9 @@ case "${command}" in
     ;;
   clone)
     cmd_clone "${1:-}" "${2:-}"
+    ;;
+  patch)
+    cmd_patch "${1:-}"
     ;;
   validate)
     cmd_validate "${1:-}"

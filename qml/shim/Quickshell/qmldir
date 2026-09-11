@@ -1,0 +1,8 @@
+module Quickshell
+ShellRoot 1.0 ShellRoot.qml
+Scope 1.0 Scope.qml
+FloatingWindow 1.0 FloatingWindow.qml
+PanelWindow 1.0 PanelWindow.qml
+PopupWindow 1.0 PopupWindow.qml
+LazyLoader 1.0 LazyLoader.qml
+Variants 1.0 Variants.qml

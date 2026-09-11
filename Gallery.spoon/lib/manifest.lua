@@ -48,6 +48,34 @@ local function tableContains(t, value)
   return false
 end
 
+-- hasEntryForKind/entryKeyMatchesKinds -- the kinds<->entryPoints cross-
+-- consistency checks below match kind names to entryPoints keys directly
+-- (both "panel" and "panel") EXCEPT for "bar-widget", where an unmodified
+-- Omarchy manifest uses the camelCase key "barWidget" (see the Radio Atlas
+-- manifest this was modelled on) while our own bar-widget-kind plugins
+-- (if any ever declare an entry point at all) would use the hyphenated
+-- key matching the kind name -- both spellings are accepted so neither
+-- convention ever produces a spurious warning.
+local function hasEntryForKind(entryPoints, kind)
+  if entryPoints[kind] ~= nil then
+    return true
+  end
+  if kind == "bar-widget" and entryPoints["barWidget"] ~= nil then
+    return true
+  end
+  return false
+end
+
+local function entryKeyMatchesKinds(key, kinds)
+  if tableContains(kinds, key) then
+    return true
+  end
+  if key == "barWidget" and tableContains(kinds, "bar-widget") then
+    return true
+  end
+  return false
+end
+
 local function isStringArray(t)
   if type(t) ~= "table" then
     return false
@@ -137,9 +165,11 @@ function M.validate(manifest, dir)
           end
         end
 
-        if entryPoint:sub(-4) == ".qml" then
-          table.insert(warnings, "Omarchy QML entry point has no macOS renderer: " .. entryPoint)
-        end
+        -- A .qml entry point (an unmodified Omarchy plugin) is a normal,
+        -- fully supported case -- it runs under the Quickshell-for-macOS
+        -- host (bin/gallery-qml), not a native Gallery panel/overlay. No
+        -- warning here; see Gallery.spoon/init.lua's resolveKind, which is
+        -- where such a panel/overlay is routed to "qml" instead.
       end
     end
   end
@@ -155,22 +185,42 @@ function M.validate(manifest, dir)
   end
 
   -- kinds/entryPoints cross-consistency -- warnings only, both directions.
+  -- (See hasEntryForKind/entryKeyMatchesKinds above for the bar-widget/
+  -- barWidget alias this needs to allow.)
   if kindsOk then
     for _, kind in ipairs(kinds) do
-      if not (entryPointsOk and entryPoints[kind] ~= nil) then
+      if not (entryPointsOk and hasEntryForKind(entryPoints, kind)) then
         table.insert(warnings, "kind '" .. kind .. "' has no entry point")
       end
     end
   end
   if entryPointsOk then
-    for kind, _ in pairs(entryPoints) do
-      if not (kindsOk and tableContains(kinds, kind)) then
-        table.insert(warnings, "entry point declared for kind '" .. tostring(kind) .. "' not listed in kinds")
+    for key, _ in pairs(entryPoints) do
+      if not (kindsOk and entryKeyMatchesKinds(key, kinds)) then
+        table.insert(warnings, "entry point declared for kind '" .. tostring(key) .. "' not listed in kinds")
       end
     end
   end
 
   return errors, warnings
+end
+
+--- True if manifest.entryPoints[kind] is a non-empty path ending in
+--- ".qml" -- i.e. this kind is actually an unmodified Omarchy plugin
+--- rendered by the Quickshell-for-macOS host (bin/gallery-qml), not a
+--- native Gallery kind module. Meaningful only for kind == "panel" or
+--- "overlay" (the two kinds an Omarchy manifest ever puts a .qml file
+--- behind); called from Gallery.spoon/init.lua's resolveKind, which is
+--- the single place a resolved panel/overlay is turned into "qml", and
+--- mirrored exactly by bin/gallery's own PY_RESOLVE_KIND (the CLI's
+--- Python helper for its own non-Hammerspoon routing).
+function M.isQmlEntryPoint(manifest, kind)
+  local entryPoints = manifest and manifest.entryPoints
+  if type(entryPoints) ~= "table" then
+    return false
+  end
+  local entryPoint = entryPoints[kind]
+  return type(entryPoint) == "string" and entryPoint:sub(-4) == ".qml"
 end
 
 --- Scan pluginDir for subdirectories containing manifest.json. Returns a

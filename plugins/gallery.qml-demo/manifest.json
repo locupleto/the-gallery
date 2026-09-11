@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.qml-demo",
+  "name": "QML Demo",
+  "version": "0.0.1",
+  "description": "Acceptance test for the gallery-qml Quickshell shim: qs.Ui controls, a Process, and a FileView.",
+  "kinds": ["panel"],
+  "entryPoints": {
+    "panel": "Demo.qml"
+  },
+  "gallery": {
+    "qml": {
+      "name": "QML Demo"
+    },
+    "panel": {
+      "width": 520,
+      "height": 420
+    }
+  }
+}

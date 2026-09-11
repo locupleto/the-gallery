@@ -34,6 +34,14 @@ TUI_BIN_SRC="${SCRIPT_DIR}/bin/gallery-tui"
 TUI_BIN_DEST="${HOME_DIR}/bin/gallery-tui"
 MENU_BIN_SRC="${SCRIPT_DIR}/bin/gallery-menu"
 MENU_BIN_DEST="${HOME_DIR}/bin/gallery-menu"
+QML_BIN_SRC="${SCRIPT_DIR}/bin/gallery-qml"
+QML_BIN_DEST="${HOME_DIR}/bin/gallery-qml"
+QML_SRC="${SCRIPT_DIR}/qml"
+QML_DEST="${CONFIG_DIR}/qml"
+PATCHES_SRC="${SCRIPT_DIR}/patches"
+PATCHES_DEST="${CONFIG_DIR}/patches"
+OMARCHY_THEME_LINK="${HOME_DIR}/.config/omarchy/current/theme"
+OMARCHY_THEME_TARGET="${CONFIG_DIR}/themes/current"
 HS_INIT="${HOME_DIR}/.hammerspoon/init.lua"
 
 DRY_RUN=0
@@ -90,7 +98,7 @@ do_uninstall() {
   else
     echo "[gallery] no CLI installed at ${HS_BIN_DEST}"
   fi
-  run rm -f "${TUI_BIN_DEST}" "${MENU_BIN_DEST}"
+  run rm -f "${TUI_BIN_DEST}" "${MENU_BIN_DEST}" "${QML_BIN_DEST}"
 
   echo "[gallery] leaving ${CONFIG_DIR} in place"
   echo "[gallery] leaving ${HS_INIT} in place -- Gallery load block was not removed automatically."
@@ -143,6 +151,20 @@ if [ -d "${THEME_HOOKS_SRC}" ]; then
   done
 fi
 
+echo "[gallery] installing qml shim tree to ${QML_DEST}"
+run mkdir -p "${QML_DEST}"
+if [ -d "${QML_SRC}" ]; then
+  run rsync -a --delete "${QML_SRC}/" "${QML_DEST}/"
+else
+  echo "[gallery] no qml/ directory in this checkout yet -- skipping (a qml-kind plugin will not run until it is added)"
+fi
+
+echo "[gallery] installing patches to ${PATCHES_DEST}"
+run mkdir -p "${PATCHES_DEST}"
+if [ -d "${PATCHES_SRC}" ]; then
+  run rsync -a --delete "${PATCHES_SRC}/" "${PATCHES_DEST}/"
+fi
+
 if [ ! -e "${THEMES_DEST}/current" ]; then
   if [ -d "${THEMES_DEST}/${DEFAULT_THEME}" ]; then
     echo "[gallery] no current theme set, pointing 'current' at ${DEFAULT_THEME}"
@@ -165,6 +187,18 @@ echo "[gallery] installing terminal-window helpers to ${TUI_BIN_DEST}, ${MENU_BI
 run cp "${TUI_BIN_SRC}" "${TUI_BIN_DEST}"
 run cp "${MENU_BIN_SRC}" "${MENU_BIN_DEST}"
 run chmod +x "${TUI_BIN_DEST}" "${MENU_BIN_DEST}"
+
+if [ -f "${QML_BIN_SRC}" ]; then
+  echo "[gallery] installing qml host launcher to ${QML_BIN_DEST}"
+  run cp "${QML_BIN_SRC}" "${QML_BIN_DEST}"
+  run chmod +x "${QML_BIN_DEST}"
+  # The qml-venv (PySide6 etc.) is deliberately NOT created here -- it is
+  # built on first run (gallery-qml itself, or `gallery-qml --setup`) so
+  # install.sh stays fast and does not need network access every time.
+  echo "[gallery] qml-venv is not created by install.sh -- it is built on first run of any qml plugin (or: gallery-qml --setup)"
+else
+  echo "[gallery] no bin/gallery-qml in this checkout yet -- skipping (a qml-kind plugin will not run until it is added)"
+fi
 
 GALLERY_BLOCK='-- gallery:begin
 -- hs.ipc must be loaded or the hs command-line tool blocks forever.
@@ -229,6 +263,27 @@ if [ -d "${SKHD_DIR}" ]; then
   fi
 else
   echo "[gallery] no ~/.config/skhd; skipping key bindings (install the tiler first)"
+fi
+
+# --- Omarchy theme compatibility symlink --------------------------------------------
+# Some unmodified Omarchy QML plugins read their colours from
+# ~/.config/omarchy/current/theme (Omarchy's own theme-current convention)
+# rather than anything Gallery-specific. Point that at Gallery's own
+# `current` theme symlink so such a plugin sees the right colours without
+# any plugin-side patch. Only replaced when it is itself a symlink (or
+# absent) -- a real directory there is left alone (e.g. a genuine Omarchy
+# install sharing this Mac) and reported, never clobbered.
+echo "[gallery] linking Omarchy theme compatibility symlink ${OMARCHY_THEME_LINK} -> ${OMARCHY_THEME_TARGET}"
+run mkdir -p "$(dirname "${OMARCHY_THEME_LINK}")"
+if [ "${DRY_RUN}" -eq 1 ]; then
+  echo "[dry] would link ${OMARCHY_THEME_LINK} -> ${OMARCHY_THEME_TARGET} unless a real directory is already there"
+elif [ -L "${OMARCHY_THEME_LINK}" ] || [ ! -e "${OMARCHY_THEME_LINK}" ]; then
+  tmp_link="$(mktemp -u "$(dirname "${OMARCHY_THEME_LINK}")/.theme.XXXXXXXX")"
+  ln -s "${OMARCHY_THEME_TARGET}" "${tmp_link}"
+  mv -fh "${tmp_link}" "${OMARCHY_THEME_LINK}"
+  echo "[gallery] linked ${OMARCHY_THEME_LINK} -> ${OMARCHY_THEME_TARGET}"
+else
+  echo "[gallery] ${OMARCHY_THEME_LINK} is a real directory, not a symlink -- leaving it in place"
 fi
 
 # --- Hammerspoon reload -------------------------------------------------------------

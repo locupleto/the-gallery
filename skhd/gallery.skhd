@@ -12,3 +12,5 @@
 shift + lalt - 0 : "$HOME/bin/gallery" toggle gallery.sysmon
 ## Gallery: spaces and windows picker (fzf in a floating terminal)
 ctrl + lalt - 0 : "$HOME/bin/gallery" toggle gallery.spaces
+## Gallery: Radio Atlas (world radio globe)
+cmd + lalt - 0 : "$HOME/bin/gallery" toggle akshar.radio-atlas
