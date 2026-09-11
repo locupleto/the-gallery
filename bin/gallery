@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+#
+# gallery -- thin CLI over the Hammerspoon IPC command for The Gallery Spoon.
+#
+# Usage:
+#   gallery status
+#   gallery list
+#   gallery open <id>
+#   gallery close <id>
+#   gallery toggle <id>
+#   gallery reload
+#   gallery log
+#   gallery doctor
+#   gallery install
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="${HOME}/Library/Logs/gallery.log"
+
+usage() {
+  cat >&2 << 'EOF'
+usage: gallery status | open <id> | close <id> | toggle <id> | list | reload | log | doctor | install
+EOF
+}
+
+require_hs() {
+  if ! command -v hs >/dev/null 2>&1; then
+    echo 'hs CLI not installed; run in Hammerspoon console: hs.ipc.cliInstall("/opt/homebrew")' >&2
+    exit 1
+  fi
+}
+
+valid_id() {
+  case "$1" in
+    ''|*[!A-Za-z0-9._-]*)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+run_ipc() {
+  local verb="$1"
+  local id="${2:-}"
+  require_hs
+  if [ -n "${id}" ]; then
+    if ! valid_id "${id}"; then
+      echo "gallery: invalid id: ${id}" >&2
+      exit 1
+    fi
+    hs -c "return spoon.Gallery:ipc('${verb}', '${id}')"
+  else
+    hs -c "return spoon.Gallery:ipc('${verb}')"
+  fi
+}
+
+cmd_status() {
+  run_ipc status
+}
+
+cmd_list() {
+  run_ipc list
+}
+
+cmd_open() {
+  local id="${1:?usage: gallery open <id>}"
+  run_ipc open "${id}"
+}
+
+cmd_close() {
+  local id="${1:?usage: gallery close <id>}"
+  run_ipc close "${id}"
+}
+
+cmd_toggle() {
+  local id="${1:?usage: gallery toggle <id>}"
+  run_ipc toggle "${id}"
+}
+
+cmd_reload() {
+  require_hs
+  hs -c "hs.reload()"
+}
+
+cmd_log() {
+  touch "${LOG_FILE}"
+  tail -f "${LOG_FILE}"
+}
+
+cmd_doctor() {
+  local ok=1
+
+  if [ -d "/Applications/Hammerspoon.app" ]; then
+    echo "OK      Hammerspoon.app present"
+  else
+    echo "MISSING Hammerspoon.app present"
+    ok=0
+  fi
+
+  if pgrep -x "Hammerspoon" >/dev/null 2>&1; then
+    echo "OK      Hammerspoon running"
+  else
+    echo "MISSING Hammerspoon running"
+    ok=0
+  fi
+
+  if command -v hs >/dev/null 2>&1; then
+    echo "OK      hs CLI on PATH"
+  else
+    echo "MISSING hs CLI on PATH"
+    ok=0
+  fi
+
+  if [ -d "${HOME}/.hammerspoon/Spoons/Gallery.spoon" ]; then
+    echo "OK      Gallery.spoon installed"
+  else
+    echo "MISSING Gallery.spoon installed"
+    ok=0
+  fi
+
+  if [ -d "${HOME}/.config/gallery/plugins" ]; then
+    echo "OK      ~/.config/gallery/plugins exists"
+  else
+    echo "MISSING ~/.config/gallery/plugins exists"
+    ok=0
+  fi
+
+  if command -v hs >/dev/null 2>&1; then
+    if [ "$(hs -c "return hs.accessibilityState()" 2>/dev/null)" = "true" ]; then
+      echo "OK      Accessibility granted"
+    else
+      echo "MISSING Accessibility granted"
+      ok=0
+    fi
+  else
+    echo "MISSING Accessibility granted (cannot check without hs CLI)"
+    ok=0
+  fi
+
+  if [ "${ok}" -eq 1 ]; then
+    exit 0
+  else
+    exit 1
+  fi
+}
+
+cmd_install() {
+  local candidate="${SCRIPT_DIR}/../install.sh"
+  if [ -f "${candidate}" ]; then
+    exec "${candidate}"
+  else
+    echo "gallery: install.sh not found relative to this script." >&2
+    echo "gallery: run install.sh from your clone of the-gallery repo." >&2
+    exit 1
+  fi
+}
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+command="$1"
+shift
+
+case "${command}" in
+  status)
+    cmd_status
+    ;;
+  list)
+    cmd_list
+    ;;
+  open)
+    cmd_open "${1:-}"
+    ;;
+  close)
+    cmd_close "${1:-}"
+    ;;
+  toggle)
+    cmd_toggle "${1:-}"
+    ;;
+  reload)
+    cmd_reload
+    ;;
+  log)
+    cmd_log
+    ;;
+  doctor)
+    cmd_doctor
+    ;;
+  install)
+    cmd_install
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

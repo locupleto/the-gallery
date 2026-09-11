@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Gallery</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #1f1811;
+    color: #e8e6df;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25em;
+    box-sizing: border-box;
+    padding: 1.5em;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 1.4em;
+    font-weight: 600;
+    color: #d8a656;
+    letter-spacing: 0.02em;
+  }
+
+  input {
+    width: 80%;
+    max-width: 24em;
+    font-size: 1em;
+    padding: 0.5em 0.75em;
+    background: #2a2118;
+    color: #e8e6df;
+    border: 1px solid #d8a656;
+    border-radius: 4px;
+    outline: none;
+  }
+
+  input:focus {
+    border-color: #e8b968;
+    box-shadow: 0 0 0 2px rgba(216, 166, 86, 0.25);
+  }
+
+  #count {
+    font-size: 0.9em;
+    color: #b7b4ab;
+  }
+
+  #count strong {
+    color: #d8a656;
+  }
+</style>
+</head>
+<body>
+  <h1>The Gallery</h1>
+  <input type="text" id="input" autofocus>
+  <div id="count">Keypresses: <strong id="counter">0</strong></div>
+
+  <script>
+    (function () {
+      var input = document.getElementById("input");
+      var counter = document.getElementById("counter");
+      var presses = 0;
+
+      input.focus();
+
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          try {
+            window.close();
+          } catch (e) {
+            // ignore, fall through to message handler fallback
+          }
+          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.gallery) {
+            window.webkit.messageHandlers.gallery.postMessage({ action: "close" });
+          }
+          return;
+        }
+
+        presses += 1;
+        counter.textContent = String(presses);
+      });
+    })();
+  </script>
+</body>
+</html>

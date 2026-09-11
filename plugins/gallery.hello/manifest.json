@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.hello",
+  "name": "Hello",
+  "version": "0.0.1",
+  "kinds": ["panel"],
+  "entryPoints": {
+    "panel": "index.html"
+  },
+  "gallery": {
+    "panel": {
+      "width": 560,
+      "height": 320,
+      "transparent": false
+    }
+  }
+}
