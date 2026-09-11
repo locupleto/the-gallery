@@ -27,19 +27,31 @@ QML_DIR = Path(__file__).resolve().parent
 # before a QQmlApplicationEngine exists -- see qml/shim/__init__.py.
 sys.path.insert(0, str(QML_DIR))
 import shim  # noqa: E402,F401
+from shim import quickshell_io as _shim_io  # noqa: E402
 
 from PySide6.QtCore import (  # noqa: E402
     QMetaObject,
+    QObject,
     Q_ARG,
     Qt,
     QTimer,
     QUrl,
+    Slot,
     qInstallMessageHandler,
 )
 import signal as _signal  # noqa: E402
 from PySide6.QtGui import QFont, QFontDatabase, QColor, QCursor, QGuiApplication  # noqa: E402
-from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
+from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent  # noqa: E402
 from PySide6.QtQuick import QQuickWindow  # noqa: E402
+
+
+class _ProcessPollBridge(QObject):
+    """Bridges a QML Timer (which keeps firing under the macOS event loop,
+    unlike a Python QTimer) to the shim's process-exit reaper."""
+
+    @Slot()
+    def poll(self):
+        _shim_io.poll_processes()
 
 DEFAULT_WIDTH = 900
 DEFAULT_HEIGHT = 640
@@ -277,6 +289,28 @@ def main(argv=None):
         sys.exit(1)
 
     root = engine.rootObjects()[0]
+
+    # Drive the shim's process-exit reaper from a QML Timer: a Process the
+    # QML engine instantiated never gets its own QProcess/QTimer callbacks
+    # serviced on macOS while idle, but a QML Timer element does keep firing.
+    poll_bridge = _ProcessPollBridge()
+    engine.rootContext().setContextProperty("__galleryProcessPoll", poll_bridge)
+    poll_component = QQmlComponent(
+        engine,
+        QUrl.fromLocalFile(str(QML_DIR / "ProcessPoll.qml")),
+        QQmlComponent.CompilationMode.PreferSynchronous,
+    )
+    poll_timer_obj = poll_component.create(engine.rootContext())
+    if poll_timer_obj is None:
+        print(
+            "gallery-qml: process-poll timer failed: "
+            + poll_component.errorString().strip(),
+            file=sys.stderr,
+        )
+    else:
+        # Parent it into the loaded plugin's own object tree so it is driven
+        # by the same event source as the plugin's working QML timers.
+        poll_timer_obj.setParent(root)
 
     title_slug = slugify(args.title)
     pidfile = pidfile_path(title_slug)

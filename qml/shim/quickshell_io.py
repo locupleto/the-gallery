@@ -13,8 +13,10 @@ transport to mean anything on macOS.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
+import weakref
 
 from PySide6.QtCore import (
     Property,
@@ -33,6 +35,42 @@ from ._jsvalue import to_python, to_str_list
 
 QML_IMPORT_NAME = "Quickshell.Io"
 QML_IMPORT_MAJOR_VERSION = 1
+
+
+# macOS/PySide6 event-delivery gotcha: a QObject the QML engine instantiates
+# (like a plugin's `Process { }`) does not get its QProcess exit notifier --
+# or any child QTimer -- serviced while the app is idle, so finished() can
+# never fire and `running` would stay true forever after a command exits.
+# (A QML `Timer` element, handled entirely in C++, does keep firing.) The
+# host therefore injects a QML Timer that calls poll_processes() on the tick,
+# which reaps exits for every live Process as a backstop. See host.py.
+_live_processes = weakref.WeakSet()
+
+
+def poll_processes():
+    for proc in list(_live_processes):
+        try:
+            proc._poll_exit()
+        except RuntimeError:
+            # The underlying C++ object was already destroyed; drop it.
+            pass
+
+
+def _pid_alive(pid):
+    """True only if pid is a live, non-zombie process. A child the Qt reaper
+    has not yet collected shows as a zombie ('Z'); treat that as gone."""
+    if not pid:
+        return False
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "state=", "-p", str(pid)],
+            capture_output=True, text=True,
+        ).stdout.strip()
+    except Exception:
+        return True
+    if not out:
+        return False
+    return not out.startswith("Z")
 
 
 @QmlElement
@@ -134,12 +172,15 @@ class Process(QObject):
         self._stdout = None
         self._stderr = None
         self._running = False
+        self._finalized = True
 
         self._proc = QProcess(self)
         self._proc.readyReadStandardOutput.connect(self._on_ready_stdout)
         self._proc.readyReadStandardError.connect(self._on_ready_stderr)
         self._proc.started.connect(self.started)
         self._proc.finished.connect(self._on_finished)
+
+        _live_processes.add(self)
 
     # -- command --
     def _get_command(self):
@@ -191,6 +232,7 @@ class Process(QObject):
         self._proc.setWorkingDirectory(self._working_directory or os.getcwd())
 
         program, *args = self._command
+        self._finalized = False
         self._proc.start(program, args)
         self._set_running_state(True)
 
@@ -200,6 +242,7 @@ class Process(QObject):
             if not self._proc.waitForFinished(200):
                 self._proc.kill()
                 self._proc.waitForFinished(200)
+        self._finalized = True
         self._set_running_state(False)
 
     def _on_ready_stdout(self):
@@ -213,6 +256,28 @@ class Process(QObject):
             self._stderr._feed(chunk)
 
     def _on_finished(self, exit_code, exit_status):
+        self._finalize(exit_code, exit_status)
+
+    def _poll_exit(self):
+        """Called from the host's QML-driven timer. Detect a command that has
+        exited even though QProcess never delivered finished() here."""
+        if self._finalized:
+            return
+        # waitForFinished(0) makes Qt block-check the child directly rather
+        # than via the un-serviced notifier; it emits finished -> _finalize
+        # if the process has exited.
+        if self._proc.waitForFinished(0):
+            return
+        # Still not seen (a detached grandchild holds the output pipe open):
+        # ask the OS whether our direct child is gone or a zombie, and if so
+        # finalize off the current exit code.
+        if not _pid_alive(self._proc.processId()):
+            self._finalize(self._proc.exitCode(), self._proc.exitStatus())
+
+    def _finalize(self, exit_code, exit_status):
+        if self._finalized:
+            return
+        self._finalized = True
         self._on_ready_stdout()
         self._on_ready_stderr()
         if self._stdout is not None and hasattr(self._stdout, "_finish"):
