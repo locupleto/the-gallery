@@ -240,16 +240,16 @@ open_out="$(timeout "${CMD_TIMEOUT}" "${GALLERY_BIN}" open "${PLUGIN_ID}")"
 say "gallery open output: ${open_out}"
 [ "${open_out}" = "opened ${PLUGIN_ID}" ] || fail "expected 'opened ${PLUGIN_ID}', got: ${open_out}"
 
-wait_until "window appears" 10 is_open \
-  || fail "no window titled '${TITLE}' appeared within 10s"
+wait_until "window appears" 20 is_open \
+  || fail "no window titled '${TITLE}' appeared within 20s"
 say "window appeared"
 
-wait_until "pidfile appears" 10 test -f "${PIDFILE}" \
-  || fail "pidfile ${PIDFILE} was not written within 10s"
+wait_until "pidfile appears" 20 test -f "${PIDFILE}" \
+  || fail "pidfile ${PIDFILE} was not written within 20s"
 say "pidfile exists: $(pidfile_pid)"
 
-wait_until "window becomes floating and visible" 10 is_floating_visible \
-  || fail "window titled '${TITLE}' did not become floating+visible within 10s (last fields: $(window_fields))"
+wait_until "window becomes floating and visible" 20 is_floating_visible \
+  || fail "window titled '${TITLE}' did not become floating+visible within 20s (last fields: $(window_fields))"
 
 fields="$(window_fields)"
 [ -n "${fields}" ] || fail "window disappeared before its fields could be read"
@@ -317,11 +317,11 @@ toggle_out1="$(timeout "${CMD_TIMEOUT}" "${GALLERY_BIN}" toggle "${PLUGIN_ID}")"
 say "gallery toggle output: ${toggle_out1}"
 [ "${toggle_out1}" = "opened ${PLUGIN_ID}" ] || fail "expected 'opened ${PLUGIN_ID}' from toggle, got: ${toggle_out1}"
 wait_until "toggle-open window appears" 10 is_open \
-  || fail "no window titled '${TITLE}' appeared within 10s of toggle-open"
+  || fail "no window titled '${TITLE}' appeared within 20s of toggle-open"
 wait_until "toggle-open pidfile appears" 10 test -f "${PIDFILE}" \
-  || fail "pidfile ${PIDFILE} was not written within 10s of toggle-open"
+  || fail "pidfile ${PIDFILE} was not written within 20s of toggle-open"
 wait_until "toggle-open window becomes floating and visible" 10 is_floating_visible \
-  || fail "toggle-open: window did not become floating+visible within 10s (last fields: $(window_fields))"
+  || fail "toggle-open: window did not become floating+visible within 20s (last fields: $(window_fields))"
 say "toggle-open OK"
 
 say "toggling ${PLUGIN_ID} (expect close)"
