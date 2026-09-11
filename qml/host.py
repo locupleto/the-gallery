@@ -53,6 +53,25 @@ class _ProcessPollBridge(QObject):
     def poll(self):
         _shim_io.poll_processes()
 
+
+class _CloseShortcutFilter(QObject):
+    """App-wide Cmd+W handler. A QtQuick plugin has no menu bar, so the
+    standard macOS close shortcut never reaches it; with the Command
+    modifier the combo is delivered as a ShortcutOverride/KeyPress that the
+    focused QML item ignores, so catch it at the application level and quit."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self._app = app
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        if event.type() in (QEvent.ShortcutOverride, QEvent.KeyPress):
+            if event.key() == Qt.Key_W and (event.modifiers() & Qt.ControlModifier):
+                self._app.quit()
+                return True
+        return super().eventFilter(obj, event)
+
 DEFAULT_WIDTH = 900
 DEFAULT_HEIGHT = 640
 FALLBACK_BACKGROUND = "#101315"  # qs.Commons Color.qml's own default
@@ -231,7 +250,13 @@ def install_escape_to_close(window, app):
 
     def key_release(event):
         original_key_release(event)
-        if not event.isAccepted() and event.key() == Qt.Key_Escape:
+        # Cmd+W is the standard macOS "close window" shortcut; close on it
+        # unconditionally (Qt maps the Command key to ControlModifier on
+        # macOS). Escape only closes if the plugin did not consume it for
+        # its own use (Radio Atlas uses Escape to clear search / hide help).
+        if event.key() == Qt.Key_W and (event.modifiers() & Qt.ControlModifier):
+            app.quit()
+        elif not event.isAccepted() and event.key() == Qt.Key_Escape:
             app.quit()
 
     window.keyReleaseEvent = key_release
@@ -258,6 +283,9 @@ def main(argv=None):
         pass
 
     app = QGuiApplication(sys.argv[:1])
+
+    _close_filter = _CloseShortcutFilter(app)
+    app.installEventFilter(_close_filter)
 
     chosen_font = install_font_substitutions()
 
