@@ -1,13 +1,17 @@
---- lib/panel.lua -- webview open/close mechanics for panel-kind plugins,
---- including the usercontent JS bridge. Ported unchanged in behavior from
---- the original init.lua; only the enclosing `self` became an explicit
---- `ctx` parameter (the Spoon object) so this module carries no globals.
+--- lib/panel.lua -- webview open/close mechanics for panel-kind plugins.
+--- The JS bridge itself (usercontent controller, window.gallery, exec,
+--- data feeds) lives in lib/bridge.lua; this file only calls Bridge.new()
+--- to get a usercontent controller to hand to hs.webview.new(), attaches
+--- the resulting webview to it, and disposes it on close.
 ---
 --- ctx is expected to expose:
 ---   ctx.plugins             -- map: id -> {manifest, dir, errors, warnings}
 ---   ctx.windows              -- map: id -> hs.webview, mutated in place
 ---   ctx.previousFocusWindow  -- map: id -> hs.window, mutated in place
 ---   ctx.log(level, msg)      -- logging function
+---   ctx.close(ctx, id)       -- also used by lib/bridge.lua to service the
+---                               JS-side gallery.close() call
+---   ctx.version, ctx.theme  -- read by lib/bridge.lua (theme optional)
 ---
 --- Returns a table with .open(ctx, id), .close(ctx, id), .toggle(ctx, id).
 --- Callers (init.lua) are expected to have already checked that id is
@@ -16,6 +20,28 @@
 --- or errored out after being opened can still be closed cleanly.
 
 local M = {}
+
+--- This file's own directory, so lib/bridge.lua can be dofile'd as a
+--- sibling regardless of how panel.lua itself was loaded. Mirrors
+--- init.lua's own resourcePath fallback and tests/manifest_test.lua's
+--- selfDir(): dofile sets the chunk name to "@<path>", so
+--- debug.getinfo(1,"S").source is a reliable absolute path here.
+local function selfDir()
+  local source = debug.getinfo(1, "S").source
+  if source:sub(1, 1) == "@" then
+    return source:sub(2):match("(.*/)") or "./"
+  end
+  return "./"
+end
+
+local Bridge = dofile(selfDir() .. "bridge.lua")
+
+-- Keyed by plugin id: the lib/bridge.lua instance backing that plugin's
+-- currently-open panel, if any. Module-level (not on ctx) because it is
+-- purely this file's own bookkeeping -- ctx's contract (see above) is
+-- unchanged by the bridge's existence. Persists for the life of the
+-- Hammerspoon session, same as ctx.windows.
+local bridges = {}
 
 local function tableContains(t, value)
   if type(t) ~= "table" then
@@ -73,6 +99,15 @@ function M.open(ctx, id)
     return "already open: " .. id
   end
 
+  -- Defensive: a bridge instance can only linger here if a previous panel
+  -- for this id closed by some path other than M.close (below) without
+  -- ctx.windows[id] surviving to say so -- dispose it before replacing it
+  -- so its timers can't leak.
+  if bridges[id] then
+    pcall(function() bridges[id].dispose() end)
+    bridges[id] = nil
+  end
+
   local manifest = entry.manifest
   if not tableContains(manifest.kinds, "panel") then
     return "plugin does not support panel: " .. id
@@ -119,52 +154,17 @@ function M.open(ctx, id)
 
   local path = entry.dir .. "/" .. entryPoint
 
-  -- JavaScript-to-Lua bridge: a usercontent controller named "gallery" is
-  -- wired into the webview so page JS can call window.gallery.close() and
-  -- window.gallery.log(msg). Built defensively -- if the controller cannot
-  -- be created (or its callback/script cannot be attached) the webview is
-  -- still created without it rather than failing the whole open.
-  local ucc = nil
-  do
-    local uccOk, controller = pcall(function() return hs.webview.usercontent.new("gallery") end)
-    if uccOk and controller then
-      ucc = controller
-
-      local callbackOk, callbackErr = pcall(function()
-        ucc:setCallback(function(message)
-          local body = message and message.body
-          if type(body) ~= "table" then
-            return
-          end
-          if body.action == "close" then
-            M.close(ctx, id)
-          elseif body.action == "log" then
-            ctx.log("INFO", "[" .. id .. "] " .. tostring(body.message))
-          end
-        end)
-      end)
-      if not callbackOk then
-        ctx.log("WARN", "failed to set usercontent callback for " .. id .. ": " .. tostring(callbackErr))
-      end
-
-      local injectOk, injectErr = pcall(function()
-        ucc:injectScript({
-          source = [[
-window.gallery = {
-  close: function () { webkit.messageHandlers.gallery.postMessage({action: "close"}); },
-  log: function (m) { webkit.messageHandlers.gallery.postMessage({action: "log", message: String(m)}); }
-};
-]],
-          injectionTime = "documentStart",
-        })
-      end)
-      if not injectOk then
-        ctx.log("WARN", "failed to inject gallery bridge script for " .. id .. ": " .. tostring(injectErr))
-      end
-    else
-      ctx.log("WARN", "failed to create usercontent controller for " .. id .. "; JS bridge disabled")
-    end
+  -- JavaScript-to-Lua bridge (lib/bridge.lua): builds the usercontent
+  -- controller wired into the webview so page JS gets window.gallery.
+  -- Bridge.new is itself defensive -- a failure inside it leaves
+  -- bridgeInstance.ucc nil, which is treated the same as "no bridge" here
+  -- (the webview is still created, just without one).
+  local bridgeOk, bridgeInstance = pcall(Bridge.new, ctx, id, entry.dir)
+  if not bridgeOk then
+    ctx.log("WARN", "failed to build bridge for " .. id .. ": " .. tostring(bridgeInstance))
+    bridgeInstance = nil
   end
+  local ucc = bridgeInstance and bridgeInstance.ucc or nil
 
   local webviewOk, webview
   if ucc then
@@ -174,7 +174,15 @@ window.gallery = {
   end
   if not webviewOk or not webview then
     ctx.log("ERROR", "failed to create webview for " .. id)
+    if bridgeInstance then
+      pcall(bridgeInstance.dispose)
+    end
     return "error: could not create window for " .. id
+  end
+
+  if bridgeInstance then
+    bridges[id] = bridgeInstance
+    pcall(bridgeInstance.attach, webview)
   end
 
   -- Window style: manifest.gallery.panel.style is an array of
@@ -209,6 +217,13 @@ window.gallery = {
     webview:windowCallback(function(action)
       if action == "closing" then
         ctx.windows[id] = nil
+        -- Defensive: dispose the bridge here too, in case the window ever
+        -- closes by some path other than M.close (which already disposes
+        -- it below). bridge.dispose() is idempotent.
+        if bridges[id] then
+          pcall(bridges[id].dispose)
+          bridges[id] = nil
+        end
       end
     end)
   end)
@@ -281,6 +296,11 @@ function M.close(ctx, id)
 
   pcall(function() win:delete() end)
   ctx.windows[id] = nil
+
+  if bridges[id] then
+    pcall(bridges[id].dispose)
+    bridges[id] = nil
+  end
 
   local prevWindow = ctx.previousFocusWindow[id]
   ctx.previousFocusWindow[id] = nil

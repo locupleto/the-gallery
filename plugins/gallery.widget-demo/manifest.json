@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.widget-demo",
+  "name": "Widget Demo",
+  "version": "0.0.1",
+  "kinds": ["bar-widget"],
+  "entryPoints": {},
+  "gallery": {
+    "widget": {
+      "command": "/usr/bin/uptime",
+      "args": [],
+      "interval": 15
+    }
+  }
+}

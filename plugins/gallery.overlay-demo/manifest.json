@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.overlay-demo",
+  "name": "Overlay Demo",
+  "version": "0.0.1",
+  "kinds": ["overlay"],
+  "entryPoints": {
+    "overlay": "index.html"
+  },
+  "gallery": {
+    "overlay": {
+      "display": "cursor",
+      "dismiss": "any-key",
+      "focus": "none"
+    }
+  }
+}

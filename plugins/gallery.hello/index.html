@@ -6,14 +6,23 @@
 <style>
   :root {
     color-scheme: dark;
+    /* Fallbacks in case the bridge's injected CSS variables never land
+       (JS bridge disabled) -- match lib/bridge.lua's DEFAULT_THEME. */
+    --gallery-background: #1f1811;
+    --gallery-foreground: #e8e6df;
+    --gallery-accent: #d8a656;
+    --gallery-muted: #9a886c;
+    --gallery-surface: #2a2214;
+    --gallery-danger: #e5726f;
+    --gallery-success: #5cc98f;
   }
 
   html, body {
     margin: 0;
     padding: 0;
     height: 100%;
-    background: #1f1811;
-    color: #e8e6df;
+    background: var(--gallery-background);
+    color: var(--gallery-foreground);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
@@ -22,16 +31,16 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1.25em;
+    gap: 1em;
     box-sizing: border-box;
-    padding: 1.5em;
+    padding: 1.25em;
   }
 
   h1 {
     margin: 0;
     font-size: 1.4em;
     font-weight: 600;
-    color: #d8a656;
+    color: var(--gallery-accent);
     letter-spacing: 0.02em;
   }
 
@@ -40,33 +49,124 @@
     max-width: 24em;
     font-size: 1em;
     padding: 0.5em 0.75em;
-    background: #2a2118;
-    color: #e8e6df;
-    border: 1px solid #d8a656;
+    background: var(--gallery-surface);
+    color: var(--gallery-foreground);
+    border: 1px solid var(--gallery-accent);
     border-radius: 4px;
     outline: none;
   }
 
   input:focus {
-    border-color: #e8b968;
-    box-shadow: 0 0 0 2px rgba(216, 166, 86, 0.25);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--gallery-accent) 25%, transparent);
   }
 
-  #count, #focusState {
+  #count, #focusState, #metricsLine, #spacesLine {
     font-size: 0.9em;
-    color: #b7b4ab;
+    color: var(--gallery-muted);
   }
 
-  #count strong, #focusState strong {
-    color: #d8a656;
+  #count strong, #focusState strong, #metricsLine strong, #spacesLine strong {
+    color: var(--gallery-accent);
+  }
+
+  #metricsLine.is-error, #spacesLine.is-error {
+    color: var(--gallery-danger);
+  }
+
+  #metricsLine.is-error strong, #spacesLine.is-error strong {
+    color: var(--gallery-danger);
+  }
+
+  #swatches {
+    display: flex;
+    gap: 0.4em;
+    align-items: center;
+  }
+
+  .swatch {
+    width: 1.4em;
+    height: 1.4em;
+    border-radius: 4px;
+    border: 1px solid var(--gallery-muted);
+    position: relative;
+  }
+
+  .swatch[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 120%;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    background: var(--gallery-surface);
+    color: var(--gallery-foreground);
+    font-size: 0.7em;
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+    pointer-events: none;
+  }
+
+  #themeName {
+    font-size: 0.85em;
+    color: var(--gallery-muted);
+  }
+
+  button {
+    font-size: 0.9em;
+    padding: 0.4em 0.9em;
+    background: var(--gallery-surface);
+    color: var(--gallery-foreground);
+    border: 1px solid var(--gallery-accent);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  button:hover {
+    background: var(--gallery-accent);
+    color: var(--gallery-background);
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  #execRow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4em;
+  }
+
+  #execResult {
+    font-size: 0.8em;
+    color: var(--gallery-muted);
+    max-width: 26em;
+    max-height: 4.5em;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    text-align: left;
   }
 </style>
 </head>
 <body>
   <h1>The Gallery</h1>
+
+  <div id="swatches"></div>
+  <div id="themeName">theme: <strong>?</strong></div>
+
   <input type="text" id="input" autofocus>
   <div id="count">Keypresses: <strong id="counter">0</strong></div>
   <div id="focusState">document.hasFocus(): <strong id="focusValue">?</strong></div>
+
+  <div id="execRow">
+    <button id="execButton" type="button">run uname</button>
+    <div id="execResult">(not run yet)</div>
+  </div>
+
+  <div id="metricsLine">CPU: <strong id="metricsValue">subscribing…</strong></div>
+  <div id="spacesLine">Space: <strong id="spacesValue">subscribing…</strong></div>
 
   <script>
     (function () {
@@ -123,6 +223,108 @@
         counter.textContent = String(presses);
         safeLog("keydown count: " + presses);
       });
+
+      // ---- theme swatches --------------------------------------------
+      var THEME_TOKENS = ["background", "foreground", "accent", "muted", "surface", "danger", "success"];
+
+      function renderTheme() {
+        var themeNameEl = document.querySelector("#themeName strong");
+        var swatchesEl = document.getElementById("swatches");
+        var theme = (window.gallery && window.gallery.theme) || null;
+
+        themeNameEl.textContent = theme && theme.name ? theme.name : "(bridge unavailable)";
+
+        swatchesEl.innerHTML = "";
+        THEME_TOKENS.forEach(function (token) {
+          var box = document.createElement("div");
+          box.className = "swatch";
+          box.style.background = "var(--gallery-" + token + ")";
+          box.title = token;
+          swatchesEl.appendChild(box);
+        });
+      }
+      renderTheme();
+
+      // ---- gallery.exec: "run uname" ----------------------------------
+      var execButton = document.getElementById("execButton");
+      var execResult = document.getElementById("execResult");
+
+      execButton.addEventListener("click", function () {
+        if (!window.gallery || typeof window.gallery.exec !== "function") {
+          execResult.textContent = "gallery.exec unavailable (bridge not loaded)";
+          return;
+        }
+        execButton.disabled = true;
+        execResult.textContent = "running…";
+        window.gallery.exec("/usr/bin/uname", ["-a"]).then(function (r) {
+          execButton.disabled = false;
+          if (r.code === 0) {
+            execResult.textContent = r.stdout.trim();
+          } else {
+            execResult.textContent = "exit " + r.code + ": " + (r.stderr || "").trim();
+          }
+        }).catch(function (err) {
+          execButton.disabled = false;
+          execResult.textContent = "error: " + (err && err.message ? err.message : String(err));
+        });
+      });
+
+      // ---- gallery.data.subscribe("metrics") --------------------------
+      var metricsValue = document.getElementById("metricsValue");
+      var metricsLine = document.getElementById("metricsLine");
+
+      function renderMetrics(data) {
+        if (data && data.error) {
+          metricsLine.classList.add("is-error");
+          metricsValue.textContent = data.error;
+          return;
+        }
+        metricsLine.classList.remove("is-error");
+        if (data && Array.isArray(data.cpu) && data.cpu.length > 0) {
+          var sum = data.cpu.reduce(function (a, b) { return a + b; }, 0);
+          var avg = sum / data.cpu.length;
+          metricsValue.textContent = avg.toFixed(1) + "%";
+        } else {
+          metricsValue.textContent = "no data";
+        }
+      }
+
+      // ---- gallery.data.subscribe("spaces") ---------------------------
+      var spacesValue = document.getElementById("spacesValue");
+      var spacesLine = document.getElementById("spacesLine");
+
+      function renderSpaces(data) {
+        if (data && data.error) {
+          spacesLine.classList.add("is-error");
+          spacesValue.textContent = data.error;
+          return;
+        }
+        spacesLine.classList.remove("is-error");
+        var spaces = (data && data.spaces) || [];
+        var focused = null;
+        for (var i = 0; i < spaces.length; i++) {
+          if (spaces[i]["has-focus"]) {
+            focused = spaces[i];
+            break;
+          }
+        }
+        if (!focused) {
+          spacesValue.textContent = "no focused space";
+          return;
+        }
+        var windowCount = Array.isArray(focused.windows) ? focused.windows.length : 0;
+        spacesValue.textContent = "#" + focused.index + " (" + windowCount + " window" + (windowCount === 1 ? "" : "s") + ")";
+      }
+
+      if (window.gallery && window.gallery.data && typeof window.gallery.data.subscribe === "function") {
+        window.gallery.data.subscribe("metrics", renderMetrics);
+        window.gallery.data.subscribe("spaces", renderSpaces);
+      } else {
+        metricsLine.classList.add("is-error");
+        metricsValue.textContent = "gallery.data unavailable (bridge not loaded)";
+        spacesLine.classList.add("is-error");
+        spacesValue.textContent = "gallery.data unavailable (bridge not loaded)";
+      }
     })();
   </script>
 </body>

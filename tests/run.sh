@@ -75,4 +75,31 @@ if ! "${HOME}/bin/gallery" status; then
   fail "gallery status failed"
 fi
 
+say "running tests/kinds_test.lua through hs"
+kinds_out="$(hs -t 30 -q "${SCRIPT_DIR}/kinds_test.lua")"; printf '%s\n' "${kinds_out}"; printf '%s\n' "${kinds_out}" | grep -q "^PASS " || fail "kinds_test.lua did not report PASS"
+
+# tests/bridge_test.lua is a 3-phase state machine driven by three separate
+# `hs` invocations with real sleeps between them -- see the big comment at
+# the top of that file for why a single call (with an internal busy-wait)
+# cannot work: Hammerspoon does not deliver an evaluateJavaScript reply (or
+# any other async callback) while the invocation that issued it is still
+# running, only once that invocation's chunk has returned and a later,
+# separate invocation lets the run loop turn again.
+say "running tests/bridge_test.lua through hs (phase 1: open)"
+hs -t 10 -q -c "return spoon.Gallery:ipc('close', 'gallery.hello')" > /dev/null 2>&1 || true
+bridge_phase1="$(hs -t 60 -q "${SCRIPT_DIR}/bridge_test.lua")"
+printf '%s\n' "${bridge_phase1}"
+sleep 1
+say "running tests/bridge_test.lua through hs (phase 2: issue in-page assertions)"
+bridge_phase2="$(hs -t 60 -q "${SCRIPT_DIR}/bridge_test.lua")"
+printf '%s\n' "${bridge_phase2}"
+sleep 2
+say "running tests/bridge_test.lua through hs (phase 3: collect + assert + close)"
+bridge_out="$(hs -t 60 -q "${SCRIPT_DIR}/bridge_test.lua")"
+printf '%s\n' "${bridge_out}"
+if ! printf '%s\n' "${bridge_out}" | grep -q "^PASS "; then
+  fail "bridge_test.lua did not report PASS"
+fi
+say "bridge_test.lua OK"
+
 say "all checks passed"

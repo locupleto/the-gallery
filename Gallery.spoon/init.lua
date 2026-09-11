@@ -6,12 +6,25 @@
 --- that directory at start, validates each manifest, and exposes an IPC
 --- surface (see obj:ipc) that the `gallery` CLI drives.
 ---
---- Phase 2: this file is the Spoon object only (metadata, start/stop, IPC
---- dispatch, logging shim). The actual work lives in lib/, loaded below:
+--- Phase 2/3: this file is the Spoon object only (metadata, start/stop,
+--- IPC dispatch, logging shim, and -- the only Phase 3 addition here --
+--- routing open/close/toggle to the right kind module). The actual work
+--- lives in lib/, loaded below:
 ---   lib/log.lua      -- append-only log
 ---   lib/manifest.lua -- plugin discovery + manifest validation
 ---   lib/state.lua    -- ~/.config/gallery/gallery.json (enable/disable)
 ---   lib/panel.lua    -- webview open/close mechanics for panel-kind plugins
+---   lib/menu.lua     -- hs.chooser mechanics for menu-kind plugins
+---   lib/overlay.lua  -- webview mechanics for overlay-kind plugins
+---   lib/service.lua  -- background timers for service-kind plugins
+---   lib/feed.lua     -- background timers for bar-widget-kind plugins
+---
+--- A plugin's primary interactive kind -- the one open/close/toggle act
+--- on -- is chosen in priority order panel > overlay > menu (see
+--- primaryInteractiveKind below). service and bar-widget are not
+--- interactive: they run continuously once enabled (see lib/service.lua,
+--- lib/feed.lua) and are inspected via the `services`/`feed` IPC verbs
+--- rather than opened/closed.
 
 local obj = {}
 obj.__index = obj
@@ -57,6 +70,19 @@ local Log = dofile(resourcePath("lib/log.lua"))
 local Manifest = dofile(resourcePath("lib/manifest.lua"))
 local State = dofile(resourcePath("lib/state.lua"))
 local Panel = dofile(resourcePath("lib/panel.lua"))
+local Menu = dofile(resourcePath("lib/menu.lua"))
+local Overlay = dofile(resourcePath("lib/overlay.lua"))
+local Service = dofile(resourcePath("lib/service.lua"))
+local Feed = dofile(resourcePath("lib/feed.lua"))
+
+-- Exposed on the Spoon object itself (not just as local upvalues) so
+-- tests (tests/kinds_test.lua) can introspect each module's own state --
+-- e.g. spoon.Gallery.Menu.isOpen(id) -- through the live, already-running
+-- instance rather than dofile'ing a disconnected copy.
+obj.Menu = Menu
+obj.Overlay = Overlay
+obj.Service = Service
+obj.Feed = Feed
 
 Log.path = os.getenv("HOME") .. "/Library/Logs/gallery.log"
 obj.statePath = State.defaultPath()
@@ -72,6 +98,33 @@ obj.log = log
 --- True if id claims the first-party "gallery." namespace.
 local function isFirstParty(id)
   return type(id) == "string" and id:match("^gallery%.") ~= nil
+end
+
+local function tableContains(t, value)
+  if type(t) ~= "table" then
+    return false
+  end
+  for _, v in ipairs(t) do
+    if v == value then
+      return true
+    end
+  end
+  return false
+end
+
+--- A plugin's primary interactive kind, in priority order panel > overlay
+--- > menu -- the one open/close/toggle act on. Returns nil for a plugin
+--- with only non-interactive kinds (service, bar-widget, bar).
+local function primaryInteractiveKind(manifest)
+  local kinds = manifest and manifest.kinds
+  if tableContains(kinds, "panel") then
+    return "panel"
+  elseif tableContains(kinds, "overlay") then
+    return "overlay"
+  elseif tableContains(kinds, "menu") then
+    return "menu"
+  end
+  return nil
 end
 
 --- Preload the hs.* extensions Gallery depends on. Extensions are loaded
@@ -91,6 +144,11 @@ local function preloadExtensions()
     "hs.application",
     "hs.window",
     "hs.pathwatcher",
+    "hs.chooser",
+    "hs.task",
+    "hs.urlevent",
+    "hs.eventtap",
+    "hs.timer",
   }) do
     pcall(require, name)
   end
@@ -133,6 +191,12 @@ function obj:start()
   loadPlugins(self)
   self.state = State.load(self.statePath)
 
+  -- Background kinds are scheduled last, once both self.plugins and
+  -- self.state exist (Service/Feed.rescan consult self:isEnabled, which
+  -- reads self.state).
+  Service.rescan(self)
+  Feed.rescan(self)
+
   pcall(function()
     hs.fs.mkdir(os.getenv("HOME") .. "/.config/gallery/state")
     local f = io.open(self.readyPath, "w")
@@ -141,14 +205,31 @@ function obj:start()
   return self
 end
 
---- Close every open plugin window.
+--- Close every open plugin window (panel, menu, overlay) and stop every
+--- running service/widget timer.
 function obj:stop()
   for id, win in pairs(self.windows) do
     pcall(function() win:delete() end)
     self.windows[id] = nil
   end
   self.previousFocusWindow = {}
+
+  for id in pairs(Menu.choosers) do
+    pcall(Menu.close, self, id)
+  end
+  for id in pairs(Overlay.overlays) do
+    pcall(Overlay.close, self, id)
+  end
+
+  Service.stopAll()
+  Feed.stopAll()
+
   return self
+end
+
+--- True if id should be considered enabled (see lib/state.lua).
+function obj:isEnabled(id)
+  return State.isEnabled(self.state, id, isFirstParty(id))
 end
 
 --- Dispatch an IPC verb from the `gallery` CLI. Always returns a string,
@@ -175,6 +256,10 @@ function obj:ipc(verb, id)
       return self:validateDir(id)
     elseif verb == "rescan" then
       return self:rescan()
+    elseif verb == "services" then
+      return self:servicesStatus()
+    elseif verb == "feed" then
+      return self:feed(id)
     else
       return "unknown verb: " .. tostring(verb)
     end
@@ -224,7 +309,7 @@ function obj:list()
     local state
     if entry.errors and #entry.errors > 0 then
       state = "errored"
-    elseif State.isEnabled(self.state, entry.id, isFirstParty(entry.id)) then
+    elseif self:isEnabled(entry.id) then
       state = "enabled"
     else
       state = "disabled"
@@ -248,7 +333,7 @@ function obj:listJson()
       name = manifest.name,
       version = manifest.version,
       kinds = manifest.kinds or {},
-      enabled = (not errored) and State.isEnabled(self.state, entry.id, isFirstParty(entry.id)) or false,
+      enabled = (not errored) and self:isEnabled(entry.id) or false,
       errored = errored,
       errors = entry.errors or {},
       warnings = entry.warnings or {},
@@ -263,8 +348,10 @@ function obj:listJson()
   return encoded
 end
 
---- Open a panel-kind plugin's window (see lib/panel.lua). Refuses unknown,
---- errored, and disabled plugins.
+--- Open a plugin's primary interactive kind (panel > overlay > menu; see
+--- primaryInteractiveKind). Refuses unknown, errored, and disabled
+--- plugins; a plugin with only non-interactive kinds (service,
+--- bar-widget) reports "no interactive kind".
 function obj:open(id)
   if not id or id == "" then
     return "usage: open <id>"
@@ -279,29 +366,70 @@ function obj:open(id)
     return "errored: " .. id .. " (" .. table.concat(entry.errors, "; ") .. ")"
   end
 
-  if not State.isEnabled(self.state, id, isFirstParty(id)) then
+  if not self:isEnabled(id) then
     return "not enabled: " .. id
   end
 
-  return Panel.open(self, id)
+  local kind = primaryInteractiveKind(entry.manifest)
+  if kind == "panel" then
+    return Panel.open(self, id)
+  elseif kind == "overlay" then
+    return Overlay.open(self, id)
+  elseif kind == "menu" then
+    return Menu.open(self, id)
+  end
+  return "no interactive kind: " .. id
 end
 
---- Close a plugin's open window (see lib/panel.lua). Deliberately
---- permissive -- not gated on enabled/errored state -- so an already-open
---- window can always be closed (obj:disable relies on this).
+--- Close a plugin's open window (whichever kind module owns it -- see
+--- primaryInteractiveKind). Deliberately permissive for a known plugin --
+--- not gated on enabled/errored state -- so an already-open window can
+--- always be closed (obj:disable relies on this). An unknown id falls
+--- through to Panel.close, which preserves the pre-Phase-3 behaviour of
+--- returning "not open: <id>" rather than erroring.
 function obj:close(id)
   if not id or id == "" then
     return "usage: close <id>"
   end
-  return Panel.close(self, id)
+
+  local entry = self.plugins[id]
+  local kind = entry and primaryInteractiveKind(entry.manifest) or nil
+
+  if kind == "panel" then
+    return Panel.close(self, id)
+  elseif kind == "overlay" then
+    return Overlay.close(self, id)
+  elseif kind == "menu" then
+    return Menu.close(self, id)
+  end
+
+  if not entry then
+    return Panel.close(self, id)
+  end
+  return "no interactive kind: " .. id
 end
 
---- Open if not currently open, otherwise close.
+--- Open if not currently open, otherwise close, for whichever kind module
+--- is this plugin's primary interactive kind.
 function obj:toggle(id)
   if not id or id == "" then
     return "usage: toggle <id>"
   end
-  if self.windows[id] then
+
+  local entry = self.plugins[id]
+  local kind = entry and primaryInteractiveKind(entry.manifest) or nil
+
+  local isOpen
+  if kind == "overlay" then
+    isOpen = Overlay.isOpen(id)
+  elseif kind == "menu" then
+    isOpen = Menu.isOpen(id)
+  else
+    -- "panel", and the unknown-id fallback (matches pre-Phase-3 behaviour).
+    isOpen = self.windows[id] ~= nil
+  end
+
+  if isOpen then
     return self:close(id)
   end
   return self:open(id)
@@ -318,6 +446,8 @@ function obj:enable(id)
   end
 
   State.enable(self.state, id, self.statePath)
+  Service.rescan(self)
+  Feed.rescan(self)
   log("INFO", "enabled " .. id)
   return "enabled: " .. id
 end
@@ -338,6 +468,8 @@ function obj:disable(id)
   end
 
   State.disable(self.state, id, self.statePath)
+  Service.rescan(self)
+  Feed.rescan(self)
   log("INFO", "disabled " .. id)
   return "disabled: " .. id
 end
@@ -377,10 +509,46 @@ function obj:validateDir(dir)
   return table.concat(lines, "\n")
 end
 
---- Re-run the manifest scan without a full Hammerspoon reload.
+--- Re-run the manifest scan without a full Hammerspoon reload, and
+--- reschedule background (service/bar-widget) timers to match.
 function obj:rescan()
   local total, errored = loadPlugins(self)
+  Service.rescan(self)
+  Feed.rescan(self)
   return string.format("rescanned: plugins=%d errored=%d", total - errored, errored)
+end
+
+--- One line per running service: "<id>\t<interval>\t<lastRun>\t<code>\t<restarts>".
+function obj:servicesStatus()
+  local lines = Service.statusLines()
+  if #lines == 0 then
+    return "no services running"
+  end
+  return table.concat(lines, "\n")
+end
+
+--- The last feed JSON written for a bar-widget-kind plugin (see
+--- lib/feed.lua), re-encoded as a single-line JSON string, or "no feed" if
+--- id has never produced one (or id looks unsafe as a path component).
+function obj:feed(id)
+  if not id or id == "" then
+    return "usage: feed <id>"
+  end
+  if id:find("/", 1, true) or id:find("..", 1, true) then
+    return "invalid id: " .. id
+  end
+
+  local path = os.getenv("HOME") .. "/.config/gallery/feed/" .. id .. ".json"
+  local readOk, decoded = pcall(hs.json.read, path)
+  if not readOk or decoded == nil then
+    return "no feed"
+  end
+
+  local encodeOk, encoded = pcall(hs.json.encode, decoded)
+  if not encodeOk then
+    return "no feed"
+  end
+  return encoded
 end
 
 return obj

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.menu-demo",
+  "name": "Menu Demo",
+  "version": "0.0.1",
+  "kinds": ["menu"],
+  "entryPoints": {},
+  "gallery": {
+    "menu": {
+      "placeholder": "Gallery menu demo...",
+      "width": 40,
+      "rows": 10,
+      "source": {
+        "type": "static",
+        "items": [
+          {
+            "text": "Open Hammerspoon site",
+            "subText": "opens hammerspoon.org in your browser",
+            "action": { "type": "open", "url": "https://www.hammerspoon.org" }
+          },
+          {
+            "text": "Say \"Gallery\"",
+            "subText": "runs /usr/bin/say",
+            "action": { "type": "exec", "command": "/usr/bin/say", "args": ["Gallery"] }
+          },
+          {
+            "text": "Toggle Hello panel",
+            "subText": "ipc toggle gallery.hello",
+            "action": { "type": "ipc", "verb": "toggle", "id": "gallery.hello" }
+          }
+        ]
+      }
+    }
+  }
+}

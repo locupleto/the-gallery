@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.service-demo",
+  "name": "Service Demo",
+  "version": "0.0.1",
+  "kinds": ["service"],
+  "entryPoints": {},
+  "gallery": {
+    "service": {
+      "command": "/bin/date",
+      "args": [],
+      "interval": 30,
+      "restartOnFailure": true
+    }
+  }
+}
