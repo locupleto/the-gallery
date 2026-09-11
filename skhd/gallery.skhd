@@ -8,7 +8,6 @@
 # the fzf menu on super+space.
 
 ## Gallery: Learn menu (cheat sheets as a chooser; the chosen sheet opens in a panel)
-lalt - 0 : "$HOME/bin/gallery" toggle gallery.learn
 ## Gallery: system monitor panel
 shift + lalt - 0 : "$HOME/bin/gallery" toggle gallery.sysmon
 ## Gallery: workspace overview overlay (any key dismisses)

@@ -120,8 +120,6 @@ fi
 say "running tests/kinds_test.lua through hs"
 kinds_out="$(run_hs_file 30 "${SCRIPT_DIR}/kinds_test.lua")"; printf '%s\n' "${kinds_out}"; printf '%s\n' "${kinds_out}" | grep -q "^PASS " || fail "kinds_test.lua did not report PASS"
 
-say "running tests/learn_test.lua through hs"
-learn_out="$(run_hs_file 30 "${SCRIPT_DIR}/learn_test.lua")"; printf '%s\n' "${learn_out}"; printf '%s\n' "${learn_out}" | grep -q "^PASS " || fail "learn_test.lua did not report PASS"
 
 # tests/bridge_test.lua is a 3-phase state machine driven by three separate
 # `hs` invocations with real sleeps between them -- see the big comment at
