@@ -70,9 +70,9 @@ usage: gallery <command> [args]
 commands:
   status                          show Gallery status
   list [--json]                   list installed plugins
-  open <id>                       open a plugin
-  close <id>                      close a plugin
-  toggle <id>                     toggle a plugin open/closed
+  open <id> [kind]                open a plugin (kind: panel|overlay|menu)
+  close <id> [kind]               close a plugin
+  toggle <id> [kind]              toggle a plugin open/closed
   enable <id>                     enable a plugin
   disable <id>                    disable a plugin
   add <git-url> [--enable] [--yes]
@@ -141,12 +141,21 @@ ipc_call() {
 run_ipc() {
   local verb="$1"
   local id="${2:-}"
+  local kind="${3:-}"
   if [ -n "${id}" ]; then
     if ! valid_id "${id}"; then
       echo "gallery: invalid id: ${id}" >&2
       exit 1
     fi
-    ipc_call "${verb}" "${id}"
+    if [ -n "${kind}" ]; then
+      case "${kind}" in
+        panel|overlay|menu) ;;
+        *) echo "gallery: invalid kind: ${kind} (panel|overlay|menu)" >&2; exit 1 ;;
+      esac
+      ipc_call "${verb}" "${id}" "${kind}"
+    else
+      ipc_call "${verb}" "${id}"
+    fi
   else
     ipc_call "${verb}"
   fi
@@ -194,18 +203,18 @@ cmd_list() {
 }
 
 cmd_open() {
-  local id="${1:?usage: gallery open <id>}"
-  run_ipc open "${id}"
+  local id="${1:?usage: gallery open <id> [panel|overlay|menu]}"
+  run_ipc open "${id}" "${2:-}"
 }
 
 cmd_close() {
-  local id="${1:?usage: gallery close <id>}"
-  run_ipc close "${id}"
+  local id="${1:?usage: gallery close <id> [panel|overlay|menu]}"
+  run_ipc close "${id}" "${2:-}"
 }
 
 cmd_toggle() {
-  local id="${1:?usage: gallery toggle <id>}"
-  run_ipc toggle "${id}"
+  local id="${1:?usage: gallery toggle <id> [panel|overlay|menu]}"
+  run_ipc toggle "${id}" "${2:-}"
 }
 
 cmd_enable() {
@@ -984,13 +993,13 @@ case "${command}" in
     cmd_list "${1:-}"
     ;;
   open)
-    cmd_open "${1:-}"
+    cmd_open "${1:-}" "${2:-}"
     ;;
   close)
-    cmd_close "${1:-}"
+    cmd_close "${1:-}" "${2:-}"
     ;;
   toggle)
-    cmd_toggle "${1:-}"
+    cmd_toggle "${1:-}" "${2:-}"
     ;;
   enable)
     cmd_enable "${1:-}"

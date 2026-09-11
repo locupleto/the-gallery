@@ -150,6 +150,21 @@ local function primaryInteractiveKind(manifest)
   return nil
 end
 
+--- Resolve which kind module an open/close/toggle should route to: an
+--- explicit `kind` (must be one the manifest declares) wins over the
+--- primary kind, so a multi-kind plugin can be opened as e.g. its panel
+--- from a menu action (`gallery open gallery.learn panel`).
+local function resolveKind(manifest, kind)
+  if kind ~= nil and kind ~= "" then
+    if (kind == "panel" or kind == "overlay" or kind == "menu")
+      and manifest and tableContains(manifest.kinds, kind) then
+      return kind
+    end
+    return nil, "kind '" .. tostring(kind) .. "' not declared"
+  end
+  return primaryInteractiveKind(manifest)
+end
+
 --- Preload the hs.* extensions Gallery depends on. Extensions are loaded
 --- eagerly here so the first panel open does not pay their load cost
 --- (measured at about 2.5 s cold) and so their console banners do not leak
@@ -284,7 +299,7 @@ end
 
 --- Dispatch an IPC verb from the `gallery` CLI. Always returns a string,
 --- even on error, and never raises out of this function.
-function obj:ipc(verb, id)
+function obj:ipc(verb, id, kind)
   -- DEBUG timing so a hung client can be correlated against the log: did
   -- the handler itself ever finish, or is the reply what got lost? Uses
   -- hs.timer.secondsSinceEpoch when available (real Hammerspoon runtime),
@@ -301,11 +316,11 @@ function obj:ipc(verb, id)
     elseif verb == "list-json" then
       return self:listJson()
     elseif verb == "open" then
-      return self:open(id)
+      return self:open(id, kind)
     elseif verb == "close" then
-      return self:close(id)
+      return self:close(id, kind)
     elseif verb == "toggle" then
-      return self:toggle(id)
+      return self:toggle(id, kind)
     elseif verb == "enable" then
       return self:enable(id)
     elseif verb == "disable" then
@@ -420,9 +435,9 @@ end
 --- primaryInteractiveKind). Refuses unknown, errored, and disabled
 --- plugins; a plugin with only non-interactive kinds (service,
 --- bar-widget) reports "no interactive kind".
-function obj:open(id)
+function obj:open(id, kind)
   if not id or id == "" then
-    return "usage: open <id>"
+    return "usage: open <id> [panel|overlay|menu]"
   end
 
   local entry = self.plugins[id]
@@ -438,7 +453,10 @@ function obj:open(id)
     return "not enabled: " .. id
   end
 
-  local kind = primaryInteractiveKind(entry.manifest)
+  local kind, kindErr = resolveKind(entry.manifest, kind)
+  if kindErr then
+    return kindErr .. ": " .. id
+  end
   if kind == "panel" then
     return Panel.open(self, id)
   elseif kind == "overlay" then
@@ -455,13 +473,21 @@ end
 --- always be closed (obj:disable relies on this). An unknown id falls
 --- through to Panel.close, which preserves the pre-Phase-3 behaviour of
 --- returning "not open: <id>" rather than erroring.
-function obj:close(id)
+function obj:close(id, kind)
   if not id or id == "" then
-    return "usage: close <id>"
+    return "usage: close <id> [panel|overlay|menu]"
   end
 
   local entry = self.plugins[id]
-  local kind = entry and primaryInteractiveKind(entry.manifest) or nil
+  local kindErr
+  if entry then
+    kind, kindErr = resolveKind(entry.manifest, kind)
+    if kindErr then
+      return kindErr .. ": " .. id
+    end
+  else
+    kind = nil
+  end
 
   if kind == "panel" then
     return Panel.close(self, id)
@@ -479,13 +505,21 @@ end
 
 --- Open if not currently open, otherwise close, for whichever kind module
 --- is this plugin's primary interactive kind.
-function obj:toggle(id)
+function obj:toggle(id, kind)
   if not id or id == "" then
-    return "usage: toggle <id>"
+    return "usage: toggle <id> [panel|overlay|menu]"
   end
 
   local entry = self.plugins[id]
-  local kind = entry and primaryInteractiveKind(entry.manifest) or nil
+  local kindErr
+  if entry then
+    kind, kindErr = resolveKind(entry.manifest, kind)
+    if kindErr then
+      return kindErr .. ": " .. id
+    end
+  else
+    kind = nil
+  end
 
   local isOpen
   if kind == "overlay" then
@@ -498,9 +532,9 @@ function obj:toggle(id)
   end
 
   if isOpen then
-    return self:close(id)
+    return self:close(id, kind)
   end
-  return self:open(id)
+  return self:open(id, kind)
 end
 
 --- Mark a plugin enabled and persist it to gallery.json.

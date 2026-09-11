@@ -183,9 +183,11 @@ def action_show(path):
     # webview. Closing when nothing is open is a harmless no-op
     # ("not open: <id>"), so this is unconditional rather than checking
     # state first.
-    subprocess.run([GALLERY_BIN, "close", "gallery.learn"],
+    # The explicit "panel" kind matters: this plugin's primary kind is the
+    # menu, so a bare `gallery open gallery.learn` would reopen the chooser.
+    subprocess.run([GALLERY_BIN, "close", "gallery.learn", "panel"],
                     capture_output=True, text=True, check=False)
-    subprocess.run([GALLERY_BIN, "open", "gallery.learn"],
+    subprocess.run([GALLERY_BIN, "open", "gallery.learn", "panel"],
                     capture_output=True, text=True, check=False)
 
 
