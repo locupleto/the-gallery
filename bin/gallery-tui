@@ -138,7 +138,7 @@ spawn_window() {
   # AppleScript itself, or its compiler chokes on the bare backslash.
   local as_cmdline
   as_cmdline="$(printf '%s' "${cmdline}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
-  if pgrep -xq iTerm2; then
+  if pgrep -xq iTerm2 || pgrep -fq "/iTerm.app/Contents/MacOS/iTerm2"; then
     osascript -e "tell application \"iTerm2\" to create window with default profile command \"${as_cmdline}\"" >/dev/null
   else
     osascript -e "tell application \"iTerm2\"

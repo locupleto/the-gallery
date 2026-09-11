@@ -145,6 +145,8 @@ if ! printf '%s\n' "${bridge_out}" | grep -q "^PASS "; then
 fi
 say "bridge_test.lua OK"
 
+say "running tests/tui_test.sh"; "${SCRIPT_DIR}/tui_test.sh" || fail "tui_test.sh failed"
+
 say "running tests/import_test.sh"; "${SCRIPT_DIR}/import_test.sh" || fail "import_test.sh failed"
 
 say "all checks passed"

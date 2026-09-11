@@ -197,6 +197,23 @@ do
   check("error: entry point does not exist", listContains(errors, "does not exist"), joined(errors))
 end
 
+do
+  local errors = Manifest.validate({
+    schemaVersion = 1, id = "a", name = "A", version = "0.1",
+    kinds = { "tui" }, entryPoints = {},
+  }, TMP_ROOT)
+  check("error: tui kind without gallery.tui.command", listContains(errors, "tui kind requires gallery.tui.command"), joined(errors))
+end
+
+do
+  local errors = Manifest.validate({
+    schemaVersion = 1, id = "a", name = "A", version = "0.1",
+    kinds = { "tui" }, entryPoints = {},
+    gallery = { tui = { command = "/opt/homebrew/bin/btop" } },
+  }, TMP_ROOT)
+  check("valid: tui kind with gallery.tui.command", #errors == 0, joined(errors))
+end
+
 --------------------------------------------------------------------------
 -- 3. WARNING classes: kinds/entryPoints inconsistency, unknown kind,
 --    .qml entry point, omarchy./gallery. namespaces.
