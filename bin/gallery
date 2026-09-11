@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 #
 # gallery -- thin CLI over the Hammerspoon IPC command for The Gallery Spoon.
+# Modelled on Omarchy 4's `omarchy plugin` CLI.
 #
 # Usage:
 #   gallery status
-#   gallery list
+#   gallery list [--json]
 #   gallery open <id>
 #   gallery close <id>
 #   gallery toggle <id>
+#   gallery enable <id>
+#   gallery disable <id>
+#   gallery add <git-url> [--enable] [--yes]
+#   gallery update [id]
+#   gallery remove <id> [--yes]
+#   gallery clone <id> <new-id>
+#   gallery validate <dir>
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -17,6 +25,12 @@ set -euo pipefail
 
 # Callers such as skhd or launchd may not carry the Homebrew path; hs lives there.
 export PATH="${PATH}:/opt/homebrew/bin:/usr/local/bin:${HOME}/bin"
+
+CONFIG_DIR="${HOME}/.config/gallery"
+PLUGIN_DIR="${CONFIG_DIR}/plugins"
+STAGING_DIR="${CONFIG_DIR}/staging"
+REMOVED_DIR="${CONFIG_DIR}/removed"
+GALLERY_JSON="${CONFIG_DIR}/gallery.json"
 
 # Every IPC call uses the hs tool's own graceful timeout (-t). Never wrap hs in
 # `timeout`: killing the client mid-request leaves Hammerspoon replying to a dead
@@ -41,7 +55,26 @@ LOG_FILE="${HOME}/Library/Logs/gallery.log"
 
 usage() {
   cat >&2 << 'EOF'
-usage: gallery status | open <id> | close <id> | toggle <id> | list | reload | log | doctor | install
+usage: gallery <command> [args]
+
+commands:
+  status                          show Gallery status
+  list [--json]                   list installed plugins
+  open <id>                       open a plugin
+  close <id>                      close a plugin
+  toggle <id>                     toggle a plugin open/closed
+  enable <id>                     enable a plugin
+  disable <id>                    disable a plugin
+  add <git-url> [--enable] [--yes]
+                                   clone and install a plugin from git
+  update [id]                     pull latest commits for git-managed plugin(s)
+  remove <id> [--yes]             disable and remove a plugin
+  clone <id> <new-id>             duplicate an installed plugin under a new id
+  validate <dir>                  validate a plugin manifest directory
+  reload                          request a Hammerspoon config reload
+  log                             tail the Gallery log
+  doctor                          check the local Gallery install
+  install                         run install.sh
 EOF
 }
 
@@ -63,18 +96,44 @@ valid_id() {
   esac
 }
 
+# Escape backslashes and single quotes so a string can be embedded safely
+# inside a single-quoted Lua string literal.
+lua_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g"
+}
+
+# ipc_call <verb> [arg...] -- builds spoon.Gallery:ipc('verb', 'arg', ...)
+# and calls hs_call. Every argument is Lua-escaped, so this is safe to use
+# both for plugin ids (already charset-restricted by valid_id) and for
+# free-form values such as filesystem paths.
+ipc_call() {
+  local verb="$1"
+  shift
+  local expr
+  expr="spoon.Gallery:ipc('$(lua_escape "${verb}")'"
+  local a
+  for a in "$@"; do
+    expr="${expr}, '$(lua_escape "${a}")'"
+  done
+  expr="${expr})"
+  require_hs
+  hs_call "return ${expr}"
+}
+
+# run_ipc <verb> [id] -- id-validated passthrough that prints Gallery's
+# reply directly (not captured), matching the CLI's original open/close/
+# toggle/status behaviour.
 run_ipc() {
   local verb="$1"
   local id="${2:-}"
-  require_hs
   if [ -n "${id}" ]; then
     if ! valid_id "${id}"; then
       echo "gallery: invalid id: ${id}" >&2
       exit 1
     fi
-    hs_call "return spoon.Gallery:ipc('${verb}', '${id}')"
+    ipc_call "${verb}" "${id}"
   else
-    hs_call "return spoon.Gallery:ipc('${verb}')"
+    ipc_call "${verb}"
   fi
 }
 
@@ -83,7 +142,40 @@ cmd_status() {
 }
 
 cmd_list() {
-  run_ipc list
+  if [ "${1:-}" = "--json" ]; then
+    local out
+    if ! out="$(ipc_call list-json)"; then
+      exit 1
+    fi
+    case "${out}" in
+      "unknown verb:"*)
+        echo "gallery: Spoon does not yet support 'list-json' (${out})" >&2
+        exit 1
+        ;;
+    esac
+    if command -v python3 >/dev/null 2>&1; then
+      printf '%s\n' "${out}" | python3 -m json.tool 2>/dev/null || printf '%s\n' "${out}"
+    else
+      printf '%s\n' "${out}"
+    fi
+    return 0
+  fi
+
+  local out
+  if ! out="$(ipc_call list)"; then
+    exit 1
+  fi
+  case "${out}" in
+    "unknown verb:"*)
+      echo "gallery: ${out}" >&2
+      exit 1
+      ;;
+  esac
+  if [ -z "${out}" ]; then
+    echo "no plugins"
+    return 0
+  fi
+  { printf 'ID\tVERSION\tKINDS\tSTATUS\n'; printf '%s\n' "${out}"; } | column -t -s "$(printf '\t')"
 }
 
 cmd_open() {
@@ -99,6 +191,435 @@ cmd_close() {
 cmd_toggle() {
   local id="${1:?usage: gallery toggle <id>}"
   run_ipc toggle "${id}"
+}
+
+cmd_enable() {
+  local id="${1:?usage: gallery enable <id>}"
+  run_ipc enable "${id}"
+}
+
+cmd_disable() {
+  local id="${1:?usage: gallery disable <id>}"
+  run_ipc disable "${id}"
+}
+
+cmd_validate() {
+  local dir="${1:?usage: gallery validate <dir>}"
+  local abs
+  if ! abs="$(cd "${dir}" 2>/dev/null && pwd)"; then
+    echo "gallery: no such directory: ${dir}" >&2
+    exit 1
+  fi
+
+  local out
+  if ! out="$(ipc_call validate "${abs}")"; then
+    exit 1
+  fi
+  case "${out}" in
+    "unknown verb:"*)
+      echo "gallery: Spoon does not yet support 'validate' (${out})" >&2
+      exit 1
+      ;;
+    ok)
+      echo "ok"
+      ;;
+    errors:*)
+      printf '%s\n' "${out}" >&2
+      exit 1
+      ;;
+    *)
+      printf '%s\n' "${out}"
+      ;;
+  esac
+}
+
+cmd_add() {
+  local url="" do_enable=0 assume_yes=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --enable)
+        do_enable=1
+        ;;
+      --yes)
+        assume_yes=1
+        ;;
+      -*)
+        echo "gallery: unknown option: $1" >&2
+        exit 1
+        ;;
+      *)
+        if [ -z "${url}" ]; then
+          url="$1"
+        else
+          echo "gallery: unexpected argument: $1" >&2
+          exit 1
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  if [ -z "${url}" ]; then
+    echo "usage: gallery add <git-url> [--enable] [--yes]" >&2
+    exit 1
+  fi
+
+  cat >&2 << 'EOF'
+Plugins run as arbitrary, unsandboxed code inside your Hammerspoon session
+with everything your user account can reach.
+EOF
+
+  if [ "${assume_yes}" -ne 1 ]; then
+    printf 'Continue? [y/N] ' >&2
+    local reply
+    read -r reply || reply=""
+    case "${reply}" in
+      y|Y|yes|YES) : ;;
+      *)
+        echo "gallery: aborted" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  command -v git >/dev/null 2>&1 || { echo "gallery: git not found on PATH" >&2; exit 1; }
+  command -v python3 >/dev/null 2>&1 || { echo "gallery: python3 not found on PATH" >&2; exit 1; }
+
+  mkdir -p "${STAGING_DIR}"
+  local staging
+  if ! staging="$(mktemp -d "${STAGING_DIR}/plugin.XXXXXXXX")"; then
+    echo "gallery: failed to create staging directory under ${STAGING_DIR}" >&2
+    exit 1
+  fi
+  trap 'rm -rf "${staging}" 2>/dev/null || true' EXIT
+
+  if ! git clone --depth 1 "${url}" "${staging}" >&2; then
+    echo "gallery: git clone failed: ${url}" >&2
+    exit 1
+  fi
+
+  if [ ! -f "${staging}/manifest.json" ]; then
+    echo "gallery: no manifest.json in cloned plugin" >&2
+    exit 1
+  fi
+
+  local id
+  if ! id="$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+pid = data.get("id")
+if not pid:
+    sys.exit(1)
+sys.stdout.write(pid)
+' "${staging}/manifest.json")"; then
+    echo "gallery: manifest.json has no id" >&2
+    exit 1
+  fi
+
+  if ! valid_id "${id}"; then
+    echo "gallery: manifest id is not a valid plugin id: ${id}" >&2
+    exit 1
+  fi
+
+  local vout
+  if vout="$(ipc_call validate "${staging}")"; then
+    case "${vout}" in
+      "unknown verb:"*)
+        echo "gallery: Spoon does not yet support 'validate' -- skipping manifest validation (${vout})" >&2
+        ;;
+      errors:*)
+        echo "gallery: manifest validation failed:" >&2
+        printf '%s\n' "${vout}" >&2
+        exit 1
+        ;;
+      warnings:*)
+        printf '%s\n' "${vout}" >&2
+        ;;
+      ok) : ;;
+      *)
+        printf '%s\n' "${vout}" >&2
+        ;;
+    esac
+  else
+    echo "gallery: could not reach Hammerspoon to validate -- proceeding without validation" >&2
+  fi
+
+  local dest="${PLUGIN_DIR}/${id}"
+  if [ -e "${dest}" ]; then
+    echo "gallery: plugin already exists: ${id} (use 'gallery update ${id}')" >&2
+    exit 1
+  fi
+
+  mkdir -p "${PLUGIN_DIR}"
+  if ! mv "${staging}" "${dest}"; then
+    echo "gallery: failed to install plugin to ${dest}" >&2
+    exit 1
+  fi
+  trap - EXIT
+
+  echo "installed ${id} -> ${dest}"
+
+  local rout
+  if rout="$(ipc_call rescan)"; then
+    case "${rout}" in
+      "unknown verb:"*)
+        echo "gallery: Spoon does not yet support 'rescan' -- reload Gallery to pick up ${id} (${rout})" >&2
+        ;;
+      *)
+        printf '%s\n' "${rout}"
+        ;;
+    esac
+  else
+    echo "gallery: failed to reach Hammerspoon for rescan" >&2
+  fi
+
+  if [ "${do_enable}" -eq 1 ]; then
+    local eout
+    if eout="$(ipc_call enable "${id}")"; then
+      printf '%s\n' "${eout}"
+    else
+      echo "gallery: failed to enable ${id}" >&2
+    fi
+  fi
+}
+
+cmd_update() {
+  local target="${1:-}"
+  if [ -n "${target}" ] && ! valid_id "${target}"; then
+    echo "gallery: invalid id: ${target}" >&2
+    exit 1
+  fi
+
+  command -v git >/dev/null 2>&1 || { echo "gallery: git not found on PATH" >&2; exit 1; }
+
+  if [ ! -d "${PLUGIN_DIR}" ]; then
+    echo "gallery: no plugins directory: ${PLUGIN_DIR}" >&2
+    exit 1
+  fi
+
+  local any=0 failures=0 dir id
+
+  for dir in "${PLUGIN_DIR}"/*/; do
+    [ -d "${dir}" ] || continue
+    id="$(basename "${dir}")"
+    if [ -n "${target}" ] && [ "${id}" != "${target}" ]; then
+      continue
+    fi
+    if [ ! -e "${dir}.git" ]; then
+      if [ -n "${target}" ]; then
+        echo "gallery: ${id} is not a git checkout, cannot update" >&2
+        exit 1
+      fi
+      continue
+    fi
+    any=1
+    echo "== ${id} =="
+
+    if ! ( cd "${dir}" && git fetch --quiet ); then
+      echo "gallery: git fetch failed for ${id}" >&2
+      failures=1
+      continue
+    fi
+
+    local upstream
+    if ! upstream="$( cd "${dir}" && git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null )"; then
+      echo "gallery: ${id} has no upstream tracking branch, skipping" >&2
+      failures=1
+      continue
+    fi
+
+    ( cd "${dir}" && git log --oneline "HEAD..@{u}" ) || true
+    ( cd "${dir}" && git diff --stat "HEAD..@{u}" ) || true
+
+    if ! ( cd "${dir}" && git pull --ff-only ); then
+      echo "gallery: ${id} cannot be fast-forwarded (local changes or diverged history); resolve manually" >&2
+      failures=1
+      continue
+    fi
+    echo "updated ${id}"
+  done
+
+  if [ -n "${target}" ] && [ "${any}" -eq 0 ]; then
+    echo "gallery: no such git-managed plugin: ${target}" >&2
+    exit 1
+  fi
+  if [ -z "${target}" ] && [ "${any}" -eq 0 ]; then
+    echo "no git-managed plugins to update"
+  fi
+
+  local rout
+  if rout="$(ipc_call rescan)"; then
+    case "${rout}" in
+      "unknown verb:"*)
+        echo "gallery: Spoon does not yet support 'rescan' (${rout})" >&2
+        ;;
+      *)
+        printf '%s\n' "${rout}"
+        ;;
+    esac
+  else
+    echo "gallery: failed to reach Hammerspoon for rescan" >&2
+    failures=1
+  fi
+
+  [ "${failures}" -eq 0 ]
+}
+
+cmd_remove() {
+  local id="" assume_yes=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes)
+        assume_yes=1
+        ;;
+      -*)
+        echo "gallery: unknown option: $1" >&2
+        exit 1
+        ;;
+      *)
+        if [ -z "${id}" ]; then
+          id="$1"
+        else
+          echo "gallery: unexpected argument: $1" >&2
+          exit 1
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  if [ -z "${id}" ]; then
+    echo "usage: gallery remove <id> [--yes]" >&2
+    exit 1
+  fi
+  if ! valid_id "${id}"; then
+    echo "gallery: invalid id: ${id}" >&2
+    exit 1
+  fi
+
+  local dir="${PLUGIN_DIR}/${id}"
+  if [ ! -d "${dir}" ]; then
+    echo "gallery: no such plugin: ${id}" >&2
+    exit 1
+  fi
+
+  if [ "${assume_yes}" -ne 1 ]; then
+    printf 'Remove plugin %s (%s)? [y/N] ' "${id}" "${dir}" >&2
+    local reply
+    read -r reply || reply=""
+    case "${reply}" in
+      y|Y|yes|YES) : ;;
+      *)
+        echo "gallery: aborted" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  local out
+  if out="$(ipc_call disable "${id}")"; then
+    case "${out}" in
+      "unknown verb:"*) : ;;
+      *) printf '%s\n' "${out}" ;;
+    esac
+  else
+    echo "gallery: could not reach Hammerspoon to disable ${id}, continuing with removal" >&2
+  fi
+
+  if [ -e "${dir}/.git" ]; then
+    rm -rf "${dir}"
+    echo "removed ${id} (git checkout deleted)"
+  else
+    mkdir -p "${REMOVED_DIR}"
+    local ts
+    ts="$(date +%Y%m%dT%H%M%S)" || ts="$$"
+    local dest="${REMOVED_DIR}/${id}-${ts}"
+    mv "${dir}" "${dest}"
+    echo "moved ${id} -> ${dest}"
+  fi
+
+  local rout
+  if rout="$(ipc_call rescan)"; then
+    case "${rout}" in
+      "unknown verb:"*)
+        echo "gallery: Spoon does not yet support 'rescan' (${rout})" >&2
+        ;;
+      *)
+        printf '%s\n' "${rout}"
+        ;;
+    esac
+  else
+    echo "gallery: failed to reach Hammerspoon for rescan" >&2
+  fi
+}
+
+cmd_clone() {
+  local id="${1:?usage: gallery clone <id> <new-id>}"
+  local new_id="${2:?usage: gallery clone <id> <new-id>}"
+
+  if ! valid_id "${id}"; then
+    echo "gallery: invalid id: ${id}" >&2
+    exit 1
+  fi
+  if ! valid_id "${new_id}"; then
+    echo "gallery: invalid id: ${new_id}" >&2
+    exit 1
+  fi
+
+  command -v python3 >/dev/null 2>&1 || { echo "gallery: python3 not found on PATH" >&2; exit 1; }
+
+  # Bundled plugins are copied into PLUGIN_DIR at install time (see
+  # install.sh), so this is the only location a plugin ever lives in on a
+  # running system -- there is no separate "shipped" path to fall back to.
+  local src="${PLUGIN_DIR}/${id}"
+  local dest="${PLUGIN_DIR}/${new_id}"
+
+  if [ ! -d "${src}" ]; then
+    echo "gallery: no such plugin: ${id}" >&2
+    exit 1
+  fi
+  if [ -e "${dest}" ]; then
+    echo "gallery: plugin already exists: ${new_id}" >&2
+    exit 1
+  fi
+  if [ ! -f "${src}/manifest.json" ]; then
+    echo "gallery: ${id} has no manifest.json, cannot clone" >&2
+    exit 1
+  fi
+
+  cp -R "${src}" "${dest}"
+
+  if ! python3 -c '
+import json, sys
+path, new_id = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    data = json.load(f)
+data["id"] = new_id
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+' "${dest}/manifest.json" "${new_id}"; then
+    echo "gallery: failed to rewrite manifest id, rolling back" >&2
+    rm -rf "${dest}"
+    exit 1
+  fi
+
+  echo "cloned ${id} -> ${new_id} (${dest})"
+
+  local out
+  if out="$(ipc_call rescan)"; then
+    case "${out}" in
+      "unknown verb:"*)
+        echo "gallery: Spoon does not yet support 'rescan' (${out})" >&2
+        ;;
+      *)
+        printf '%s\n' "${out}"
+        ;;
+    esac
+  else
+    echo "gallery: failed to reach Hammerspoon for rescan" >&2
+  fi
 }
 
 cmd_reload() {
@@ -137,6 +658,20 @@ cmd_doctor() {
     ok=0
   fi
 
+  if command -v git >/dev/null 2>&1; then
+    echo "OK      git on PATH"
+  else
+    echo "MISSING git on PATH"
+    ok=0
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    echo "OK      python3 on PATH"
+  else
+    echo "MISSING python3 on PATH"
+    ok=0
+  fi
+
   if [ -d "${HOME}/.hammerspoon/Spoons/Gallery.spoon" ]; then
     echo "OK      Gallery.spoon installed"
   else
@@ -144,11 +679,17 @@ cmd_doctor() {
     ok=0
   fi
 
-  if [ -d "${HOME}/.config/gallery/plugins" ]; then
-    echo "OK      ~/.config/gallery/plugins exists"
+  if [ -d "${PLUGIN_DIR}" ]; then
+    echo "OK      ${PLUGIN_DIR} exists"
   else
-    echo "MISSING ~/.config/gallery/plugins exists"
+    echo "MISSING ${PLUGIN_DIR} exists"
     ok=0
+  fi
+
+  if [ -f "${GALLERY_JSON}" ]; then
+    echo "OK      ${GALLERY_JSON} exists"
+  else
+    echo "MISSING ${GALLERY_JSON} exists (informational; written once the Spoon persists state)"
   fi
 
   if command -v hs >/dev/null 2>&1; then
@@ -194,7 +735,7 @@ case "${command}" in
     cmd_status
     ;;
   list)
-    cmd_list
+    cmd_list "${1:-}"
     ;;
   open)
     cmd_open "${1:-}"
@@ -204,6 +745,27 @@ case "${command}" in
     ;;
   toggle)
     cmd_toggle "${1:-}"
+    ;;
+  enable)
+    cmd_enable "${1:-}"
+    ;;
+  disable)
+    cmd_disable "${1:-}"
+    ;;
+  add)
+    cmd_add "$@"
+    ;;
+  update)
+    cmd_update "${1:-}"
+    ;;
+  remove)
+    cmd_remove "$@"
+    ;;
+  clone)
+    cmd_clone "${1:-}" "${2:-}"
+    ;;
+  validate)
+    cmd_validate "${1:-}"
     ;;
   reload)
     cmd_reload

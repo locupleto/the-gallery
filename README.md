@@ -26,12 +26,16 @@ symlinked) and wires `~/.hammerspoon/init.lua` to load Gallery.
 ## Usage
 
 ```sh
-gallery status
-gallery list
-gallery open gallery.hello
-gallery toggle gallery.hello
-gallery doctor
+gallery status | list [--json] | open <id> | close <id> | toggle <id> |
+gallery enable <id> | disable <id> | validate <dir> |
+gallery add <git-url> [--enable] [--yes] | update [id] | remove <id> [--yes] |
+gallery clone <id> <new-id> | reload | log | doctor | install
 ```
+
+`add`, `update`, `remove`, and `clone` mirror Omarchy's `plugin` verbs:
+`add` clones a plugin from git into `~/.config/gallery/plugins`, `update`
+fast-forwards git-managed plugins, `remove` disables and deletes (or
+archives) one, and `clone` duplicates an installed plugin under a new id.
 
 Run `gallery` with no arguments, or see `bin/gallery`, for the full verb
 list.

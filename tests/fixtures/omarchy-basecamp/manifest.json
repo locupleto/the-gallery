@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "basecamp.notifications",
+  "name": "Basecamp",
+  "version": "0.1.0",
+  "kinds": ["bar-widget", "service"],
+  "entryPoints": {
+    "bar-widget": "Panel.qml",
+    "service": "Service.qml"
+  }
+}

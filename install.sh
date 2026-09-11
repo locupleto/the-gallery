@@ -112,8 +112,10 @@ spoon.Gallery:start()
 do
   -- Debounced: an install copies several files at once, and reloading on each
   -- event leaves the IPC port down for many seconds (or crashes Hammerspoon).
-  local galleryReloadTimer = nil
-  local gallerySpoonWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.hammerspoon/", function(files)
+  -- Both must be globals: a watcher held only by a local is garbage collected
+  -- and silently stops firing after a few minutes.
+  galleryReloadTimer = nil
+  gallerySpoonWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.hammerspoon/", function(files)
     for _, file in ipairs(files) do
       if file:sub(-4) == ".lua" then
         if galleryReloadTimer then galleryReloadTimer:stop() end

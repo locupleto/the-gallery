@@ -6,129 +6,78 @@
 --- that directory at start, validates each manifest, and exposes an IPC
 --- surface (see obj:ipc) that the `gallery` CLI drives.
 ---
---- This is a first draft written before Hammerspoon was available locally
---- for testing, so every call into the hs.* API is defensive (pcall-wrapped
---- where an API name or behavior could not be confirmed against a running
---- Hammerspoon).
+--- Phase 2: this file is the Spoon object only (metadata, start/stop, IPC
+--- dispatch, logging shim). The actual work lives in lib/, loaded below:
+---   lib/log.lua      -- append-only log
+---   lib/manifest.lua -- plugin discovery + manifest validation
+---   lib/state.lua    -- ~/.config/gallery/gallery.json (enable/disable)
+---   lib/panel.lua    -- webview open/close mechanics for panel-kind plugins
 
 local obj = {}
 obj.__index = obj
 
 -- Metadata
 obj.name = "Gallery"
-obj.version = "0.0.1"
+obj.version = "0.1.0"
 obj.author = "Urban Ottosson"
 obj.license = "MIT"
 obj.homepage = "https://github.com/locupleto/the-gallery"
 
 obj.pluginDir = os.getenv("HOME") .. "/.config/gallery/plugins"
-obj.logPath = os.getenv("HOME") .. "/Library/Logs/gallery.log"
 -- Written at the end of start(); the installer waits for it instead of probing
 -- the IPC port, because a probe killed mid-request can wedge or crash Hammerspoon.
 obj.readyPath = os.getenv("HOME") .. "/.config/gallery/state/ready"
 obj.plugins = {}
+obj.pluginList = {}
 obj.windows = {}
 -- Keyed by plugin id: the hs.window that was frontmost immediately before
 -- that plugin's panel was shown, captured so focus can be restored to it
--- on close (see manifest.gallery.panel.restoreFocus).
+-- on close (see manifest.gallery.panel.restoreFocus). Read/written by
+-- lib/panel.lua.
 obj.previousFocusWindow = {}
 
---- Append a timestamped line to obj.logPath and print to the Hammerspoon
---- console. Never raises: a failure to open the log file is silently
---- ignored so logging can never take Gallery down.
+--- Resolve a path within this Spoon's own directory. Prefers
+--- hs.spoons.resourcePath (see https://www.hammerspoon.org/docs/hs.spoons.html,
+--- confirmed present in this Hammerspoon build), which derives the Spoon's
+--- directory from the call stack of whoever calls it; wrapping the call in
+--- an anonymous function here keeps that stack lookup pointed at this file.
+--- Falls back to deriving the directory from this file's own
+--- debug.getinfo source if resourcePath is ever unavailable.
+local function resourcePath(partial)
+  local ok, result = pcall(function() return hs.spoons.resourcePath(partial) end)
+  if ok and result then
+    return result
+  end
+  local source = debug.getinfo(1, "S").source:sub(2)
+  local dir = source:match("(.*/)") or "./"
+  return dir .. partial
+end
+
+local Log = dofile(resourcePath("lib/log.lua"))
+local Manifest = dofile(resourcePath("lib/manifest.lua"))
+local State = dofile(resourcePath("lib/state.lua"))
+local Panel = dofile(resourcePath("lib/panel.lua"))
+
+Log.path = os.getenv("HOME") .. "/Library/Logs/gallery.log"
+obj.statePath = State.defaultPath()
+
+--- Append a timestamped line to Log.path and print to the Hammerspoon
+--- console. Never raises. Also exposed on obj (as obj.log) so lib/panel.lua
+--- can call ctx.log(level, msg) without a global.
 local function log(level, msg)
-  local line = string.format("%s %s %s", os.date("!%Y-%m-%dT%H:%M:%SZ"), level, msg)
+  Log.log(level, msg)
+end
+obj.log = log
 
-  local ok = pcall(function()
-    local f = io.open(obj.logPath, "a")
-    if f then
-      f:write(line, "\n")
-      f:close()
-    end
-  end)
-  if not ok then
-    -- Nothing more we can do if the log file itself is unwritable.
-  end
-
-  if hs and hs.printf then
-    pcall(hs.printf, "[Gallery] %s: %s", level, msg)
-  end
+--- True if id claims the first-party "gallery." namespace.
+local function isFirstParty(id)
+  return type(id) == "string" and id:match("^gallery%.") ~= nil
 end
 
---- True if value is present in the array-like table t.
-local function tableContains(t, value)
-  if type(t) ~= "table" then
-    return false
-  end
-  for _, v in ipairs(t) do
-    if v == value then
-      return true
-    end
-  end
-  return false
-end
-
---- Validate the minimal manifest fields Gallery relies on. Returns
---- true, or false plus a reason string.
-local function validateManifest(m)
-  if type(m) ~= "table" then
-    return false, "manifest is not a table"
-  end
-  if m.schemaVersion ~= 1 then
-    return false, "schemaVersion is not 1"
-  end
-  if type(m.id) ~= "string" or m.id == "" then
-    return false, "missing or invalid id"
-  end
-  if type(m.name) ~= "string" or m.name == "" then
-    return false, "missing or invalid name"
-  end
-  if type(m.version) ~= "string" or m.version == "" then
-    return false, "missing or invalid version"
-  end
-  if type(m.kinds) ~= "table" then
-    return false, "kinds is not a table"
-  end
-  if type(m.entryPoints) ~= "table" then
-    return false, "entryPoints is not a table"
-  end
-  return true
-end
-
---- Pick a floating window level from whichever Hammerspoon module currently
---- exposes windowLevels. This has moved between hs.drawing and hs.canvas
---- across Hammerspoon versions; try both and fall back to nil (the
---- system default level) rather than raising.
-local function pickWindowLevel()
-  local ok, level = pcall(function()
-    if hs.drawing and hs.drawing.windowLevels and hs.drawing.windowLevels.floating then
-      return hs.drawing.windowLevels.floating
-    end
-    if hs.canvas and hs.canvas.windowLevels and hs.canvas.windowLevels.floating then
-      return hs.canvas.windowLevels.floating
-    end
-    return nil
-  end)
-  if ok then
-    return level
-  end
-  return nil
-end
-
---- Default window style mask names (see manifest.gallery.panel.style) and
---- default focus mode (see manifest.gallery.panel.focus). Kept as named
---- constants so the gate test harness's `variant` subcommand and this file
---- agree on what "default" means.
-local DEFAULT_PANEL_STYLE = { "borderless", "utility" }
-local DEFAULT_PANEL_FOCUS = "activate"
-
---- Scan obj.pluginDir for plugin subdirectories containing manifest.json,
---- decode and validate each, and populate obj.plugins keyed by id. A
---- missing plugin directory, an unreadable manifest, or a manifest that
---- fails validation is logged and skipped -- this never raises.
--- Extensions are loaded eagerly here so the first panel open does not pay
--- their load cost (measured at about 2.5 s cold) and so their console
--- banners do not leak into CLI output.
+--- Preload the hs.* extensions Gallery depends on. Extensions are loaded
+--- eagerly here so the first panel open does not pay their load cost
+--- (measured at about 2.5 s cold) and so their console banners do not leak
+--- into CLI output.
 local function preloadExtensions()
   for _, name in ipairs({
     "hs.webview",
@@ -141,52 +90,48 @@ local function preloadExtensions()
     "hs.fs",
     "hs.application",
     "hs.window",
+    "hs.pathwatcher",
   }) do
     pcall(require, name)
   end
 end
 
+--- Re-scan obj.pluginDir and rebuild obj.plugins / obj.pluginList. Never
+--- raises (Manifest.scan doesn't either). Returns total, errored counts.
+local function loadPlugins(self)
+  local results = Manifest.scan(self.pluginDir)
+  table.sort(results, function(a, b)
+    return tostring(a.id or a.dir) < tostring(b.id or b.dir)
+  end)
+
+  self.plugins = {}
+  self.pluginList = results
+
+  local errored = 0
+  for _, entry in ipairs(results) do
+    local key = (entry.id and entry.id ~= "") and entry.id or entry.dir
+    self.plugins[key] = entry
+    if entry.errors and #entry.errors > 0 then
+      errored = errored + 1
+      log("WARN", "errored plugin " .. tostring(entry.id or entry.dir) .. " (" .. entry.dir .. "): " .. table.concat(entry.errors, "; "))
+    else
+      log("INFO", "loaded plugin " .. tostring(entry.id) .. " from " .. entry.dir)
+      if entry.warnings and #entry.warnings > 0 then
+        log("WARN", "plugin " .. tostring(entry.id) .. " has warnings: " .. table.concat(entry.warnings, "; "))
+      end
+    end
+  end
+
+  return #results, errored
+end
+
 function obj:start()
   preloadExtensions()
-  self.plugins = {}
   self.windows = self.windows or {}
   self.previousFocusWindow = self.previousFocusWindow or {}
 
-  local dirOk, dirAttr = pcall(hs.fs.attributes, self.pluginDir)
-  if not dirOk or not dirAttr or dirAttr.mode ~= "directory" then
-    log("WARN", "plugin directory not found: " .. tostring(self.pluginDir))
-    return self
-  end
-
-  local scanOk, scanErr = pcall(function()
-    for entry in hs.fs.dir(self.pluginDir) do
-      if entry ~= "." and entry ~= ".." then
-        local pluginPath = self.pluginDir .. "/" .. entry
-        local attr = hs.fs.attributes(pluginPath)
-        if attr and attr.mode == "directory" then
-          local manifestPath = pluginPath .. "/manifest.json"
-          if hs.fs.attributes(manifestPath) then
-            local readOk, manifest = pcall(hs.json.read, manifestPath)
-            if readOk and manifest then
-              local valid, reason = validateManifest(manifest)
-              if valid then
-                self.plugins[manifest.id] = { manifest = manifest, dir = pluginPath }
-                log("INFO", "loaded plugin " .. manifest.id .. " from " .. pluginPath)
-              else
-                log("WARN", "invalid manifest at " .. manifestPath .. ": " .. tostring(reason))
-              end
-            else
-              log("WARN", "failed to read/decode manifest at " .. manifestPath)
-            end
-          end
-        end
-      end
-    end
-  end)
-
-  if not scanOk then
-    log("ERROR", "error scanning plugin directory: " .. tostring(scanErr))
-  end
+  loadPlugins(self)
+  self.state = State.load(self.statePath)
 
   pcall(function()
     hs.fs.mkdir(os.getenv("HOME") .. "/.config/gallery/state")
@@ -214,12 +159,22 @@ function obj:ipc(verb, id)
       return self:status()
     elseif verb == "list" then
       return self:list()
+    elseif verb == "list-json" then
+      return self:listJson()
     elseif verb == "open" then
       return self:open(id)
     elseif verb == "close" then
       return self:close(id)
     elseif verb == "toggle" then
       return self:toggle(id)
+    elseif verb == "enable" then
+      return self:enable(id)
+    elseif verb == "disable" then
+      return self:disable(id)
+    elseif verb == "validate" then
+      return self:validateDir(id)
+    elseif verb == "rescan" then
+      return self:rescan()
     else
       return "unknown verb: " .. tostring(verb)
     end
@@ -236,8 +191,13 @@ end
 --- One-line summary of Gallery's current state.
 function obj:status()
   local pluginCount = 0
-  for _ in pairs(self.plugins) do
-    pluginCount = pluginCount + 1
+  local erroredCount = 0
+  for _, entry in pairs(self.plugins) do
+    if entry.errors and #entry.errors > 0 then
+      erroredCount = erroredCount + 1
+    else
+      pluginCount = pluginCount + 1
+    end
   end
 
   local windowCount = 0
@@ -246,28 +206,65 @@ function obj:status()
   end
 
   return string.format(
-    "Gallery %s; plugins=%d; pluginDir=%s; windows=%d",
+    "Gallery %s; plugins=%d; errored=%d; pluginDir=%s; windows=%d",
     obj.version,
     pluginCount,
+    erroredCount,
     self.pluginDir,
     windowCount
   )
 end
 
---- One line per loaded plugin: "<id>\t<version>\t<kinds joined by comma>".
+--- One line per scanned plugin: "<id>\t<version>\t<kinds joined by comma>\t<state>",
+--- state being enabled|disabled|errored.
 function obj:list()
   local lines = {}
-  for id, entry in pairs(self.plugins) do
-    local kinds = table.concat(entry.manifest.kinds or {}, ",")
-    table.insert(lines, string.format("%s\t%s\t%s", id, entry.manifest.version, kinds))
+  for _, entry in ipairs(self.pluginList) do
+    local manifest = entry.manifest or {}
+    local state
+    if entry.errors and #entry.errors > 0 then
+      state = "errored"
+    elseif State.isEnabled(self.state, entry.id, isFirstParty(entry.id)) then
+      state = "enabled"
+    else
+      state = "disabled"
+    end
+    local kinds = table.concat(manifest.kinds or {}, ",")
+    table.insert(lines, string.format("%s\t%s\t%s\t%s", tostring(entry.id), tostring(manifest.version or ""), kinds, state))
   end
   table.sort(lines)
   return table.concat(lines, "\n")
 end
 
---- Open a panel-kind plugin's window. Sizes and positions the webview from
---- the manifest's gallery.panel config, centred on the screen under the
---- mouse, and remembers it in obj.windows keyed by id.
+--- JSON array of {id,name,version,kinds,enabled,errored,errors,warnings,dir}
+--- for every scanned plugin.
+function obj:listJson()
+  local out = {}
+  for _, entry in ipairs(self.pluginList) do
+    local manifest = entry.manifest or {}
+    local errored = (entry.errors and #entry.errors > 0) or false
+    table.insert(out, {
+      id = entry.id,
+      name = manifest.name,
+      version = manifest.version,
+      kinds = manifest.kinds or {},
+      enabled = (not errored) and State.isEnabled(self.state, entry.id, isFirstParty(entry.id)) or false,
+      errored = errored,
+      errors = entry.errors or {},
+      warnings = entry.warnings or {},
+      dir = entry.dir,
+    })
+  end
+
+  local encodeOk, encoded = pcall(hs.json.encode, out)
+  if not encodeOk then
+    error("failed to encode plugin list: " .. tostring(encoded))
+  end
+  return encoded
+end
+
+--- Open a panel-kind plugin's window (see lib/panel.lua). Refuses unknown,
+--- errored, and disabled plugins.
 function obj:open(id)
   if not id or id == "" then
     return "usage: open <id>"
@@ -278,237 +275,25 @@ function obj:open(id)
     return "unknown plugin: " .. id
   end
 
-  if self.windows[id] then
-    return "already open: " .. id
+  if entry.errors and #entry.errors > 0 then
+    return "errored: " .. id .. " (" .. table.concat(entry.errors, "; ") .. ")"
   end
 
-  local manifest = entry.manifest
-  if not tableContains(manifest.kinds, "panel") then
-    return "plugin does not support panel: " .. id
+  if not State.isEnabled(self.state, id, isFirstParty(id)) then
+    return "not enabled: " .. id
   end
 
-  local entryPoint = manifest.entryPoints and manifest.entryPoints.panel
-  if not entryPoint then
-    return "no panel entry point declared: " .. id
-  end
-
-  local panelCfg = (manifest.gallery and manifest.gallery.panel) or {}
-  local width = panelCfg.width or 640
-  local height = panelCfg.height or 400
-
-  local screenFrame = nil
-  local screenOk, screen = pcall(function() return hs.mouse.getCurrentScreen() end)
-  if screenOk and screen then
-    local frameOk, frame = pcall(function() return screen:frame() end)
-    if frameOk then
-      screenFrame = frame
-    end
-  end
-  if not screenFrame then
-    local mainOk, mainScreen = pcall(function() return hs.screen.mainScreen() end)
-    if mainOk and mainScreen then
-      local frameOk, frame = pcall(function() return mainScreen:frame() end)
-      if frameOk then
-        screenFrame = frame
-      end
-    end
-  end
-
-  local rect
-  if screenFrame then
-    rect = {
-      x = screenFrame.x + (screenFrame.w - width) / 2,
-      y = screenFrame.y + (screenFrame.h - height) / 2,
-      w = width,
-      h = height,
-    }
-  else
-    rect = { x = 0, y = 0, w = width, h = height }
-  end
-
-  local path = entry.dir .. "/" .. entryPoint
-
-  -- JavaScript-to-Lua bridge: a usercontent controller named "gallery" is
-  -- wired into the webview so page JS can call window.gallery.close() and
-  -- window.gallery.log(msg). Built defensively -- if the controller cannot
-  -- be created (or its callback/script cannot be attached) the webview is
-  -- still created without it rather than failing the whole open.
-  local ucc = nil
-  do
-    local uccOk, controller = pcall(function() return hs.webview.usercontent.new("gallery") end)
-    if uccOk and controller then
-      ucc = controller
-
-      local callbackOk, callbackErr = pcall(function()
-        ucc:setCallback(function(message)
-          local body = message and message.body
-          if type(body) ~= "table" then
-            return
-          end
-          if body.action == "close" then
-            self:close(id)
-          elseif body.action == "log" then
-            log("INFO", "[" .. id .. "] " .. tostring(body.message))
-          end
-        end)
-      end)
-      if not callbackOk then
-        log("WARN", "failed to set usercontent callback for " .. id .. ": " .. tostring(callbackErr))
-      end
-
-      local injectOk, injectErr = pcall(function()
-        ucc:injectScript({
-          source = [[
-window.gallery = {
-  close: function () { webkit.messageHandlers.gallery.postMessage({action: "close"}); },
-  log: function (m) { webkit.messageHandlers.gallery.postMessage({action: "log", message: String(m)}); }
-};
-]],
-          injectionTime = "documentStart",
-        })
-      end)
-      if not injectOk then
-        log("WARN", "failed to inject gallery bridge script for " .. id .. ": " .. tostring(injectErr))
-      end
-    else
-      log("WARN", "failed to create usercontent controller for " .. id .. "; JS bridge disabled")
-    end
-  end
-
-  local webviewOk, webview
-  if ucc then
-    webviewOk, webview = pcall(hs.webview.new, rect, {}, ucc)
-  else
-    webviewOk, webview = pcall(hs.webview.new, rect)
-  end
-  if not webviewOk or not webview then
-    log("ERROR", "failed to create webview for " .. id)
-    return "error: could not create window for " .. id
-  end
-
-  -- Window style: manifest.gallery.panel.style is an array of
-  -- hs.webview.windowMasks key names (default {"borderless","utility"}).
-  -- hs.webview:windowStyle accepts that array directly and combines the
-  -- named masks with bitwise-or internally.
-  local styleList = panelCfg.style
-  if type(styleList) ~= "table" or #styleList == 0 then
-    styleList = DEFAULT_PANEL_STYLE
-  end
-  local styleOk, styleErr = pcall(function() webview:windowStyle(styleList) end)
-  if not styleOk then
-    log("WARN", "failed to apply window style for " .. id .. ": " .. tostring(styleErr))
-  end
-  local styleDesc = table.concat(styleList, "+")
-
-  local level = pickWindowLevel()
-  if level then
-    pcall(function() webview:level(level) end)
-  end
-
-  pcall(function() webview:allowTextEntry(true) end)
-
-  if panelCfg.transparent then
-    pcall(function() webview:transparent(true) end)
-  end
-
-  pcall(function() webview:deleteOnClose(true) end)
-  pcall(function() webview:bringToFront(true) end)
-
-  pcall(function()
-    webview:windowCallback(function(action)
-      if action == "closing" then
-        self.windows[id] = nil
-      end
-    end)
-  end)
-
-  pcall(function() webview:url("file://" .. path) end)
-
-  -- Capture whatever was frontmost right before this panel is shown, so
-  -- obj:close can restore focus to it afterwards (manifest.gallery.panel.restoreFocus).
-  local prevFrontOk, prevFront = pcall(function() return hs.window.frontmostWindow() end)
-  self.previousFocusWindow[id] = (prevFrontOk and prevFront) or nil
-
-  pcall(function() webview:show() end)
-
-  self.windows[id] = webview
-
-  -- Focus handling: manifest.gallery.panel.focus (default "activate").
-  --   "activate" -- activate the Hammerspoon app, then focus this window.
-  --   "window"   -- focus this window only, do not activate the app.
-  --   "none"     -- do nothing; whatever has focus keeps it.
-  local focusMode = panelCfg.focus
-  if focusMode ~= "activate" and focusMode ~= "window" and focusMode ~= "none" then
-    if focusMode ~= nil then
-      log("WARN", "unknown focus mode '" .. tostring(focusMode) .. "' for " .. id .. "; defaulting to " .. DEFAULT_PANEL_FOCUS)
-    end
-    focusMode = DEFAULT_PANEL_FOCUS
-  end
-
-  if focusMode == "activate" then
-    pcall(function()
-      local app = hs.application.get("Hammerspoon")
-      if app then
-        app:activate(true)
-      end
-    end)
-    pcall(function()
-      local hsWindow = webview:hswindow()
-      if hsWindow then
-        hsWindow:focus()
-      end
-    end)
-  elseif focusMode == "window" then
-    pcall(function()
-      local hsWindow = webview:hswindow()
-      if hsWindow then
-        hsWindow:focus()
-      end
-    end)
-  end
-  -- focusMode == "none": nothing to do.
-
-  log("INFO", string.format("opened %s style=%s focus=%s", id, styleDesc, focusMode))
-  return "opened " .. id
+  return Panel.open(self, id)
 end
 
---- Close and forget a plugin's open window. If
---- manifest.gallery.panel.restoreFocus is not false, also attempts to
---- refocus whatever window was frontmost before this plugin's panel was
---- shown (captured in obj:open).
+--- Close a plugin's open window (see lib/panel.lua). Deliberately
+--- permissive -- not gated on enabled/errored state -- so an already-open
+--- window can always be closed (obj:disable relies on this).
 function obj:close(id)
   if not id or id == "" then
     return "usage: close <id>"
   end
-
-  local win = self.windows[id]
-  if not win then
-    return "not open: " .. id
-  end
-
-  pcall(function() win:delete() end)
-  self.windows[id] = nil
-
-  local prevWindow = self.previousFocusWindow[id]
-  self.previousFocusWindow[id] = nil
-
-  local entry = self.plugins[id]
-  local panelCfg = (entry and entry.manifest and entry.manifest.gallery and entry.manifest.gallery.panel) or {}
-  if panelCfg.restoreFocus ~= false then
-    if prevWindow then
-      local restoreOk, restoreErr = pcall(function() prevWindow:focus() end)
-      if restoreOk then
-        log("INFO", "restored previous focus after closing " .. id)
-      else
-        log("WARN", "failed to restore previous focus after closing " .. id .. ": " .. tostring(restoreErr))
-      end
-    else
-      log("INFO", "no previous window captured to restore focus to after closing " .. id)
-    end
-  end
-
-  log("INFO", "closed " .. id)
-  return "closed " .. id
+  return Panel.close(self, id)
 end
 
 --- Open if not currently open, otherwise close.
@@ -516,11 +301,86 @@ function obj:toggle(id)
   if not id or id == "" then
     return "usage: toggle <id>"
   end
-
   if self.windows[id] then
     return self:close(id)
   end
   return self:open(id)
+end
+
+--- Mark a plugin enabled and persist it to gallery.json.
+function obj:enable(id)
+  if not id or id == "" then
+    return "usage: enable <id>"
+  end
+  local entry = self.plugins[id]
+  if not entry then
+    return "unknown plugin: " .. id
+  end
+
+  State.enable(self.state, id, self.statePath)
+  log("INFO", "enabled " .. id)
+  return "enabled: " .. id
+end
+
+--- Mark a plugin disabled and persist it to gallery.json, closing its
+--- window first if open.
+function obj:disable(id)
+  if not id or id == "" then
+    return "usage: disable <id>"
+  end
+  local entry = self.plugins[id]
+  if not entry then
+    return "unknown plugin: " .. id
+  end
+
+  if self.windows[id] then
+    self:close(id)
+  end
+
+  State.disable(self.state, id, self.statePath)
+  log("INFO", "disabled " .. id)
+  return "disabled: " .. id
+end
+
+--- Validate the manifest.json in an arbitrary directory (not necessarily
+--- one Gallery has scanned) and report errors/warnings as text.
+function obj:validateDir(dir)
+  if not dir or dir == "" then
+    return "usage: validate <dir>"
+  end
+
+  local manifestPath = dir .. "/manifest.json"
+  local readOk, manifest = pcall(hs.json.read, manifestPath)
+  if not readOk or not manifest then
+    return "errors:\nfailed to read/decode manifest at " .. manifestPath
+  end
+
+  local errors, warnings = Manifest.validate(manifest, dir)
+  local lines = {}
+  if #errors > 0 then
+    -- bin/gallery's cmd_validate/cmd_add match on the "errors:" prefix.
+    table.insert(lines, "errors:")
+    for _, e in ipairs(errors) do table.insert(lines, e) end
+    if #warnings > 0 then
+      table.insert(lines, "warnings:")
+      for _, w in ipairs(warnings) do table.insert(lines, w) end
+    end
+  elseif #warnings > 0 then
+    -- bin/gallery's cmd_add matches on a bare "warnings:" prefix (not
+    -- "ok\nwarnings:...") for the warnings-only case.
+    table.insert(lines, "warnings:")
+    for _, w in ipairs(warnings) do table.insert(lines, w) end
+  else
+    -- bin/gallery's cmd_validate/cmd_add match on the exact string "ok".
+    table.insert(lines, "ok")
+  end
+  return table.concat(lines, "\n")
+end
+
+--- Re-run the manifest scan without a full Hammerspoon reload.
+function obj:rescan()
+  local total, errored = loadPlugins(self)
+  return string.format("rescanned: plugins=%d errored=%d", total - errored, errored)
 end
 
 return obj
