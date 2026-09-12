@@ -5,6 +5,9 @@
 #
 # Usage:
 #   gallery-qml <plugin-dir> [entry.qml] --title "<Name>" [--width W --height H]
+#   gallery-qml --setup      build the venv and the Gallery.app wrapper, launch
+#                            nothing (what install.sh and `gallery doctor` point
+#                            at for a fresh machine)
 #
 # Creates (once) and reuses a dedicated venv at ~/.config/gallery/qml-venv
 # via uv, using a uv-managed Python (never Homebrew's) per this repo's
@@ -121,6 +124,17 @@ ensure_bundle() {
 PLIST
   fi
 }
+
+if [ "${1:-}" = "--setup" ]; then
+  ensure_venv
+  if ensure_bundle && [ -x "${BUNDLE_EXE}" ]; then
+    echo "gallery-qml: venv ready at ${VENV_DIR}, bundle ready at ${BUNDLE}"
+  else
+    echo "gallery-qml: venv ready at ${VENV_DIR}; bundle could not be built (plugins will run from the bare interpreter)" >&2
+  fi
+  "${VENV_PY}" -c 'import PySide6; print("gallery-qml: PySide6", PySide6.__version__)'
+  exit 0
+fi
 
 ensure_venv
 

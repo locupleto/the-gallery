@@ -312,6 +312,15 @@ else
   echo "[gallery] ${HS_INIT} already references Gallery, leaving it untouched"
 fi
 
+# --- skhd bindings, first copy ------------------------------------------------------
+# skhdrc includes gallery.skhd; put the real file in place BEFORE the tiler step so
+# that when tiler/install.sh starts or restarts skhd (a fresh machine, or a changed
+# skhdrc) the new instance already carries the Gallery keys. The reload further
+# down covers the case where only this file changed.
+SKHD_DIR="${HOME_DIR}/.config/skhd"
+run mkdir -p "${SKHD_DIR}"
+run install -m 644 "${SCRIPT_DIR}/skhd/gallery.skhd" "${SKHD_DIR}/gallery.skhd"
+
 # --- tiler (yabai, skhd, JankyBorders, Learn) --------------------------------------
 # The Gallery's tiling layer lives in tiler/ in this same repo. Its installer places
 # ~/.config/yabai/yabairc and ~/.config/skhd/skhdrc (which includes gallery.skhd,
@@ -331,14 +340,29 @@ else
   "${SCRIPT_DIR}/tiler/install.sh" ${tiler_args[@]+"${tiler_args[@]}"}
 fi
 
-# --- skhd bindings ----------------------------------------------------------------
-# Copied next to skhdrc, which includes it with `.load "gallery.skhd"` (added by
-# tiler/install.sh in this repo). skhd is reloaded if it is running.
-SKHD_DIR="${HOME_DIR}/.config/skhd"
+# --- skhd bindings, reload ----------------------------------------------------------
+# gallery.skhd (copied above) is included by skhdrc with `.load "gallery.skhd"`.
+# skhd is asked to reload if it is running, so a change to this file alone takes
+# effect without a restart.
 if [ -d "${SKHD_DIR}" ]; then
-  run install -m 644 "${SCRIPT_DIR}/skhd/gallery.skhd" "${SKHD_DIR}/gallery.skhd"
   if pgrep -xq skhd; then
-    if [ "${DRY_RUN}" -eq 1 ]; then echo "[dry] skhd --reload"; else skhd --reload && echo "[gallery] skhd reloaded"; fi
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      echo "[dry] skhd --reload"
+    else
+      # `skhd --restart-service` (tiler step) returns before the new instance
+      # has written its pid-file; for a few seconds `skhd --reload` then fails
+      # with "could not locate existing instance". Retry briefly.
+      reload_tries=0
+      until skhd --reload 2>/dev/null; do
+        reload_tries=$((reload_tries + 1))
+        if [ "${reload_tries}" -ge 10 ]; then
+          echo "[gallery] skhd --reload did not succeed after ${reload_tries} tries; run it by hand" >&2
+          break
+        fi
+        sleep 1
+      done
+      [ "${reload_tries}" -lt 10 ] && echo "[gallery] skhd reloaded"
+    fi
   fi
   # The tiler's key sheet (vault Cheat-Sheets/Tiler-Keys.md, plus the copy the
   # voice assistant reads) is generated from the "## " lines of skhdrc and its
@@ -381,6 +405,26 @@ link_omarchy_theme() {
 }
 link_omarchy_theme "${OMARCHY_THEME_LINK}"
 link_omarchy_theme "${OMARCHY_STATE_THEME_LINK}"
+
+# --- theme render ---------------------------------------------------------------------
+# A fresh machine has no ~/.config/gallery/state/theme.{css,json,sh} until a theme
+# is set or rendered, yet the Spoon, the theme picker, gallery-borders and the
+# iTerm2 dynamic profiles all read those files. Render the current theme now
+# (renderers only -- hooks and the Spoon are not touched; cheap and idempotent),
+# then re-sync the borders daemon, which yabairc may have launched before the
+# render existed and which reconfigures in place.
+if [ "${DRY_RUN}" -eq 1 ]; then
+  echo "[dry] gallery theme render; gallery-borders apply"
+else
+  if "${BIN_DEST}" theme render >/dev/null 2>&1; then
+    echo "[gallery] theme rendered ($(readlink "${THEMES_DEST}/current" 2>/dev/null || echo current))"
+  else
+    echo "[gallery] theme render failed; run 'gallery theme render' by hand" >&2
+  fi
+  if pgrep -xq borders && [ -x "${BORDERS_BIN_DEST}" ]; then
+    "${BORDERS_BIN_DEST}" apply >/dev/null 2>&1 && echo "[gallery] borders re-synced to the rendered theme" || true
+  fi
+fi
 
 # --- Hammerspoon reload -------------------------------------------------------------
 # The init.lua pathwatcher reloads Hammerspoon (debounced) when the Spoon copy above
