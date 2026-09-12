@@ -321,11 +321,14 @@ fi
 if [ "${SKIP_TILER}" -eq 1 ]; then
   echo "[gallery] --skip-tiler: not running tiler/install.sh"
 else
+  # Expanded with the ${arr[@]+"${arr[@]}"} idiom: under `set -u`, the stock
+  # macOS bash 3.2 (/bin/bash, what a Mac without Homebrew's bash runs this
+  # with) treats an EMPTY array expansion as an unbound variable.
   tiler_args=()
   [ "${DRY_RUN}" -eq 1 ] && tiler_args+=(--dry-run)
   [ "${RESTART_TILER}" -eq 1 ] && tiler_args+=(--restart)
-  echo "[gallery] running tiler/install.sh ${tiler_args[*]}"
-  "${SCRIPT_DIR}/tiler/install.sh" "${tiler_args[@]}"
+  echo "[gallery] running tiler/install.sh ${tiler_args[@]+"${tiler_args[*]}"}"
+  "${SCRIPT_DIR}/tiler/install.sh" ${tiler_args[@]+"${tiler_args[@]}"}
 fi
 
 # --- skhd bindings ----------------------------------------------------------------
