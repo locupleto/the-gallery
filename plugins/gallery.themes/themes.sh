@@ -65,10 +65,33 @@ get_val() {
   sed -n "s/^${key}[[:space:]]*=[[:space:]]*\"\\(.*\\)\"[[:space:]]*\$/\\1/p" "$file" | head -1
 }
 
+# --- width awareness ---------------------------------------------------------
+# The header (instructions + swatch grid) lives in fzf's LIST pane, which is
+# half the window (preview-window=right:50%). On a 16" MacBook the Gallery
+# window's 6:6 grid gives ~105 columns in total, so the list pane has ~48 --
+# the full header lines (up to 85 columns) and the two-column swatch grid
+# (60) are cut off there, key hints included. Below COMPACT_BELOW list
+# columns the header switches to a compact form: shorter wording, the border
+# prefs on two lines, and swatches without their hex values.
+#
+# fzf exports FZF_COLUMNS to transform/execute commands (the --swatches
+# subprocess); the initial --header is built before fzf starts, where
+# `tput cols` reads the window. A fallback of 160 (wide) keeps the full form
+# when neither is known.
+COMPACT_BELOW=86   # the full border line is 85 columns
+list_cols() {
+  local total
+  total="${FZF_COLUMNS:-${COLUMNS:-$(tput cols 2>/dev/null || echo 160)}}"
+  [[ "$total" =~ ^[0-9]+$ ]] || total=160
+  printf '%d' $(( total / 2 - 4 ))
+}
+COMPACT=0
+[[ "$(list_cols)" -lt "$COMPACT_BELOW" ]] && COMPACT=1
+
 # swatch LABEL HEX -- one truecolor block + label + hex value, or nothing if
 # HEX is empty/malformed (missing-key tolerance lives here). Fixed visible
 # width when HEX is present -- see CELL_WIDTH below, which depends on this
-# exact format string.
+# exact format string. Compact mode drops the hex value (block + label only).
 swatch() {
   local label="$1" hex="$2" r g b
   [[ -n "$hex" ]] || return 0
@@ -80,7 +103,11 @@ swatch() {
   r=$((16#${hex:0:2}))
   g=$((16#${hex:2:2}))
   b=$((16#${hex:4:2}))
-  printf '\033[48;2;%d;%d;%dm   \033[0m  %-16s #%s\n' "$r" "$g" "$b" "$label" "$hex"
+  if [[ "$COMPACT" -eq 1 ]]; then
+    printf '\033[48;2;%d;%d;%dm   \033[0m  %-17.17s\n' "$r" "$g" "$b" "$label"
+  else
+    printf '\033[48;2;%d;%d;%dm   \033[0m  %-16s #%s\n' "$r" "$g" "$b" "$label" "$hex"
+  fi
 }
 
 # --- swatches (list-side header) -------------------------------------------
@@ -91,6 +118,7 @@ swatch() {
 # the right-hand column still lines up across rows even when a theme is
 # missing one of the left-hand keys.
 CELL_WIDTH=29
+[[ "$COMPACT" -eq 1 ]] && CELL_WIDTH=22   # 3 + 2 + 17, no hex (see swatch)
 
 # Two-column layout: 16 colours in 8 rows. Index i pairs LEFT_KEYS[i] with
 # RIGHT_KEYS[i]. The last right-hand slot is a spare -- most colors.toml
@@ -266,6 +294,17 @@ static_header() {
   prefs="$(borders_prefs)"
   width="${prefs%% *}"
   bright="${prefs##* }"
+  if [[ "$COMPACT" -eq 1 ]]; then
+    # Narrow list pane (see list_cols): same facts, four short lines, so
+    # every key hint stays visible.
+    case "$mode" in
+      theme) console_line="Console: follows theme  ctrl-t" ;;
+      *)     console_line="Console: iTerm Default  ctrl-t" ;;
+    esac
+    printf 'Current: %s  Enter applies, Esc closes\n%s\nBorder width %s  ctrl-w\nBorder bright %s  ctrl-b\n' \
+      "${current:-(none)}" "$console_line" "$(width_radio "$width")" "$(bright_radio "$bright")"
+    return 0
+  fi
   border_line="$(printf 'Border: width %s  ctrl-w cycles   bright %s  ctrl-b toggles' \
     "$(width_radio "$width")" "$(bright_radio "$bright")")"
   printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n%s\n%s\n' \

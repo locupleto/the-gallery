@@ -279,7 +279,18 @@ theme="$(theme_name)"
 self_q="$(printf '%q' "$SELF")"
 themes_q="$(printf '%q' "$THEMES_SH")"
 
-if [[ "$from_themes" -eq 1 ]]; then
+# The list pane is 40% of the window (preview-window=right:60%); on a 16"
+# MacBook that is ~38 columns, so keep the header short there (same idea as
+# themes.sh's compact mode).
+total_cols="${FZF_COLUMNS:-${COLUMNS:-$(tput cols 2>/dev/null || echo 160)}}"
+[[ "$total_cols" =~ ^[0-9]+$ ]] || total_cols=160
+if [[ $(( total_cols * 4 / 10 - 4 )) -lt 56 ]]; then
+  if [[ "$from_themes" -eq 1 ]]; then
+    header="${theme:-(unknown)}  Enter applies, Esc back"
+  else
+    header="${theme:-(unknown)}  Enter applies, Esc closes"
+  fi
+elif [[ "$from_themes" -eq 1 ]]; then
   header="Theme: ${theme:-(unknown)} -- Enter applies, Esc back to themes"
 else
   header="Theme: ${theme:-(unknown)} -- Enter applies, Esc closes"
