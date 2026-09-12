@@ -139,7 +139,8 @@ menu() {
     command -v fzf >/dev/null || die "fzf is not installed (brew install fzf)"
     local pick
     pick="$(list_sheets | fzf --height=100% --layout=reverse --border=rounded \
-        --prompt='Learn > ' --header='Enter shows a sheet, Esc closes' \
+        --prompt='Learn > ' --header='Enter shows a sheet • Shift+Up/Down or Alt+Up/Down scroll preview • Esc closes' \
+        --bind 'shift-up:preview-up,shift-down:preview-down,alt-up:preview-half-page-up,alt-down:preview-half-page-down' \
         --preview "\"$SELF\" preview {}" \
         --preview-window=right:60%:wrap)" || exit 0
     [ -n "$pick" ] && exec "$SELF" ${LEARN_DISPLAY:+--display "$LEARN_DISPLAY"} show "$pick"
