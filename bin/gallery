@@ -36,6 +36,11 @@
 #   gallery console theme
 #   gallery console native
 #   gallery console toggle
+#   gallery widgets status
+#   gallery widgets available
+#   gallery widgets theme
+#   gallery widgets native
+#   gallery widgets toggle
 #   gallery borders status
 #   gallery borders width <1-12>
 #   gallery borders bright on|off|toggle
@@ -60,6 +65,7 @@ THEME_DIR="${CONFIG_DIR}/themes"
 THEME_HOOKS_DIR="${GALLERY_THEME_HOOKS_DIR:-${CONFIG_DIR}/hooks/theme-set.d}"
 BACKGROUNDS_STATE_FILE="${CONFIG_DIR}/state/backgrounds.json"
 CONSOLE_STATE_FILE="${CONFIG_DIR}/state/console.json"
+WIDGETS_STATE_FILE="${CONFIG_DIR}/state/widgets.json"
 BORDERS_STATE_FILE="${CONFIG_DIR}/state/borders.json"
 # Installed by install.sh from this repo's patches/ directory -- see that
 # directory's own README.md for the mechanism (macOS replacements for a
@@ -124,6 +130,11 @@ commands:
   console theme                   make the iTerm console follow the active theme
   console native                  restore the iTerm console to its own Default colours
   console toggle                  flip between theme and native
+  widgets status                  show whether the Übersicht crystal widgets follow the theme
+  widgets available               exit 0 if Übersicht runs with the crystal widgets, else 1
+  widgets theme                   make the crystal widgets follow the active theme
+  widgets native                  restore the crystal widgets' own shipped colours
+  widgets toggle                  flip between theme and native
   borders status                  show the focused-window border width/bright prefs
   borders width <1-12>            set the focused-window border width (default 5)
   borders bright on|off|toggle    mix the active border colour toward bright_foreground
@@ -1756,6 +1767,210 @@ cmd_console() {
   esac
 }
 
+# --- Übersicht crystal widgets mode ------------------------------------------
+#
+# The crystal widgets (locupleto/crystal-widgets-v2, an Übersicht desktop
+# widget set) can either follow the active Gallery theme -- their static
+# white becomes the theme's lightest foreground, their bar fill the accent --
+# or keep their own shipped colours. Recorded in WIDGETS_STATE_FILE as
+# {"mode": "theme"} or {"mode": "native"}; missing/invalid means native, the
+# same contract as the iTerm console mode above. Switching modes re-runs the
+# renderer, which rewrites state/crystal.css (read by the widgets'
+# crystal-theme.widget every couple of seconds) and adds or drops
+# CRYSTAL_BAR_COLOR in theme.sh (read by their crystal_common.sh on every
+# refresh), so the desktop follows within a refresh or two.
+#
+# The setting only makes sense while Übersicht is running with these
+# widgets; widgets_available is what the theme picker consults to decide
+# whether to show the ctrl-u line at all.
+
+# widgets_read_mode -- prints "theme" or "native" (default "native").
+widgets_read_mode() {
+  if [ ! -f "${WIDGETS_STATE_FILE}" ]; then
+    printf 'native'
+    return 0
+  fi
+  python3 -c '
+import json, sys
+
+path = sys.argv[1]
+mode = "native"
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        val = data.get("mode")
+        if val in ("theme", "native"):
+            mode = val
+except Exception:
+    pass
+sys.stdout.write(mode)
+' "${WIDGETS_STATE_FILE}"
+}
+
+# widgets_write_mode <mode> -- atomically records the mode (same temp file +
+# os.replace pattern as console_write_mode).
+widgets_write_mode() {
+  local mode="$1"
+  mkdir -p "$(dirname "${WIDGETS_STATE_FILE}")"
+  python3 -c '
+import json, os, sys, tempfile
+
+path, mode = sys.argv[1], sys.argv[2]
+
+d = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".widgets.", suffix=".json", dir=d)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"mode": mode}, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+except Exception:
+    os.unlink(tmp)
+    raise
+' "${WIDGETS_STATE_FILE}" "${mode}"
+}
+
+# widgets_dir -- prints the widget directory the running Übersicht serves:
+# the `-d <dir>` argument of its server.js process when set (a custom
+# folder, as on the Studio), else the app's default folder. Prints nothing
+# when Übersicht is not running.
+widgets_dir() {
+  local args dir
+  args="$(ps -axo args= 2>/dev/null | grep '[R]esources/server.js' | head -n 1)"
+  [ -n "${args}" ] || return 1
+  dir="$(printf '%s\n' "${args}" | sed -n 's/.* -d \(.*\) -p [0-9][0-9]* .*/\1/p')"
+  if [ -z "${dir}" ]; then
+    dir="${HOME}/Library/Application Support/Übersicht/widgets"
+  fi
+  printf '%s' "${dir}"
+}
+
+# widgets_available -- returns 0 when Übersicht is running AND its widget
+# directory contains at least one crystal-*.widget, else 1. Cheap enough to
+# run per keystroke from the picker (one ps, one glob).
+widgets_available() {
+  local dir
+  dir="$(widgets_dir)" || return 1
+  [ -d "${dir}" ] || return 1
+  local w
+  for w in "${dir}"/crystal-*.widget; do
+    [ -d "${w}" ] && return 0
+  done
+  return 1
+}
+
+cmd_widgets_status() {
+  local mode
+  mode="$(widgets_read_mode)"
+  if [ "${mode}" = "theme" ]; then
+    echo "widgets: theme (following $(theme_current_name || true))"
+  else
+    echo "widgets: native (crystal widgets' own shipped colours)"
+  fi
+
+  local dir
+  if dir="$(widgets_dir)"; then
+    if widgets_available; then
+      echo "ubersicht: running, crystal widgets in ${dir}"
+      if [ -d "${dir}/crystal-theme.widget" ]; then
+        echo "crystal-theme.widget: installed"
+      else
+        echo "crystal-theme.widget: missing -- static colours stay shipped white; only the bar fill follows the theme"
+      fi
+    else
+      echo "ubersicht: running, but no crystal-*.widget in ${dir} -- setting has no effect"
+    fi
+  else
+    echo "ubersicht: not running -- setting has no effect"
+  fi
+
+  if [ -f "${CONFIG_DIR}/state/crystal.css" ]; then
+    echo "crystal.css: exists"
+  else
+    echo "crystal.css: missing (run: gallery theme render)"
+  fi
+}
+
+cmd_widgets_available() {
+  if widgets_available; then
+    echo "available"
+    return 0
+  fi
+  echo "unavailable"
+  return 1
+}
+
+# widgets_set_mode <theme|native> -- records the mode, then re-renders
+# (crystal.css + theme.sh) unless there is no current theme to render from.
+widgets_set_mode() {
+  local mode="$1"
+  widgets_write_mode "${mode}"
+
+  local current
+  current="$(theme_current_name)"
+  local label
+  if [ "${mode}" = "theme" ]; then
+    label="theme (following ${current:-no current theme})"
+  else
+    label="native (crystal widgets' own shipped colours)"
+  fi
+
+  if [ -z "${current}" ]; then
+    echo "widgets: ${label} -- render skipped (no current theme set)"
+    return 0
+  fi
+
+  if ! run_theme_render; then
+    echo "gallery: widgets mode recorded but render failed" >&2
+    return 1
+  fi
+  echo "widgets: ${label}"
+  if ! widgets_available; then
+    echo "note: Übersicht is not running with the crystal widgets on this Mac; the mode is recorded for when it is" >&2
+  fi
+}
+
+cmd_widgets_toggle() {
+  local mode
+  mode="$(widgets_read_mode)"
+  if [ "${mode}" = "theme" ]; then
+    widgets_set_mode native
+  else
+    widgets_set_mode theme
+  fi
+}
+
+cmd_widgets() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    status)
+      cmd_widgets_status
+      ;;
+    available)
+      cmd_widgets_available
+      ;;
+    theme)
+      widgets_set_mode theme
+      ;;
+    native)
+      widgets_set_mode native
+      ;;
+    toggle)
+      cmd_widgets_toggle
+      ;;
+    "")
+      echo "usage: gallery widgets <status|available|theme|native|toggle>" >&2
+      exit 1
+      ;;
+    *)
+      echo "gallery: unknown widgets subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 # --- borders (JankyBorders focus-outline prefs) ------------------------------
 #
 # The focused-window frame (JankyBorders, driven by bin/gallery-borders)
@@ -2488,6 +2703,9 @@ case "${command}" in
     ;;
   console)
     cmd_console "$@"
+    ;;
+  widgets)
+    cmd_widgets "$@"
     ;;
   borders)
     cmd_borders "$@"

@@ -44,6 +44,13 @@
 #   ctrl-b                     toggle whether the focus outline's colour is
 #                              mixed toward the theme's bright_foreground --
 #                              see `gallery borders bright`; same header line
+#   ctrl-u                     toggle whether the Übersicht crystal widgets
+#                              follow the theme or keep their own shipped
+#                              colours -- see `gallery widgets`. The key and
+#                              its "Widgets: ..." header line exist only
+#                              while Übersicht is running with those widgets
+#                              on this Mac (widgets_available below); on any
+#                              other Mac the picker never mentions them
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -51,6 +58,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 GALLERY_BIN="${HOME}/bin/gallery"
 THEME_DIR="${HOME}/.config/gallery/themes"
 CONSOLE_STATE_FILE="${HOME}/.config/gallery/state/console.json"
+WIDGETS_STATE_FILE="${HOME}/.config/gallery/state/widgets.json"
 BORDERS_STATE_FILE="${HOME}/.config/gallery/state/borders.json"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
@@ -191,6 +199,49 @@ sys.stdout.write(mode)
 ' "$CONSOLE_STATE_FILE" 2>/dev/null || printf 'native'
 }
 
+# widgets_mode -- prints "theme" or "native" straight from
+# WIDGETS_STATE_FILE (default "native"), same contract and same
+# per-keystroke direct-file-read reasoning as console_mode.
+widgets_mode() {
+  if [[ ! -f "$WIDGETS_STATE_FILE" ]]; then
+    printf 'native'
+    return 0
+  fi
+  python3 -c '
+import json, sys
+
+mode = "native"
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        val = data.get("mode")
+        if val in ("theme", "native"):
+            mode = val
+except Exception:
+    pass
+sys.stdout.write(mode)
+' "$WIDGETS_STATE_FILE" 2>/dev/null || printf 'native'
+}
+
+# widgets_available -- 0 when Übersicht is running on this Mac with the
+# crystal widgets, else 1: mirrors bin/gallery's widgets_available (one ps,
+# one glob) rather than shelling out to `gallery widgets available`, since
+# this runs on every focus event. Decides whether the picker shows the
+# "Widgets: ..." line and honours ctrl-u at all.
+widgets_available() {
+  local args dir w
+  args="$(ps -axo args= 2>/dev/null | grep '[R]esources/server.js' | head -n 1)"
+  [[ -n "$args" ]] || return 1
+  dir="$(printf '%s\n' "$args" | sed -n 's/.* -d \(.*\) -p [0-9][0-9]* .*/\1/p')"
+  [[ -n "$dir" ]] || dir="${HOME}/Library/Application Support/Übersicht/widgets"
+  [[ -d "$dir" ]] || return 1
+  for w in "$dir"/crystal-*.widget; do
+    [[ -d "$w" ]] && return 0
+  done
+  return 1
+}
+
 # borders_prefs -- prints "WIDTH BRIGHT" (bright as "on"/"off") straight
 # from BORDERS_STATE_FILE, default "5 off" if missing/unreadable/garbage --
 # same contract (and same per-keystroke direct-file-read reasoning) as
@@ -283,7 +334,7 @@ bright_radio() {
 # fresh, on load/each highlight) print identical lines without needing to
 # thread state between processes.
 static_header() {
-  local current mode console_line prefs width bright border_line
+  local current mode console_line prefs width bright border_line widgets_line
   current="$("${GALLERY_BIN}" theme current 2>/dev/null || true)"
   mode="$(console_mode)"
   if [[ "$mode" == "theme" ]]; then
@@ -291,24 +342,37 @@ static_header() {
   else
     console_line="Console: iTerm Default  (ctrl-t toggles)"
   fi
+  # The Übersicht line is appended only on a Mac where it means something
+  # (see widgets_available); elsewhere the header is exactly as before.
+  widgets_line=""
+  if widgets_available; then
+    case "$(widgets_mode)" in
+      theme) widgets_line="Widgets: follow theme  (ctrl-u toggles)" ;;
+      *)     widgets_line="Widgets: own colours  (ctrl-u toggles)" ;;
+    esac
+  fi
   prefs="$(borders_prefs)"
   width="${prefs%% *}"
   bright="${prefs##* }"
   if [[ "$COMPACT" -eq 1 ]]; then
-    # Narrow list pane (see list_cols): same facts, four short lines, so
-    # every key hint stays visible.
+    # Narrow list pane (see list_cols): same facts, four short lines (five
+    # with the widgets line), so every key hint stays visible.
     case "$mode" in
       theme) console_line="Console: follows theme  ctrl-t" ;;
       *)     console_line="Console: iTerm Default  ctrl-t" ;;
     esac
+    [[ -n "$widgets_line" ]] && widgets_line="${widgets_line/  (ctrl-u toggles)/  ctrl-u}"
     printf 'Current: %s  Enter applies, Esc closes\n%s\nBorder width %s  ctrl-w\nBorder bright %s  ctrl-b\n' \
       "${current:-(none)}" "$console_line" "$(width_radio "$width")" "$(bright_radio "$bright")"
+    [[ -n "$widgets_line" ]] && printf '%s\n' "$widgets_line"
     return 0
   fi
   border_line="$(printf 'Border: width %s  ctrl-w cycles   bright %s  ctrl-b toggles' \
     "$(width_radio "$width")" "$(bright_radio "$bright")")"
   printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n%s\n%s\n' \
     "${current:-(none)}" "$console_line" "$border_line"
+  [[ -n "$widgets_line" ]] && printf '%s\n' "$widgets_line"
+  return 0
 }
 
 # --- preview pane (image only) ----------------------------------------------
@@ -518,6 +582,12 @@ fzf_args=(
   # theme's bright_foreground.
   --bind "ctrl-b:execute-silent(${gallery_q} borders bright toggle)+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"
 )
+# ctrl-u: toggle whether the Übersicht crystal widgets follow the theme.
+# Bound only when Übersicht is running with those widgets on this Mac, so
+# on any other Mac the key does nothing and the header never mentions it.
+if widgets_available; then
+  fzf_args+=(--bind "ctrl-u:execute-silent(${gallery_q} widgets toggle)+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})")
+fi
 # `load`, not `start`: the list is streamed in, so pos() on `start` runs
 # against an empty list and does nothing. The initial header/preview-label
 # also have to be set here (chained onto the same bind), since `focus`

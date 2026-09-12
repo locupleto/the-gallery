@@ -64,6 +64,7 @@ gallery clone <id> <new-id> |
 gallery theme list | current | set <name> | render | next |
 gallery bg list | current | set <file> | next | prev | apply |
 gallery console status | theme | native | toggle |
+gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
 gallery reload | log | doctor | install
 ```
@@ -106,6 +107,19 @@ default profile shows a star in the list; `gallery console status` prints
 `default profile: Console (ok)` once it has taken. Writing the
 `Default Bookmark Guid` preference from the shell is not honoured while
 iTerm runs, so the CLI never tries.
+
+`widgets ...` does the same for the Übersicht crystal widgets
+(locupleto/crystal-widgets-v2), and is just as optional: `native` (the
+default) leaves them on their own shipped colours, `theme` swaps their
+static white for the theme's lightest foreground and their CPU/mem/swap bar
+fill for the accent. The renderer writes `~/.config/gallery/state/crystal.css`
+(CSS custom properties, empty in native mode) which the widgets'
+`crystal-theme.widget` injects into the widget document every couple of
+seconds, and adds `CRYSTAL_BAR_COLOR` to `theme.sh` in theme mode only. The
+mode lives in `~/.config/gallery/state/widgets.json`. The theme picker shows
+a "Widgets: ..." line and binds `ctrl-u` to toggle it, but only while
+Übersicht is running with those widgets on this Mac (`gallery widgets
+available`); elsewhere the picker never mentions them.
 
 `borders ...` controls the focused-window frame JankyBorders draws
 (`bin/gallery-borders`). The active colour follows Omarchy's own rule: a
