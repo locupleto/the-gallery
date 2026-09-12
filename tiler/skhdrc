@@ -106,7 +106,7 @@ lalt - b : d="$HOME/.ai_voice_assistant"; [ -d "$d" ] || d="$HOME/Developer/proj
 # New iTerm window (open -a only activates a running app). The first press raises
 # the Automation prompt "skhd wants to control iTerm2" — allow it once.
 ## new iTerm window
-lalt - return : osascript -e 'tell application "iTerm2" to create window with default profile'
+lalt - return : osascript -e 'tell application id "com.googlecode.iterm2" to create window with default profile'
 ## restart yabai, reload skhd
 shift + lalt - r : yabai --restart-service; skhd --reload
 

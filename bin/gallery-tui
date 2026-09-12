@@ -154,6 +154,13 @@ except Exception:
 # iTerm2 for the caller (one prompt, once), exactly like learn's
 # open_window (cold-iTerm branch included: a cold iTerm restores its own
 # windows first, so ours is made to activate and follow).
+#
+# iTerm is addressed by bundle id, never by name: while iTerm is NOT
+# running, `tell application "iTerm2"` fails to resolve (LaunchServices
+# knows the bundle as "iTerm"; "iTerm2" only matches the running process),
+# and AppleScript then rejects `create window` with "Expected end of line,
+# etc. but found class name". A Mac whose iTerm is always open never shows
+# this; a fresh machine does, on the very first key press.
 spawn_window() {
   local cmdline
   cmdline="$(printf '%q ' "${SELF}" "$@")"
@@ -173,9 +180,9 @@ spawn_window() {
   fi
 
   if pgrep -xq iTerm2 || pgrep -fq "/iTerm.app/Contents/MacOS/iTerm2"; then
-    osascript -e "tell application \"iTerm2\" to ${create_clause}" >/dev/null
+    osascript -e "tell application id \"com.googlecode.iterm2\" to ${create_clause}" >/dev/null
   else
-    osascript -e "tell application \"iTerm2\"
+    osascript -e "tell application id \"com.googlecode.iterm2\"
         activate
         ${create_clause}
     end tell" >/dev/null

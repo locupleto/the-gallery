@@ -177,10 +177,10 @@ open_window() {
     disp="$(focused_display)"
     cmd="$(printf '%q ' "$SELF" ${disp:+--display "$disp"} "$@")"
     if pgrep -xq iTerm2; then
-        osascript -e "tell application \"iTerm2\" to create window with default profile command \"$cmd\"" >/dev/null
+        osascript -e "tell application id \"com.googlecode.iterm2\" to create window with default profile command \"$cmd\"" >/dev/null
     else
         # A cold iTerm opens its own restored windows first; ours follows.
-        osascript -e "tell application \"iTerm2\"
+        osascript -e "tell application id \"com.googlecode.iterm2\"
             activate
             create window with default profile command \"$cmd\"
         end tell" >/dev/null
