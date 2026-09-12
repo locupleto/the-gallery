@@ -4,8 +4,8 @@
 # The sheets are Obsidian notes in the vault's Cheat-Sheets folder (one source,
 # read in place, never copied). The only generated one is Tiler-Keys.md, built
 # from the "## description" lines in tiler/skhdrc so the sheet can never drift
-# from the bindings. Sheets render in a floating, centred iTerm window (glow;
-# q or Esc closes it). Doors: super+space (menu), super+shift+space (tiler
+# from the bindings. Sheets render in a floating, centred iTerm window (glow
+# rendering, paged by fzf; q or Esc closes it). Doors: super+space (menu), super+shift+space (tiler
 # keys), and "Learn" in Spotlight (~/Applications/Learn.app).
 #
 #   learn open menu|show <Sheet>   open a floating iTerm window running the command
@@ -123,13 +123,36 @@ show() {
     float_me "$name"
     fetch_if_evicted "$f" || die "no sheet named '$name' in $SHEETS"
     command -v glow >/dev/null || die "glow is not installed (brew install glow)"
-    # Strip the YAML frontmatter; glow renders the rest in its pager (q / Esc
-    # quits). Fed from a pipe glow would guess "no terminal" and print raw
-    # markdown (the "# Headline" look), hence the forced style. Keep the pipe:
-    # given a file path, glow first interrogates the terminal for its colours
-    # and stalls where nothing answers.
+    command -v fzf >/dev/null || die "fzf is not installed (brew install fzf)"
+    # Strip the YAML frontmatter; glow renders the rest to ANSI text and fzf
+    # pages it (see page below). Fed from a pipe glow would guess "no
+    # terminal" and print raw markdown (the "# Headline" look), hence the
+    # forced style. Keep the pipe: given a file path, glow first interrogates
+    # the terminal for its colours and stalls where nothing answers.
     clear
-    strip_frontmatter "$f" | glow -p -s "$GLOW_STYLE" -w 110 -
+    strip_frontmatter "$f" | glow -s "$GLOW_STYLE" -w 110 - | page
+}
+
+# page -- a read-only pager with Esc as a first-class quit key, built on fzf.
+#
+# Why not `glow -p`: from glow 2.0 on, -p no longer opens glow's own pager
+# (where q and Esc both quit) but hands the text to $PAGER, i.e. `less`. In
+# less a lone Esc can never be a command: it is the meta prefix (Esc-v etc.),
+# so less blocks waiting for the next key, and a lesskey `\e quit` binding
+# never fires (verified against less 668 under a pty, 2026-09-12). glow 3's
+# `-t` TUI treats Esc as "back", not quit, so it does not help either.
+#
+# fzf in --no-input mode is a plain scrollable list: every rendered line is
+# an item (empty lines included), arrows / PgUp / PgDn / mouse wheel scroll,
+# and Esc, q and Enter all close. The current-line highlight is blanked out
+# (bg+/fg+ = terminal default, blank pointer) so it reads as text, not a
+# menu. fzf exits 130 on abort, which is the normal way out here.
+page() {
+    fzf --ansi --no-sort --no-input --layout=reverse --no-info --no-separator \
+        --pointer=' ' --color='bg+:-1,fg+:-1,gutter:-1' \
+        --header='q or Esc closes • arrows / PgUp / PgDn / wheel scroll' \
+        --bind 'esc:abort,q:abort,enter:abort,j:down,k:up,space:page-down,b:page-up,g:first,G:last' \
+        >/dev/null || true
 }
 
 menu() {
