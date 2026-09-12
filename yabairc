@@ -41,4 +41,19 @@ yabai -m rule --add subrole!="^AXStandardWindow$" manage=off
 yabai -m rule --add app="^iTerm2$" title="^Learn: " manage=off grid=6:6:1:1:4:4
 yabai -m rule --apply
 
+# --- active-window border (JankyBorders) -------------------------------------
+# A crisp accent outline around the FOCUSED window only (unfocused windows get
+# no border), so the active window is obvious across multiple displays instead
+# of being telegraphed only by the red/yellow/green traffic-light buttons.
+# borders is a separate daemon (FelixKratz/formulae/borders); it needs no
+# scripting addition, so SIP stays enabled. Full path + LANG so it resolves
+# under launchd, and killall keeps it a singleton across yabai restarts.
+killall borders 2>/dev/null
+LANG="en_US.UTF-8" /opt/homebrew/bin/borders \
+    active_color=0xff7aa2f7 \
+    inactive_color=0x00000000 \
+    width=5.0 \
+    style=round \
+    >/dev/null 2>&1 &
+
 echo "yabai configuration loaded"

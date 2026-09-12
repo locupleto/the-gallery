@@ -69,6 +69,13 @@ for f in yabai skhd; do
         run brew install "asmvik/formulae/$f"
     fi
 done
+# JankyBorders (borders): draws the accent outline around the focused window
+# (launched from yabairc). Needs no scripting addition, so SIP stays enabled.
+if brew list --formula borders >/dev/null 2>&1; then
+    echo "[tiler] borders already installed ($(brew list --versions borders))"
+else
+    run brew install "FelixKratz/formulae/borders"
+fi
 # The Learn menu (tiler/learn): fzf picks a sheet, glow renders it.
 for f in fzf glow; do
     if brew list --formula "$f" >/dev/null 2>&1; then
