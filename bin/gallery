@@ -2322,6 +2322,11 @@ try:
 except Exception:
     print("parse-error")
     sys.exit(0)
+# System prompt/notification windows never carry an AX reference and are
+# often the ONLY windows on a fresh machine (the Accessibility prompt
+# itself, say), which would read as blindness. Ignore them.
+system_apps = {"CoreServicesUIAgent", "UserNotificationCenter", "Notification Center", "loginwindow"}
+data = [w for w in data if isinstance(w, dict) and w.get("app") not in system_apps] if isinstance(data, list) else data
 if not isinstance(data, list) or len(data) < 1:
     print("no-windows")
     sys.exit(0)
