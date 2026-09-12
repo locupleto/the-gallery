@@ -173,7 +173,7 @@ keys_md() {
 title: Tiler keys — left Option is super
 type: cheat-sheet
 status: generated
-generated_from: tiler/skhdrc
+generated_from: the-gallery/tiler/skhdrc
 related:
   - "[[Desktop-Tiling-With-Yabai]]"
 tags:
