@@ -13,6 +13,20 @@
 # Control for every Desktop you want to reach. yabai itself never switches Spaces
 # (that would need the scripting addition and a partially disabled SIP).
 
+# --- pass the keyboard through to the Omarchy VM -------------------------------
+# Inside UTM the guest runs Omarchy, whose modifier is ALSO left Option (Hyprland
+# is configured with altwin:swap_lalt_lwin, so macOS never sees Cmd+Space). Every
+# lalt chord below would otherwise be swallowed by skhd before the VM saw it, and
+# the guest would be unusable. skhd stands down entirely while UTM is focused.
+#
+# Remapping the guest's Super to left Ctrl instead was considered and rejected: it
+# collides with Mission Control, which owns Ctrl+1..9 and Ctrl+arrows -- the very
+# shortcuts the Space bindings below drive -- so the guest would lose Super+N and
+# Super+arrows, and its Ctrl would land on Cmd where UTM cannot reliably hold it.
+.blacklist [
+    "utm"
+]
+
 # --- focus -------------------------------------------------------------------
 ## focus the window west / south / north / east (continues onto the next display)
 lalt - h : yabai -m window --focus west  || yabai -m display --focus west
