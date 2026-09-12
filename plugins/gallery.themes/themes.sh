@@ -42,21 +42,58 @@ swatch() {
   printf '\033[48;2;%d;%d;%dm   \033[0m  %-16s #%s\n' "$r" "$g" "$b" "$label" "$hex"
 }
 
-# render_preview NAME -- the palette card fzf's --preview shells out to.
+# render_preview NAME -- the palette card fzf's --preview shells out to:
+# truecolor swatches on top, and (below them) a chafa character-mode
+# thumbnail of the theme's active background. Native-protocol image output
+# (iTerm OSC 1337, what backgrounds.sh's own preview uses) cannot share a
+# preview pane with plain text -- see backgrounds.sh's render_preview
+# comment for the empirical details -- so the thumbnail here is rendered in
+# chafa's `-f symbols` character mode instead, which IS plain text and
+# composes fine with the swatches above it.
 render_preview() {
   local name="$1"
   local file="${THEME_DIR}/${name}/colors.toml"
-  printf '%s\n\n' "$name"
-  if [[ ! -f "$file" ]]; then
-    echo "(no colors.toml found)"
-    return 0
+  local swatches rows_used cols rows thumb_rows bg_name bg_path
+
+  swatches="$(
+    if [[ -f "$file" ]]; then
+      local key
+      for key in accent background foreground \
+                 red yellow green cyan blue magenta \
+                 bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta; do
+        swatch "$key" "$(get_val "$file" "$key")"
+      done
+    else
+      echo "(no colors.toml found)"
+    fi
+  )"
+
+  printf '%s\n\n%s\n' "$name" "$swatches"
+
+  # 2 header lines (name + blank) plus however many swatch lines actually
+  # printed (missing-key tolerance means this varies), plus the blank
+  # separator line printed below -- all subtracted from the preview
+  # window's total rows to size the thumbnail into whatever is left.
+  rows_used=$(( 2 + $(printf '%s\n' "$swatches" | wc -l) + 1 ))
+  cols="${FZF_PREVIEW_COLUMNS:-40}"
+  rows="${FZF_PREVIEW_LINES:-40}"
+  thumb_rows=$(( rows - rows_used ))
+  [[ "$thumb_rows" -lt 1 ]] && thumb_rows=1
+
+  printf '\n'
+  bg_name="$("${GALLERY_BIN}" bg current "$name" 2>/dev/null || true)"
+  if [[ -z "$bg_name" ]]; then
+    echo "no backgrounds"
+  elif ! command -v chafa >/dev/null 2>&1; then
+    echo "(install chafa for a thumbnail)"
+  else
+    bg_path="${THEME_DIR}/${name}/backgrounds/${bg_name}"
+    if [[ -r "$bg_path" ]]; then
+      chafa -f symbols --symbols block -s "${cols}x${thumb_rows}" "$bg_path" 2>/dev/null
+    else
+      echo "(background image not readable)"
+    fi
   fi
-  local key
-  for key in accent background foreground \
-             red yellow green cyan blue magenta \
-             bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta; do
-    swatch "$key" "$(get_val "$file" "$key")"
-  done
 }
 
 # Build the fzf input: one tab-delimited line per row.
@@ -112,8 +149,15 @@ if ! command -v fzf >/dev/null 2>&1; then
   exit 1
 fi
 
+# The two plugins are installed side by side under .../gallery/plugins/, so
+# resolve the sibling by path rather than assuming it's on PATH.
+BACKGROUNDS_SH="$(cd "$(dirname "$SELF")/../gallery.backgrounds" && pwd)/backgrounds.sh"
+
 current="$("${GALLERY_BIN}" theme current 2>/dev/null || true)"
 pos="$(current_pos "$current" || true)"
+
+gallery_q="$(printf '%q' "$GALLERY_BIN")"
+bg_q="$(printf '%q' "$BACKGROUNDS_SH")"
 
 fzf_args=(
   --delimiter=$'\t'
@@ -123,9 +167,16 @@ fzf_args=(
   --border=rounded
   --no-multi
   --prompt='Theme > '
-  --header="Current: ${current:-(none)} -- Enter applies, Esc closes"
+  --header="Current: ${current:-(none)} -- Enter applies theme and shows its backgrounds, Esc closes"
   --preview="$(printf '%q' "$SELF") --preview {1}"
   --preview-window=right:50%
+  # Enter applies the theme (execute-silent -- ~1-2s: renderers + hooks
+  # incl. wallpaper) and then hands the SAME fzf process off to the
+  # background picker for that theme via become(), which execve()s over
+  # this process in place -- no new window, no new process tree. The
+  # change-header first is a best-effort "please wait" cue: fzf renders it
+  # before the blocking execute-silent runs.
+  --bind "enter:change-header(Applying theme, please wait...)+execute-silent(${gallery_q} theme set {1})+become(${bg_q} --from-themes)"
 )
 # `load`, not `start`: the list is streamed in, so pos() on `start` runs
 # against an empty list and does nothing.
@@ -133,17 +184,10 @@ if [[ -n "$pos" ]]; then
   fzf_args+=(--bind "load:pos(${pos})")
 fi
 
-selected=""
-status=0
-selected=$(list_lines | fzf "${fzf_args[@]}") || status=$?
+list_lines | fzf "${fzf_args[@]}" || true
 
-if [[ -z "$selected" ]]; then
-  # Esc / no selection: close quietly.
-  exit 0
-fi
-
-name=$(cut -f1 <<<"$selected")
-
-"${GALLERY_BIN}" theme set "$name"
-
+# Reached only once the become() chain (however many theme<->backgrounds
+# hops the user made) has really wound down -- i.e. Esc all the way out.
+# Enter no longer falls through to a plain "print selection and exit"; the
+# bind above both applies the theme and transitions to stage two itself.
 exit 0

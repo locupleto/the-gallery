@@ -4,6 +4,12 @@
 # apply it via the gallery CLI.
 #
 #   backgrounds.sh                 run the interactive fzf picker (needs a tty)
+#   backgrounds.sh --from-themes   same picker, but Esc becomes the theme
+#                                  picker (gallery.themes/themes.sh) instead
+#                                  of closing -- this is how themes.sh hands
+#                                  off to this script on Enter, and how Esc
+#                                  hands back, all via fzf's become() (in
+#                                  place, no new window/process tree)
 #   backgrounds.sh --list          print the fzf input lines and exit (for testing, no tty needed)
 #   backgrounds.sh --preview FILE  render FILE's image and exit (no tty needed;
 #                                  this is what fzf itself shells back out to on
@@ -183,6 +189,12 @@ current_pos() {
   return 1
 }
 
+from_themes=0
+if [[ "${1:-}" == "--from-themes" ]]; then
+  from_themes=1
+  shift
+fi
+
 case "${1:-}" in
   --preview)
     render_preview "${2:?usage: backgrounds.sh --preview <file>}"
@@ -224,8 +236,20 @@ if [[ $? -ne 0 ]]; then
   exit 1
 fi
 
+# The two plugins are installed side by side under .../gallery/plugins/, so
+# resolve the sibling by path rather than assuming it's on PATH. Only
+# needed in --from-themes mode (Esc becomes it); resolved unconditionally
+# here since it's cheap and keeps the fzf_args block below simple.
+THEMES_SH="$(cd "$(dirname "$SELF")/../gallery.themes" && pwd)/themes.sh"
+
 if [[ -z "$lines" ]]; then
   echo "No backgrounds found for the current theme."
+  if [[ "$from_themes" -eq 1 ]]; then
+    # Direct launch (key B): nothing to show, just close. Handed off from
+    # the theme picker: bounce back to it instead of dumping the user out.
+    sleep 1
+    exec "$THEMES_SH"
+  fi
   sleep 3
   exit 0
 fi
@@ -235,6 +259,13 @@ pos="$(current_pos "$current" "$lines" || true)"
 theme="$(theme_name)"
 
 self_q="$(printf '%q' "$SELF")"
+themes_q="$(printf '%q' "$THEMES_SH")"
+
+if [[ "$from_themes" -eq 1 ]]; then
+  header="Theme: ${theme:-(unknown)} -- Enter applies, Esc back to themes"
+else
+  header="Theme: ${theme:-(unknown)} -- Enter applies, Esc closes"
+fi
 
 fzf_args=(
   --delimiter=$'\t'
@@ -244,7 +275,7 @@ fzf_args=(
   --border=rounded
   --no-multi
   --prompt='Background > '
-  --header="Theme: ${theme:-(unknown)} -- Enter applies, Esc closes"
+  --header="$header"
   --preview="${self_q} --preview {1}"
   --preview-window=right:60%,border-rounded
   --preview-label=' Background '
@@ -259,13 +290,21 @@ if [[ -n "$pos" ]]; then
 else
   fzf_args+=(--bind "load:transform-preview-label(${self_q} --dims {1})")
 fi
+if [[ "$from_themes" -eq 1 ]]; then
+  # Only when we were handed off from the theme picker: Esc becomes it
+  # again (in place, via execve -- see themes.sh's own enter bind) instead
+  # of the default abort-and-exit.
+  fzf_args+=(--bind "esc:become(${themes_q})")
+fi
 
 selected=""
 status=0
 selected=$(printf '%s\n' "$lines" | fzf "${fzf_args[@]}") || status=$?
 
 if [[ -z "$selected" ]]; then
-  # Esc / no selection: close quietly.
+  # Esc / no selection (only reachable here when NOT --from-themes, since
+  # that case rebinds esc to become() above instead of falling through):
+  # close quietly.
   exit 0
 fi
 
