@@ -46,14 +46,22 @@ yabai -m rule --apply
 # no border), so the active window is obvious across multiple displays instead
 # of being telegraphed only by the red/yellow/green traffic-light buttons.
 # borders is a separate daemon (FelixKratz/formulae/borders); it needs no
-# scripting addition, so SIP stays enabled. Full path + LANG so it resolves
-# under launchd, and killall keeps it a singleton across yabai restarts.
-killall borders 2>/dev/null
-LANG="en_US.UTF-8" /opt/homebrew/bin/borders \
-    active_color=0xff7aa2f7 \
-    inactive_color=0x00000000 \
-    width=5.0 \
-    style=round \
-    >/dev/null 2>&1 &
+# scripting addition, so SIP stays enabled.
+# The accent follows the active Gallery theme when the-gallery is installed:
+# its gallery-borders helper owns the borders invocation and re-syncs the
+# colour on every `gallery theme set`. Without the Gallery, fall back to the
+# hardcoded launch so the tiler still works standalone (full path + LANG so
+# it resolves under launchd; killall keeps it a singleton across restarts).
+if [ -x "${HOME}/bin/gallery-borders" ]; then
+    "${HOME}/bin/gallery-borders" apply
+else
+    killall borders 2>/dev/null
+    LANG="en_US.UTF-8" /opt/homebrew/bin/borders \
+        active_color=0xff7aa2f7 \
+        inactive_color=0x00000000 \
+        width=5.0 \
+        style=round \
+        >/dev/null 2>&1 &
+fi
 
 echo "yabai configuration loaded"
