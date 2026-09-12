@@ -252,6 +252,12 @@ install_all() {
     keys_md "$rc" > "$(sheet_path Tiler-Keys)"
     echo "[learn] wrote $(sheet_path Tiler-Keys)"
 
+    # Same content, next to the installed learn/skhdrc: the copy the voice
+    # assistant reads (fast_brain.py) — launchd cannot read the iCloud vault.
+    keys_md "$rc" > "$(dirname "$SELF")/Tiler-Keys.md"
+    chmod 644 "$(dirname "$SELF")/Tiler-Keys.md"
+    echo "[learn] wrote $(dirname "$SELF")/Tiler-Keys.md"
+
     # Learn.app: a shell-script bundle so Spotlight lists "Learn". It runs the
     # installed copy of this script (~/.config/skhd/learn), not the repo one.
     local exe="$APP/Contents/MacOS/Learn"
