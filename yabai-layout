@@ -44,7 +44,8 @@ be replayed as a batch of frames — yabai only exposes structural primitives
                                                            # space — ignore)
          yabai -m window <a2>     --warp <anchor>         # re-insert here
          yabai -m window <anchor> --ratio abs:<ratio>
-         yabai -m window <anchor> --insert east|south     # toggle off
+         # (the warp consumes the pending insert; a west/west toggle pair
+         #  on the anchor clears any leftover once the Space is rebuilt)
 
      THE KEY FINDING: `--toggle float` always un-floats into the
      currently-FOCUSED Space's tree, never the window's own last Space —
@@ -396,10 +397,23 @@ def _build(node, anchor_id, gap):
     yabai("window", str(a2), "--warp", str(anchor_id), check=False)
     time.sleep(0.15)
     yabai("window", str(anchor_id), "--ratio", f"abs:{node['ratio']:.4f}", check=False)
-    yabai("window", str(anchor_id), "--insert", direction, check=False)  # clear pending state
+    # No "clear" toggle here: the warp consumes the pending insert, and
+    # `--insert` is a toggle, so re-issuing the direction would re-arm it
+    # (seen live as yabai's red insert-feedback overlay left on the last
+    # anchor, and every new window on that Space landing there). Any
+    # leftover is cleared once per Space by _clear_insert.
 
     _build(c1, anchor_id, gap)
     _build(c2, a2, gap)
+
+
+def _clear_insert(win_id: int):
+    """Leave no pending --insert anywhere. yabai keeps at most one pending
+    insert, and --insert toggles: setting a direction this tool never uses
+    (west) on win_id supersedes whatever was pending, and setting it again
+    undoes it -- deterministic regardless of prior state."""
+    yabai("window", str(win_id), "--insert", "west", check=False)
+    yabai("window", str(win_id), "--insert", "west", check=False)
 
 
 def restore_space(space_snap, live_by_id, gap, eps, summary: list[str]):
@@ -492,6 +506,7 @@ def restore_space(space_snap, live_by_id, gap, eps, summary: list[str]):
                             f"as possible (not gated)")
             return
         _build(tree, anchor_id, gap)
+        _clear_insert(anchor_id)
 
     # Release orphans and new windows for yabai to place; report them.
     for wid in orphan_ids_present:
