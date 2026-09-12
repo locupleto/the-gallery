@@ -1,0 +1,146 @@
+# skhd hotkeys for yabai (installed by tiler/install.sh to ~/.config/skhd/skhdrc).
+#
+# LEFT Option (lalt) is "super", as in Hyprland/Omarchy. The RIGHT Option is never
+# bound here: on the Swedish layout it keeps typing @ | [ ] { } (Opt+2, Opt+7,
+# Opt+8/9, Opt+Shift+8/9), just like AltGr on Linux. Push-to-talk for the voice
+# assistant is the right Command key on this machine (PTT_KEY=cmd_r).
+#
+# Lines starting with "## " describe the binding(s) below them; tiler/learn turns
+# them into the key sheet (super+space > Tiler keys), so keep them current.
+#
+# Space switching goes through the Mission Control shortcuts (Ctrl+1..9), which
+# must be enabled in System Settings > Keyboard > Keyboard Shortcuts > Mission
+# Control for every Desktop you want to reach. yabai itself never switches Spaces
+# (that would need the scripting addition and a partially disabled SIP).
+
+# --- pass the keyboard through to the Omarchy VM -------------------------------
+# Inside UTM the guest runs Omarchy, whose modifier is ALSO left Option (Hyprland
+# is configured with altwin:swap_lalt_lwin, so macOS never sees Cmd+Space). Every
+# lalt chord below would otherwise be swallowed by skhd before the VM saw it, and
+# the guest would be unusable. skhd stands down entirely while UTM is focused.
+#
+# Remapping the guest's Super to left Ctrl instead was considered and rejected: it
+# collides with Mission Control, which owns Ctrl+1..9 and Ctrl+arrows -- the very
+# shortcuts the Space bindings below drive -- so the guest would lose Super+N and
+# Super+arrows, and its Ctrl would land on Cmd where UTM cannot reliably hold it.
+.blacklist [
+    "utm"
+]
+
+# --- focus -------------------------------------------------------------------
+## focus the window west / south / north / east (continues onto the next display)
+lalt - h : yabai -m window --focus west  || yabai -m display --focus west
+lalt - j : yabai -m window --focus south || yabai -m display --focus south
+lalt - k : yabai -m window --focus north || yabai -m display --focus north
+lalt - l : yabai -m window --focus east  || yabai -m display --focus east
+## focus the previous window
+lalt - tab : yabai -m window --focus recent
+
+# --- move (swap tiles; fall through to the neighbouring display) ---------------
+## swap the window west / south / north / east (moves to the next display at the edge)
+shift + lalt - h : yabai -m window --swap west  || (yabai -m window --display west && yabai -m display --focus west)
+shift + lalt - j : yabai -m window --swap south || (yabai -m window --display south && yabai -m display --focus south)
+shift + lalt - k : yabai -m window --swap north || (yabai -m window --display north && yabai -m display --focus north)
+shift + lalt - l : yabai -m window --swap east  || (yabai -m window --display east && yabai -m display --focus east)
+
+# --- Spaces: super+N switches, super+shift+N sends the window and follows ------
+## switch to Space N (via the Mission Control Ctrl+N shortcut)
+lalt - 1 : skhd -k "ctrl - 1"
+lalt - 2 : skhd -k "ctrl - 2"
+lalt - 3 : skhd -k "ctrl - 3"
+lalt - 4 : skhd -k "ctrl - 4"
+lalt - 5 : skhd -k "ctrl - 5"
+lalt - 6 : skhd -k "ctrl - 6"
+lalt - 7 : skhd -k "ctrl - 7"
+lalt - 8 : skhd -k "ctrl - 8"
+lalt - 9 : skhd -k "ctrl - 9"
+## send the window to Space N and follow it
+shift + lalt - 1 : yabai -m window --space 1 && skhd -k "ctrl - 1"
+shift + lalt - 2 : yabai -m window --space 2 && skhd -k "ctrl - 2"
+shift + lalt - 3 : yabai -m window --space 3 && skhd -k "ctrl - 3"
+shift + lalt - 4 : yabai -m window --space 4 && skhd -k "ctrl - 4"
+shift + lalt - 5 : yabai -m window --space 5 && skhd -k "ctrl - 5"
+shift + lalt - 6 : yabai -m window --space 6 && skhd -k "ctrl - 6"
+shift + lalt - 7 : yabai -m window --space 7 && skhd -k "ctrl - 7"
+shift + lalt - 8 : yabai -m window --space 8 && skhd -k "ctrl - 8"
+shift + lalt - 9 : yabai -m window --space 9 && skhd -k "ctrl - 9"
+
+# --- displays ----------------------------------------------------------------
+## send the window to the other display and follow it
+shift + lalt - s : export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; w=$(yabai -m query --windows --window); wid=$(echo "$w" | jq -r ".id"); src=$(echo "$w" | jq -r ".display"); tot=$(yabai -m query --displays | jq "length"); yabai -m window "$wid" --display $(( src % tot + 1 )) && yabai -m window --focus "$wid"
+
+# --- window state --------------------------------------------------------------
+## toggle zoom (the window fills its display)
+lalt - f : yabai -m window --toggle zoom-fullscreen
+## toggle float (a floated window lands centred)
+lalt - t : yabai -m window --toggle float --grid 4:4:1:1:2:2
+## toggle the split direction
+shift + lalt - e : yabai -m window --toggle split
+## minimize
+lalt - m : yabai -m window --minimize
+## close the window
+lalt - w : yabai -m window --close
+
+# --- tree ----------------------------------------------------------------------
+## rotate the tree 90 degrees
+lalt - r : yabai -m space --rotate 90
+## balance all tiles
+shift + lalt - b : yabai -m space --balance
+## toggle stacked / tiled for the current Space
+lalt - s : yabai -m query --spaces --space | grep -qE '"type": *"stack"' && yabai -m space --layout bsp || yabai -m space --layout stack
+
+# --- resize (arrows: left/right narrower/wider, up/down shorter/taller) --------
+## resize by 60 px: left / right narrower / wider, up / down shorter / taller
+lalt - left  : yabai -m window --resize right:-60:0 || yabai -m window --resize left:60:0
+lalt - right : yabai -m window --resize right:60:0  || yabai -m window --resize left:-60:0
+lalt - up    : yabai -m window --resize bottom:0:-60 || yabai -m window --resize top:0:60
+lalt - down  : yabai -m window --resize bottom:0:60  || yabai -m window --resize top:0:-60
+
+# --- launch / service ------------------------------------------------------------
+# New window in the DEFAULT browser via the assistant's own verb (resolves the browser
+# from LaunchServices, Cmd+N if running, launches otherwise). The assistant's runtime
+# is ~/.ai_voice_assistant on the Studio and the repo checkout on the laptop. First
+# press: allow "skhd wants to control System Events".
+## new window in the default browser
+lalt - b : d="$HOME/.ai_voice_assistant"; [ -d "$d" ] || d="$HOME/Developer/projects/git/ai_voice_assistant"; "$d/venv/bin/python" "$d/desktop.py" exec "open a new browser window"
+# New iTerm window (open -a only activates a running app). The first press raises
+# the Automation prompt "skhd wants to control iTerm2" — allow it once.
+## new iTerm window
+lalt - return : osascript -e 'tell application "iTerm2" to create window with default profile'
+## restart yabai, reload skhd
+shift + lalt - r : yabai --restart-service; skhd --reload
+
+# --- apps (Omarchy web-app keys) -------------------------------------------------
+# Safari web apps live in ~/Applications; open -a activates the one window they have.
+# Omarchy: a ChatGPT, shift+a Grok, c Calendar, e Email, y YouTube, x X, g messaging
+# (WhatsApp there; Telegram here). Split toggle moved to shift+e to free super+e.
+## ChatGPT web app
+lalt - a : open -a "$HOME/Applications/ChatGPT.app"
+## Grok web app
+shift + lalt - a : open -a "$HOME/Applications/Grok.app"
+## Calendar
+lalt - c : open -a Calendar
+## Gmail web app
+lalt - e : open -a "$HOME/Applications/Gmail.app"
+## YouTube web app
+lalt - y : open -a "$HOME/Applications/YouTube.app"
+## X web app
+lalt - x : open -a "$HOME/Applications/X.app"
+## Telegram (Omarchy's messaging slot)
+lalt - g : open -a Telegram
+
+# --- learn (cheat sheets, Omarchy's "Learn" menu) --------------------------------
+# tiler/learn opens a floating iTerm window (yabairc floats titles starting with
+# "Learn") listing the vault's Cheat-Sheets, rendered with glow. Spotlight has the
+# same menu as "Learn" (~/Applications/Learn.app, built by tiler/learn install).
+## Learn menu: choose a cheat sheet (vault Cheat-Sheets folder)
+lalt - space : "$HOME/.config/skhd/learn" open menu
+## the tiler key sheet, generated from this file
+shift + lalt - space : "$HOME/.config/skhd/learn" open show Tiler-Keys
+
+# === The Gallery (Hammerspoon plugin host) — bindings in gallery.skhd (below) ===
+# Bindings live in gallery.skhd next to this file, installed by the-gallery's
+# install.sh (repo git/the-gallery). skhd stays the only hotkey grabber; the
+# Gallery binds no keys of its own. tiler/install.sh creates an empty file if
+# the Gallery is not installed, so this include never fails.
+.load "gallery.skhd"

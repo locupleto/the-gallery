@@ -1,0 +1,67 @@
+#!/usr/bin/env sh
+# yabai configuration for the voice assistant's desk (installed by tiler/install.sh
+# to ~/.config/yabai/yabairc). No scripting addition: SIP stays enabled, Spaces are
+# switched by the Mission Control hotkeys (Ctrl+N), never by yabai.
+
+# --- layout ------------------------------------------------------------------
+yabai -m config layout                  bsp
+yabai -m config window_placement        second_child
+# New windows open on the display under the pointer (what DESKTOP_AUTO_PLACE=mouse
+# did before the tiler); the assistant skips its own auto-placement while yabai runs.
+yabai -m config window_origin_display   cursor
+# Even splits, Hyprland style (Urban's choice 2026-09-09). The 7:5 house grid lives on
+# in the voice verbs: "left column" asks yabai for DESKTOP_COLUMNS (0.5833) explicitly.
+yabai -m config split_ratio             0.5
+yabai -m config split_type              auto
+yabai -m config auto_balance            off
+yabai -m config window_zoom_persist     on
+
+# --- gaps --------------------------------------------------------------------
+yabai -m config window_gap              8
+yabai -m config top_padding             8
+yabai -m config bottom_padding          8
+yabai -m config left_padding            8
+yabai -m config right_padding           8
+
+# --- mouse -------------------------------------------------------------------
+# Option-drag moves, Option-right-drag resizes, dropping on a tile swaps.
+yabai -m config mouse_modifier          alt
+yabai -m config mouse_action1           move
+yabai -m config mouse_action2           resize
+yabai -m config mouse_drop_action       swap
+yabai -m config focus_follows_mouse     off
+yabai -m config mouse_follows_focus     off
+
+# --- windows that must never be tiled ----------------------------------------
+yabai -m rule --add app="^(System Settings|System Preferences|Calculator|Activity Monitor|Archive Utility|Installer|Software Update|Logi Options\+?|iStat Menus|CleanMyMac X|Digital Colou?r Meter|Font Book|Migration Assistant)$" manage=off
+yabai -m rule --add app="^Finder$" title="(Copy|Info|Connect|Move|Delete|Get Info)" manage=off
+# Sheets, popovers, floating panels and anything that is not a standard window.
+yabai -m rule --add subrole!="^AXStandardWindow$" manage=off
+# The Learn cheat-sheet window (tiler/learn): a floating, centred iTerm window.
+yabai -m rule --add app="^iTerm2$" title="^Learn: " manage=off grid=6:6:1:1:4:4
+yabai -m rule --apply
+
+# --- active-window border (JankyBorders) -------------------------------------
+# A crisp accent outline around the FOCUSED window only (unfocused windows get
+# no border), so the active window is obvious across multiple displays instead
+# of being telegraphed only by the red/yellow/green traffic-light buttons.
+# borders is a separate daemon (FelixKratz/formulae/borders); it needs no
+# scripting addition, so SIP stays enabled.
+# The accent follows the active Gallery theme when the-gallery is installed:
+# its gallery-borders helper owns the borders invocation and re-syncs the
+# colour on every `gallery theme set`. Without the Gallery, fall back to the
+# hardcoded launch so the tiler still works standalone (full path + LANG so
+# it resolves under launchd; killall keeps it a singleton across restarts).
+if [ -x "${HOME}/bin/gallery-borders" ]; then
+    "${HOME}/bin/gallery-borders" apply
+else
+    killall borders 2>/dev/null
+    LANG="en_US.UTF-8" /opt/homebrew/bin/borders \
+        active_color=0xff7aa2f7 \
+        inactive_color=0x00000000 \
+        width=5.0 \
+        style=round \
+        >/dev/null 2>&1 &
+fi
+
+echo "yabai configuration loaded"

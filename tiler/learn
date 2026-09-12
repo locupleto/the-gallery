@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# Cheat sheets on a key — Omarchy's "Learn" menu for this desk.
+#
+# The sheets are Obsidian notes in the vault's Cheat-Sheets folder (one source,
+# read in place, never copied). The only generated one is Tiler-Keys.md, built
+# from the "## description" lines in tiler/skhdrc so the sheet can never drift
+# from the bindings. Sheets render in a floating, centred iTerm window (glow;
+# q or Esc closes it). Doors: super+space (menu), super+shift+space (tiler
+# keys), and "Learn" in Spotlight (~/Applications/Learn.app).
+#
+#   learn open menu|show <Sheet>   open a floating iTerm window running the command
+#                                  (centred on the display that has focus)
+#   learn menu                     pick a sheet with fzf, then show it (in-window)
+#   learn show <Sheet>             render one sheet with glow (in-window)
+#   learn list                     the sheet names, one per line
+#   learn keys-md [skhdrc]         print the tiler key sheet as markdown
+#   learn install [skhdrc]         write Tiler-Keys.md to the vault, build Learn.app
+#
+# Installed to ~/.config/skhd/learn by tiler/install.sh (skhd and Learn.app run
+# under launchd, which cannot read the external volume the repo lives on).
+set -euo pipefail
+# iTerm starts our window's command with a bare PATH: make Homebrew tools visible.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+VAULT="${OBSIDIAN_VAULT:-$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault}"
+SHEETS="${LEARN_SHEETS:-$VAULT/Cheat-Sheets}"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+APP="$HOME/Applications/Learn.app"
+TITLE_PREFIX="Learn"       # yabairc floats iTerm windows whose title starts with this
+
+die() { echo "learn: $*" >&2; exit 1; }
+
+# --- sheets ----------------------------------------------------------------------------
+sheet_path() { printf '%s/%s.md' "$SHEETS" "$1"; }
+
+list_sheets() {
+    [ -d "$SHEETS" ] || die "no cheat-sheet folder at $SHEETS"
+    # Tiler-Keys first, then the rest alphabetically; iCloud placeholders included.
+    { [ -e "$(sheet_path Tiler-Keys)" ] && echo Tiler-Keys; } || true
+    find "$SHEETS" -maxdepth 1 \( -name '*.md' -o -name '.*.md.icloud' \) -print0 \
+        | xargs -0 -n1 basename \
+        | sed -E 's/^\.(.*)\.md\.icloud$/\1/; s/\.md$//' \
+        | grep -vx 'Tiler-Keys' | sort -f
+}
+
+fetch_if_evicted() {
+    # iCloud may have evicted the note to a ".Name.md.icloud" placeholder.
+    local f="$1"
+    if [ ! -e "$f" ] && [ -e "$(dirname "$f")/.$(basename "$f").icloud" ]; then
+        echo "fetching from iCloud ..." >&2
+        brctl download "$f" 2>/dev/null || true
+        for _ in $(seq 1 40); do [ -e "$f" ] && break; sleep 0.25; done
+    fi
+    [ -e "$f" ]
+}
+
+# --- in-window rendering -----------------------------------------------------------------
+# The house glow style: glow's "dark" with the literal "## " heading prefixes
+# removed (installed next to this script; falls back to the built-in style).
+GLOW_STYLE="${GLOW_STYLE:-$(dirname "$SELF")/learn.style.json}"
+[ -f "$GLOW_STYLE" ] || GLOW_STYLE=dark
+strip_frontmatter() { awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; next} !fm' "$1"; }
+
+set_title() { printf '\033]0;%s\007' "$TITLE_PREFIX: $1"; }
+
+# The display the sheet belongs on: the one that had focus when the key was
+# pressed (or Learn was picked in Spotlight). Captured by open_window and handed
+# to the in-window command as --display N; iTerm itself opens the window
+# wherever its last window was, which is the wrong display half the time.
+LEARN_DISPLAY="${LEARN_DISPLAY:-}"
+
+focused_display() {
+    command -v yabai >/dev/null || return 0
+    yabai -m query --displays --display 2>/dev/null \
+        | sed -n 's/^[[:space:]]*"index":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1
+}
+
+# Our own window's yabai record, found by the title set_title just gave it —
+# never by focus: on a cold or slow iTerm the new window is not focused yet, and
+# the focused one is whatever the user was in (once, another iTerm window, which
+# then got floated instead). One JSON object per line, empty until the title has
+# propagated.
+own_window() {
+    yabai -m query --windows 2>/dev/null | tr -d '\n' | sed 's/},[[:space:]]*{/}\
+{/g' | grep -E "\"app\":[[:space:]]*\"iTerm2\"" | grep -F "\"title\":" | grep -F "$TITLE_PREFIX: $1\"" | head -1
+}
+
+float_me() {
+    # The yabairc rule floats us by title; this is the belt to that brace, for a
+    # window yabai managed before the title arrived (always, in practice: the
+    # title is set from inside the window). Also parks us on the right display.
+    command -v yabai >/dev/null || return 0
+    local name="$1" w="" id
+    for _ in $(seq 1 40); do          # a cold iTerm restores its windows first
+        w="$(own_window "$name" || true)"
+        [ -n "$w" ] && break
+        sleep 0.1
+    done
+    [ -n "$w" ] || return 0
+    id="$(printf '%s' "$w" | sed -n 's/.*"id":[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+    [ -n "$id" ] || return 0
+    if [ -n "$LEARN_DISPLAY" ]; then
+        yabai -m window "$id" --display "$LEARN_DISPLAY" >/dev/null 2>&1 || true
+    fi
+    if printf '%s' "$w" | grep -q '"is-floating":[[:space:]]*false'; then
+        yabai -m window "$id" --toggle float >/dev/null 2>&1 || true
+    fi
+    yabai -m window "$id" --grid 6:6:1:1:4:4 >/dev/null 2>&1 || true
+    yabai -m window "$id" --focus >/dev/null 2>&1 || true
+}
+
+# iTerm warns "a session ended very soon after starting" (and blames the
+# profile) when a window closes within a few seconds. Escape on the menu does
+# exactly that, so the window lingers to the three-second mark before exiting.
+_t0=$(date +%s)
+linger() { local dt=$(( $(date +%s) - _t0 )); [ "$dt" -lt 3 ] && sleep $(( 3 - dt )); return 0; }
+
+show() {
+    local name="$1" f
+    f="$(sheet_path "$name")"
+    trap linger EXIT
+    set_title "$name"
+    float_me "$name"
+    fetch_if_evicted "$f" || die "no sheet named '$name' in $SHEETS"
+    command -v glow >/dev/null || die "glow is not installed (brew install glow)"
+    # Strip the YAML frontmatter; glow renders the rest in its pager (q / Esc
+    # quits). Fed from a pipe glow would guess "no terminal" and print raw
+    # markdown (the "# Headline" look), hence the forced style. Keep the pipe:
+    # given a file path, glow first interrogates the terminal for its colours
+    # and stalls where nothing answers.
+    clear
+    strip_frontmatter "$f" | glow -p -s "$GLOW_STYLE" -w 110 -
+}
+
+menu() {
+    trap linger EXIT
+    set_title "menu"
+    float_me "menu"
+    command -v fzf >/dev/null || die "fzf is not installed (brew install fzf)"
+    local pick
+    pick="$(list_sheets | fzf --height=100% --layout=reverse --border=rounded \
+        --prompt='Learn > ' --header='Enter shows a sheet • Shift+Up/Down or Alt+Up/Down scroll preview • Esc closes' \
+        --bind 'shift-up:preview-up,shift-down:preview-down,alt-up:preview-half-page-up,alt-down:preview-half-page-down' \
+        --preview "\"$SELF\" preview {}" \
+        --preview-window=right:60%:wrap)" || exit 0
+    [ -n "$pick" ] && exec "$SELF" ${LEARN_DISPLAY:+--display "$LEARN_DISPLAY"} show "$pick"
+}
+
+# --- the floating window ----------------------------------------------------------------------
+open_window() {
+    # A fresh iTerm window running this script. Needs Automation → iTerm2 for the
+    # caller (skhd, or Learn.app in Spotlight) — one prompt, once.
+    local cmd disp
+    disp="$(focused_display)"
+    cmd="$(printf '%q ' "$SELF" ${disp:+--display "$disp"} "$@")"
+    if pgrep -xq iTerm2; then
+        osascript -e "tell application \"iTerm2\" to create window with default profile command \"$cmd\"" >/dev/null
+    else
+        # A cold iTerm opens its own restored windows first; ours follows.
+        osascript -e "tell application \"iTerm2\"
+            activate
+            create window with default profile command \"$cmd\"
+        end tell" >/dev/null
+    fi
+}
+
+# --- generation ---------------------------------------------------------------------------------
+keys_md() {
+    local rc="${1:-$(dirname "$SELF")/skhdrc}"
+    [ -f "$rc" ] || die "no skhdrc at $rc"
+    cat <<EOF
+---
+title: Tiler keys — left Option is super
+type: cheat-sheet
+status: generated
+generated_from: tiler/skhdrc
+related:
+  - "[[Desktop-Tiling-With-Yabai]]"
+tags:
+  - cheat-sheet
+  - tiler
+---
+
+# Tiler keys
+
+Left Option is **super**; the right Option types \`@ | [ ] { }\`. Space
+switching rides on the Mission Control Ctrl+N shortcuts. Push-to-talk for
+the voice assistant is the right Command key.
+
+> Generated from \`tiler/skhdrc\` by \`tiler/learn install\` — edit the
+> description lines there, not this note.
+
+EOF
+    { cat "$rc"; load_includes "$rc"; } | awk '
+        function flush() {
+            if (desc != "" && keys != "") printf("| %s | %s |\n", keys, desc)
+            desc = ""; keys = ""
+        }
+        /^# --- / {
+            flush()
+            sec = $0; sub(/^# --- /, "", sec); sub(/ -+$/, "", sec)
+            sub(/[:(].*$/, "", sec); sub(/ +$/, "", sec)
+            printf("\n## %s\n\n| keys | action |\n|---|---|\n", toupper(substr(sec,1,1)) substr(sec,2))
+            next
+        }
+        /^## / { flush(); desc = substr($0, 4); next }
+        /^[a-z]/ && / : / {
+            if (desc == "") next
+            k = $0; sub(/ *:.*$/, "", k)
+            gsub(/lalt/, "super", k); sub(/ *- */, " + ", k)
+            if (k ~ /^shift \+ super/) k = "super + shift" substr(k, 14)
+            # A group under one description: digits 1..9 collapse to one row,
+            # other keys join as "super + h / j / k / l".
+            if (keys == "") { keys = k; next }
+            if (k ~ /[1-9]$/) { base = k; sub(/[1-9]$/, "", base); keys = base "1 … 9"; next }
+            last = k; sub(/^.* \+ /, "", last)
+            keys = keys " / " last
+            next
+        }
+        /^$/ { flush() }
+        END { flush() }
+    '
+}
+
+# load_includes <skhdrc> -- follows `.load "<file>"` directives in skhdrc
+# (skhd's own include syntax) so bindings defined in an included file (e.g.
+# gallery.skhd, installed by the-gallery) show up in the generated sheet.
+# <file> resolves relative to skhdrc's own directory first, falling back to
+# the installed skhd config dir; missing either way, it is skipped silently
+# (skhd itself tolerates a missing/empty include the same way). A synthetic
+# "# --- <Section> ---" line is emitted ahead of each included file's
+# contents so the awk generator above gives it its own "## <Section>"
+# heading, named after the file's basename without ".skhd".
+load_includes() {
+    local rc="$1" rc_dir load_file load_path section
+    rc_dir="$(dirname "$rc")"
+    while IFS= read -r load_file; do
+        [ -n "$load_file" ] || continue
+        load_path="$rc_dir/$load_file"
+        [ -f "$load_path" ] || load_path="$HOME/.config/skhd/$load_file"
+        [ -f "$load_path" ] || continue
+        section="$(basename "$load_file" .skhd)"
+        section="$(printf '%s' "$section" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+        printf '# --- %s ---\n' "$section"
+        cat "$load_path"
+    done < <(sed -n 's/^\.load "\(.*\)"$/\1/p' "$rc")
+}
+
+install_all() {
+    local rc="${1:-$(dirname "$SELF")/skhdrc}"
+    [ -d "$SHEETS" ] || die "no cheat-sheet folder at $SHEETS (is the vault on this Mac?)"
+    keys_md "$rc" > "$(sheet_path Tiler-Keys)"
+    echo "[learn] wrote $(sheet_path Tiler-Keys)"
+
+    # Same content, next to the installed learn/skhdrc: the copy the voice
+    # assistant reads (fast_brain.py) — launchd cannot read the iCloud vault.
+    keys_md "$rc" > "$(dirname "$SELF")/Tiler-Keys.md"
+    chmod 644 "$(dirname "$SELF")/Tiler-Keys.md"
+    echo "[learn] wrote $(dirname "$SELF")/Tiler-Keys.md"
+
+    # Learn.app: a shell-script bundle so Spotlight lists "Learn". It runs the
+    # installed copy of this script (~/.config/skhd/learn), not the repo one.
+    local exe="$APP/Contents/MacOS/Learn"
+    mkdir -p "$APP/Contents/MacOS"
+    cat > "$APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>            <string>Learn</string>
+    <key>CFBundleDisplayName</key>     <string>Learn</string>
+    <key>CFBundleIdentifier</key>      <string>org.ottosson.learn</string>
+    <key>CFBundleVersion</key>         <string>1</string>
+    <key>CFBundleShortVersionString</key> <string>1.0</string>
+    <key>CFBundlePackageType</key>     <string>APPL</string>
+    <key>CFBundleExecutable</key>      <string>Learn</string>
+    <key>LSUIElement</key>             <true/>
+    <key>LSMinimumSystemVersion</key>  <string>13.0</string>
+</dict>
+</plist>
+PLIST
+    cat > "$exe" <<'SH'
+#!/bin/bash
+# Learn.app — Spotlight door to the cheat-sheet menu (built by tiler/learn install).
+exec "$HOME/.config/skhd/learn" open menu
+SH
+    chmod 755 "$exe"
+    codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
+    mdimport "$APP" >/dev/null 2>&1 || true   # Spotlight lists it right away
+    echo "[learn] built $APP (Spotlight: \"Learn\")"
+}
+
+# --- main ---------------------------------------------------------------------------------------
+if [ "${1:-}" = "--display" ]; then LEARN_DISPLAY="${2:-}"; shift 2; fi
+case "${1:-}" in
+    open)     shift; open_window "$@" ;;
+    menu)     menu ;;
+    show)     [ -n "${2:-}" ] || die "usage: learn show <Sheet>"; show "$2" ;;
+    list)     list_sheets ;;
+    preview)  f="$(sheet_path "${2:-}")"; [ -e "$f" ] && strip_frontmatter "$f" | glow -s "$GLOW_STYLE" -w "${FZF_PREVIEW_COLUMNS:-70}" - | head -80 || echo "(not fetched from iCloud yet)" ;;
+    keys-md)  keys_md "${2:-}" ;;
+    install)  install_all "${2:-}" ;;
+    *)        sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
