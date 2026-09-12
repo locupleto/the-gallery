@@ -11,19 +11,22 @@
 # No scripting addition is installed (no sudoers entry, no `yabai --load-sa`). SIP
 # stays enabled; Space switching remains the Mission Control Ctrl+N shortcuts.
 #
-#   tiler/install.sh            install/refresh and (re)start both services
+#   tiler/install.sh            install/refresh; restart a service only if its
+#                               effective config changed (see "services")
+#   tiler/install.sh --restart  restart both services even if unchanged
 #   tiler/install.sh --dry-run  print what would happen
 #   tiler/install.sh --uninstall  stop both services and remove the rc files
 #                                 (keeps the Homebrew formulas)
 set -euo pipefail
 cd "$(dirname "$0")"
 
-DRY=0; UNINSTALL=0
+DRY=0; UNINSTALL=0; RESTART=0
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY=1 ;;
         --uninstall) UNINSTALL=1 ;;
-        *) echo "usage: $0 [--dry-run] [--uninstall]" >&2; exit 2 ;;
+        --restart) RESTART=1 ;;
+        *) echo "usage: $0 [--dry-run] [--restart] [--uninstall]" >&2; exit 2 ;;
     esac
 done
 
@@ -86,6 +89,13 @@ for f in fzf glow; do
 done
 
 # --- configuration -------------------------------------------------------------------
+# The rc files minus comments and blank lines: what a service actually acts on.
+# Captured before the copy so the services step can tell a real change from a
+# comment-only edit.
+effective() { grep -vE '^[[:space:]]*(#|$)' "$1" 2>/dev/null || true; }
+yabai_before="$(effective "$YABAI_RC")"
+skhd_before="$(effective "$SKHD_RC")"
+
 run install -d "$(dirname "$YABAI_RC")" "$(dirname "$SKHD_RC")"
 run install -m 755 yabairc "$YABAI_RC"
 run install -m 644 skhdrc  "$SKHD_RC"
@@ -100,14 +110,25 @@ run install -m 644 learn.style.json "$(dirname "$SKHD_RC")/learn.style.json"
 if [ "$DRY" = 1 ]; then echo "[dry] learn install skhdrc"; else "$(dirname "$SKHD_RC")/learn" install "$PWD/skhdrc"; fi
 
 # --- services --------------------------------------------------------------------------
-# A running service is restarted so the freshly copied rc files take effect
+# A running service is restarted so a changed rc file takes effect
 # (--start-service on a running service returns 0 without reloading anything).
+# Restarting yabai is NOT free: it rebuilds every window tree from scratch, so
+# manual split ratios, swaps and zoom state on every display are lost. A
+# service is therefore restarted only when its effective config (comments and
+# blank lines stripped) differs from what was live before the copy, or with
+# --restart. Comment-only edits are copied without touching the services.
 for f in yabai skhd; do
-    if [ "$DRY" = 1 ]; then echo "[dry] $f --restart-service (or --start-service)"; continue; fi
-    if pgrep -xq "$f"; then
+    case "$f" in
+        yabai) before="$yabai_before"; after="$(effective yabairc)" ;;
+        skhd)  before="$skhd_before";  after="$(effective skhdrc)" ;;
+    esac
+    if [ "$DRY" = 1 ]; then echo "[dry] $f --restart-service if config changed (or --start-service)"; continue; fi
+    if ! pgrep -xq "$f"; then
+        "$f" --start-service && echo "[tiler] $f service started"
+    elif [ "$RESTART" = 1 ] || [ "$before" != "$after" ]; then
         "$f" --restart-service && echo "[tiler] $f service restarted"
     else
-        "$f" --start-service && echo "[tiler] $f service started"
+        echo "[tiler] $f config unchanged, not restarting (--restart to force)"
     fi
 done
 
