@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+#
+# gallery-borders -- keep JankyBorders' focus outline in sync with the
+# active Gallery theme.
+#
+# Mechanism: JankyBorders (FelixKratz/borders) is a single long-lived
+# daemon. Per its own man page ("If an instance of borders is already
+# running, subsequent invocations will update the existing process with
+# the new arguments") a running daemon is reconfigured in place by simply
+# invoking the binary again with new options -- confirmed empirically here
+# 2026-09-12: with borders running (pid P, active_color=0xff7aa2f7),
+# running `borders active_color=0xffff0000 inactive_color=0x00000000
+# width=5.0 style=round` left `pgrep -x borders` at exactly one pid (still
+# P) and visibly changed the live border colour; no second process was
+# spawned. So `apply` below just re-invokes the binary when it is already
+# running, and only does a full `killall` + relaunch when it is not.
+#
+# This is the ONE place the borders style constants (inactive colour,
+# width, corner style) live -- the tiler's yabairc (ai_voice_assistant
+# repo) prefers this script when it is installed and only falls back to
+# its own hardcoded invocation when it is not (see that file's comment).
+#
+# Usage:
+#   gallery-borders [apply]   -- sync the border colour to the current
+#                                 Gallery theme (default action)
+#   gallery-borders status    -- print the daemon's pid and accent in use
+#
+set -euo pipefail
+
+BORDERS_BIN="/opt/homebrew/bin/borders"
+THEME_STATE="${XDG_CONFIG_HOME:-$HOME/.config}/gallery/state/theme.sh"
+DEFAULT_ACCENT="#7aa2f7"
+
+# The only place the non-accent style constants live.
+STYLE_OPTS=(inactive_color=0x00000000 width=5.0 style=round)
+
+die() {
+  echo "gallery-borders: $*" >&2
+  exit 1
+}
+
+# Reads GALLERY_ACCENT out of the theme-state file without polluting this
+# process's environment: the whole lookup runs inside the command
+# substitution's own subshell, so sourcing theme.sh here is subshell-safe.
+current_accent() {
+  (
+    unset GALLERY_ACCENT
+    if [ -f "${THEME_STATE}" ]; then
+      # shellcheck disable=SC1090
+      . "${THEME_STATE}" 2>/dev/null || true
+    fi
+    printf '%s' "${GALLERY_ACCENT:-${DEFAULT_ACCENT}}"
+  )
+}
+
+# "#rrggbb" -> "0xffRRGGBB" (opaque alpha). Falls back to the default
+# accent if the input is not a well-formed hex colour.
+to_argb() {
+  local hex="$1"
+  hex="${hex#\#}"
+  case "${hex}" in
+    [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+      printf '0xff%s' "${hex}"
+      ;;
+    *)
+      printf '0xff%s' "${DEFAULT_ACCENT#\#}"
+      ;;
+  esac
+}
+
+borders_pid() {
+  pgrep -x borders 2>/dev/null | head -1 || true
+}
+
+# Fully detach the daemon from this process (and from the caller that
+# invoked us, e.g. yabairc or a theme-set hook) so it survives both
+# yabairc finishing and `gallery theme set` returning. macOS ships no
+# `setsid`, so nohup + background + disown is the primary path; setsid is
+# used instead when present (e.g. via a Linux-ish coreutils install).
+launch_detached() {
+  local active_argb="$1"
+  if command -v setsid >/dev/null 2>&1; then
+    LANG="en_US.UTF-8" setsid "${BORDERS_BIN}" \
+      "active_color=${active_argb}" "${STYLE_OPTS[@]}" \
+      >/dev/null 2>&1 &
+  else
+    LANG="en_US.UTF-8" nohup "${BORDERS_BIN}" \
+      "active_color=${active_argb}" "${STYLE_OPTS[@]}" \
+      >/dev/null 2>&1 &
+  fi
+  disown
+}
+
+cmd_apply() {
+  [ -x "${BORDERS_BIN}" ] || die "borders not found at ${BORDERS_BIN}"
+
+  local accent argb pid
+  accent="$(current_accent)"
+  argb="$(to_argb "${accent}")"
+  pid="$(borders_pid)"
+
+  if [ -n "${pid}" ]; then
+    # Already running: reconfigure in place (see header comment).
+    LANG="en_US.UTF-8" "${BORDERS_BIN}" "active_color=${argb}" "${STYLE_OPTS[@]}" \
+      >/dev/null 2>&1
+    echo "gallery-borders: reconfigured running daemon (pid ${pid}) -> active_color=${argb}"
+  else
+    killall borders 2>/dev/null || true
+    launch_detached "${argb}"
+    echo "gallery-borders: launched daemon -> active_color=${argb}"
+  fi
+}
+
+cmd_status() {
+  local pid accent
+  pid="$(borders_pid)"
+  accent="$(current_accent)"
+  if [ -n "${pid}" ]; then
+    echo "running (pid ${pid}), accent ${accent}"
+  else
+    echo "not running, accent would be ${accent}"
+    exit 1
+  fi
+}
+
+sub="${1:-apply}"
+[ $# -gt 0 ] && shift || true
+case "${sub}" in
+  apply) cmd_apply "$@" ;;
+  status) cmd_status "$@" ;;
+  *) die "unknown subcommand: ${sub} (usage: gallery-borders [apply|status])" ;;
+esac

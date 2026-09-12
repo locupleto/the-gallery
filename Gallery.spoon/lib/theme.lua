@@ -5,12 +5,27 @@
 --- ~/.config/gallery/themes/<name>/colors.toml, a flat TOML file (no
 --- tables, arrays, or multi-line strings). The active theme is the
 --- symlink ~/.config/gallery/themes/current -> <name> (directory).
---- TWO shapes are understood here, because upstream Omarchy's actual
---- schema (checked against all 22 vendored themes, see
+---
+--- tools/render-theme.py (the CLI's own renderer) is now the SINGLE
+--- derivation of every Gallery theme token, surface/border included: the
+--- `gallery` CLI runs it, before hooks and before asking Hammerspoon to
+--- reload, and it writes the result to
+--- <config dir>/state/theme.json (the sibling of the themes dir this
+--- module is handed -- see stateJsonPath below). M.load below PREFERS that
+--- file: if it exists and its `name` matches the theme the `current`
+--- symlink resolves to, and it carries every token this module's
+--- consumers need, its tokens are returned as-is -- no re-derivation, no
+--- risk of drifting out of step with render-theme.py.
+---
+--- The TOML-parse-and-derive path below (deriveFromRealSchema) is the
+--- FALLBACK for whenever that JSON isn't usable yet: a fresh install
+--- before the CLI has ever rendered a theme, theme.lua's own standalone
+--- tests (which never invoke render-theme.py), or a stale/missing/
+--- unparseable state file. It independently understands the same two
+--- colors.toml shapes tools/render-theme.py does, because upstream
+--- Omarchy's actual schema (checked against all 22 vendored themes, see
 --- tools/vendor-omarchy-themes.sh) differs from a flat 16-slot ANSI
---- palette -- tools/render-theme.py (the CLI's own renderer, owned by
---- another worker) documents and implements the exact same two shapes,
---- and the derivation below MUST keep agreeing with it key-for-key:
+--- palette:
 ---
 ---   - Omarchy's real schema: mode ("dark"|"light"), accent, selection,
 ---     muted, background, dark_background, darker_background,
@@ -28,7 +43,9 @@
 --- Every derived token below prefers a literal key the file already has,
 --- and otherwise computes it from Omarchy's real keys, so both shapes
 --- render an identical color0..15/cursor/selection_*/muted/danger/
---- success/warning/info set (see deriveFromRealSchema).
+--- success/warning/info set (see deriveFromRealSchema) -- and, since this
+--- fallback path must stand in for the JSON path above whenever it isn't
+--- available, an identical surface/border pair too.
 ---
 --- This module only depends on hs.fs, hs.json, and the Lua 5.4 standard
 --- library (io.open/io.popen), so it can be dofile'd standalone (e.g. from
@@ -47,7 +64,11 @@
 ---       success values hardcoded as DEFAULT_THEME in lib/bridge.lua),
 ---       used whenever there is no resolvable current theme.
 ---   .load(themesDir) -> table
----       Resolves themesDir .. "/current", parses its colors.toml, and
+---       Resolves themesDir .. "/current" to get the current theme's name.
+---       If <state>/theme.json exists (state dir derived from themesDir,
+---       see stateJsonPath), parses it and, when its `name` matches and it
+---       carries every required token (see REQUIRED_STRING_KEYS), returns
+---       it verbatim. Otherwise parses that theme's colors.toml and
 ---       returns a token table: every raw key from colors.toml (minus
 ---       `mode`), plus `name` (the resolved theme directory's basename),
 ---       `light` (boolean: mode == "light" if a mode key is present,
@@ -357,13 +378,119 @@ local function deriveFromRealSchema(tokens)
   tokens.border = mixHex(tokens.background, tokens.foreground, 0.25)
 end
 
+------------------------------------------------------------------------
+-- state/theme.json (tools/render-theme.py's output) -- preferred source.
+------------------------------------------------------------------------
+
+--- Every token key M.load's consumers (cssVariables callers, bridge.lua's
+--- ctx.theme, plugin pages reading window.gallery.theme) rely on being
+--- present. Checked against a parsed state/theme.json before trusting it
+--- in place of the TOML-derive path; any single one missing/empty falls
+--- through to that path instead.
+local REQUIRED_STRING_KEYS = {
+  "background", "foreground", "accent", "cursor",
+  "selection_background", "selection_foreground",
+  "muted", "danger", "success", "warning", "info",
+  "surface", "border",
+}
+for i = 0, 15 do
+  table.insert(REQUIRED_STRING_KEYS, "color" .. i)
+end
+
+--- themesDir's sibling "state" directory's theme.json path, e.g.
+--- ".../gallery/themes" -> ".../gallery/state/theme.json" -- mirrors
+--- tools/render-theme.py's own STATE_DIR = CONFIG_DIR / "state" (themesDir
+--- there is CONFIG_DIR / "themes"). Derived purely from themesDir's own
+--- parent directory (not hardcoded to the literal name "themes") so test
+--- fixtures using any directory name still resolve correctly. Returns nil
+--- if themesDir has no parent segment to strip.
+local function stateJsonPath(themesDir)
+  local trimmed = tostring(themesDir):gsub("/+$", "")
+  local parent = trimmed:match("^(.*)/[^/]+$")
+  if not parent or parent == "" then
+    return nil
+  end
+  return parent .. "/state/theme.json"
+end
+
+--- True iff `tokens` (a decoded state/theme.json table) has every key
+--- REQUIRED_STRING_KEYS names as a non-empty string, plus a string `name`
+--- and boolean `light`. Anything less means render-theme.py's output is
+--- for a shape this module doesn't yet understand (or is simply
+--- incomplete/corrupt) -- caller should fall back to the TOML-derive path.
+local function stateTokensComplete(tokens)
+  if type(tokens) ~= "table" then
+    return false
+  end
+  if type(tokens.name) ~= "string" or tokens.name == "" then
+    return false
+  end
+  if type(tokens.light) ~= "boolean" then
+    return false
+  end
+  for _, key in ipairs(REQUIRED_STRING_KEYS) do
+    local v = tokens[key]
+    if type(v) ~= "string" or v == "" then
+      return false
+    end
+  end
+  return true
+end
+
+--- Read <state>/theme.json, parse it, and return its tokens verbatim only
+--- if it exists, parses, its `name` equals `expectedName` (the theme the
+--- `current` symlink resolves to right now), and stateTokensComplete
+--- accepts it. Returns nil on any failure (missing file, unreadable,
+--- unparseable JSON, name mismatch, incomplete token set) -- never raises,
+--- and every failure path is a silent "fall back to TOML", not an error.
+local function loadStateJsonTokens(themesDir, expectedName)
+  local jsonPath = stateJsonPath(themesDir)
+  if not jsonPath then
+    return nil
+  end
+  if not hs.fs.attributes(jsonPath) then
+    return nil
+  end
+
+  local f = io.open(jsonPath, "r")
+  if not f then
+    return nil
+  end
+  local content = f:read("a")
+  f:close()
+  if type(content) ~= "string" or content == "" then
+    return nil
+  end
+
+  local decodeOk, decoded = pcall(hs.json.decode, content)
+  if not decodeOk or type(decoded) ~= "table" then
+    return nil
+  end
+  if decoded.name ~= expectedName then
+    return nil
+  end
+  if not stateTokensComplete(decoded) then
+    return nil
+  end
+  return decoded
+end
+
 --- Load the active theme from themesDir (see contract atop this file).
---- Never raises; falls back to defaultTokens() on any failure.
+--- Prefers <state>/theme.json (tools/render-theme.py's output) when it
+--- exists, names the same theme the `current` symlink resolves to, and
+--- carries every required token; otherwise falls back to parsing and
+--- deriving from colors.toml directly. Never raises; falls back to
+--- defaultTokens() on any failure.
 function M.load(themesDir)
   local ok, result = pcall(function()
     local dir, name = resolveCurrentDir(themesDir)
     if not dir then
       return nil
+    end
+
+    local stateTokens = loadStateJsonTokens(themesDir, name)
+    if stateTokens then
+      return stateTokens
     end
 
     local raw = M.parse(dir .. "/colors.toml")

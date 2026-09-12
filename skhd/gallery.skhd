@@ -14,3 +14,5 @@ lalt + shift - 0 : "$HOME/bin/gallery" toggle gallery.sysmon
 lalt + ctrl - 0 : "$HOME/bin/gallery" toggle gallery.spaces
 ## Gallery: Radio Atlas (world radio globe)
 lalt + cmd - 0 : "$HOME/bin/gallery" toggle akshar.radio-atlas
+## Gallery: theme picker (fzf palette preview, Omarchy-style theme menu)
+shift + ctrl + lalt - space : "$HOME/bin/gallery" toggle gallery.themes

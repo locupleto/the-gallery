@@ -34,6 +34,8 @@ TUI_BIN_SRC="${SCRIPT_DIR}/bin/gallery-tui"
 TUI_BIN_DEST="${HOME_DIR}/bin/gallery-tui"
 MENU_BIN_SRC="${SCRIPT_DIR}/bin/gallery-menu"
 MENU_BIN_DEST="${HOME_DIR}/bin/gallery-menu"
+BORDERS_BIN_SRC="${SCRIPT_DIR}/bin/gallery-borders"
+BORDERS_BIN_DEST="${HOME_DIR}/bin/gallery-borders"
 QML_BIN_SRC="${SCRIPT_DIR}/bin/gallery-qml"
 QML_BIN_DEST="${HOME_DIR}/bin/gallery-qml"
 QML_SRC="${SCRIPT_DIR}/qml"
@@ -99,7 +101,7 @@ do_uninstall() {
   else
     echo "[gallery] no CLI installed at ${HS_BIN_DEST}"
   fi
-  run rm -f "${TUI_BIN_DEST}" "${MENU_BIN_DEST}" "${QML_BIN_DEST}"
+  run rm -f "${TUI_BIN_DEST}" "${MENU_BIN_DEST}" "${QML_BIN_DEST}" "${BORDERS_BIN_DEST}"
 
   echo "[gallery] leaving ${CONFIG_DIR} in place"
   echo "[gallery] leaving ${HS_INIT} in place -- Gallery load block was not removed automatically."
@@ -188,6 +190,10 @@ echo "[gallery] installing terminal-window helpers to ${TUI_BIN_DEST}, ${MENU_BI
 run cp "${TUI_BIN_SRC}" "${TUI_BIN_DEST}"
 run cp "${MENU_BIN_SRC}" "${MENU_BIN_DEST}"
 run chmod +x "${TUI_BIN_DEST}" "${MENU_BIN_DEST}"
+
+echo "[gallery] installing theme-aware borders helper to ${BORDERS_BIN_DEST}"
+run cp "${BORDERS_BIN_SRC}" "${BORDERS_BIN_DEST}"
+run chmod +x "${BORDERS_BIN_DEST}"
 
 if [ -f "${QML_BIN_SRC}" ]; then
   echo "[gallery] installing qml host launcher to ${QML_BIN_DEST}"

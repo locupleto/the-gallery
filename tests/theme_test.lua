@@ -364,6 +364,167 @@ do
 end
 
 --------------------------------------------------------------------------
+-- 8. state/theme.json path: when <state>/theme.json exists and its name
+--    matches the resolved current theme, its tokens are used VERBATIM --
+--    not re-derived from colors.toml. colors.toml here is deliberately
+--    seeded with different values from theme.json so a pass here proves
+--    the JSON path (not a coincidental match) is what ran; also checks
+--    surface/border are present via this path.
+--------------------------------------------------------------------------
+do
+  local caseDir = TMP_ROOT .. "/json-match"
+  local themesDir = caseDir .. "/themes"
+  local themeDir = themesDir .. "/tokyo-night"
+  mkdirp(themeDir)
+  writeFile(themeDir .. "/colors.toml", table.concat({
+    "accent = \"#100000\"",
+    "background = \"#200000\"",
+    "foreground = \"#300000\"",
+  }, "\n"))
+  symlinkCurrent(themesDir, "tokyo-night")
+
+  local jsonTokens = {
+    name = "tokyo-night",
+    light = false,
+    background = "#111111",
+    foreground = "#222222",
+    accent = "#333333",
+    cursor = "#444444",
+    selection_background = "#555555",
+    selection_foreground = "#666666",
+    muted = "#777777",
+    danger = "#888888",
+    success = "#999999",
+    warning = "#aaaaaa",
+    info = "#bbbbbb",
+    surface = "#cccccc",
+    border = "#dddddd",
+  }
+  for i = 0, 15 do
+    jsonTokens["color" .. i] = string.format("#00%02x00", i)
+  end
+
+  mkdirp(caseDir .. "/state")
+  writeFile(caseDir .. "/state/theme.json", hs.json.encode(jsonTokens))
+
+  local tokens = Theme.load(themesDir)
+  check("json path: name from theme.json", tokens.name == "tokyo-night", tostring(tokens.name))
+  check("json path: background from theme.json, NOT colors.toml", tokens.background == "#111111", tostring(tokens.background))
+  check("json path: accent from theme.json, NOT colors.toml", tokens.accent == "#333333", tostring(tokens.accent))
+  check("json path: color0 from theme.json", tokens.color0 == "#000000", tostring(tokens.color0))
+  check("json path: color15 from theme.json", tokens.color15 == "#000f00", tostring(tokens.color15))
+  check("json path: surface present", tokens.surface == "#cccccc", tostring(tokens.surface))
+  check("json path: border present", tokens.border == "#dddddd", tostring(tokens.border))
+
+  local css = Theme.cssVariables(tokens)
+  check("json path: cssVariables includes --gallery-surface", css:find("--gallery-surface: #cccccc;", 1, true) ~= nil, css)
+  check("json path: cssVariables includes --gallery-border", css:find("--gallery-border: #dddddd;", 1, true) ~= nil, css)
+end
+
+--------------------------------------------------------------------------
+-- 9. state/theme.json missing entirely: falls back to the TOML-derive
+--    path cleanly (no error, full token set including surface/border).
+--------------------------------------------------------------------------
+do
+  local caseDir = TMP_ROOT .. "/json-missing"
+  local themesDir = caseDir .. "/themes"
+  local themeDir = themesDir .. "/tokyo-night"
+  mkdirp(themeDir)
+  writeFile(themeDir .. "/colors.toml", table.concat({
+    "accent = \"#7aa2f7\"",
+    "background = \"#1a1b26\"",
+    "foreground = \"#a9b1d6\"",
+    "color1 = \"#f7768e\"",
+    "color2 = \"#9ece6a\"",
+    "color3 = \"#e0af68\"",
+    "color4 = \"#7aa2f7\"",
+    "color8 = \"#444b6a\"",
+  }, "\n"))
+  symlinkCurrent(themesDir, "tokyo-night")
+  -- Deliberately no caseDir/state directory at all.
+
+  local tokens = Theme.load(themesDir)
+  check("missing json: falls back to TOML-derived name", tokens.name == "tokyo-night", tostring(tokens.name))
+  check("missing json: falls back to TOML-derived background", tokens.background == "#1a1b26", tostring(tokens.background))
+  check("missing json: derived surface present", type(tokens.surface) == "string" and tokens.surface ~= "", tostring(tokens.surface))
+  check("missing json: derived border present", type(tokens.border) == "string" and tokens.border ~= "", tostring(tokens.border))
+end
+
+--------------------------------------------------------------------------
+-- 10. state/theme.json present but STALE (its name no longer matches the
+--     resolved current theme, e.g. the CLI rendered a different theme
+--     than the one `current` now points at): falls back to TOML-derive,
+--     ignoring the stale JSON entirely.
+--------------------------------------------------------------------------
+do
+  local caseDir = TMP_ROOT .. "/json-stale"
+  local themesDir = caseDir .. "/themes"
+  local themeDir = themesDir .. "/tokyo-night"
+  mkdirp(themeDir)
+  writeFile(themeDir .. "/colors.toml", table.concat({
+    "accent = \"#7aa2f7\"",
+    "background = \"#1a1b26\"",
+    "foreground = \"#a9b1d6\"",
+    "color1 = \"#f7768e\"",
+    "color2 = \"#9ece6a\"",
+    "color3 = \"#e0af68\"",
+    "color4 = \"#7aa2f7\"",
+    "color8 = \"#444b6a\"",
+  }, "\n"))
+  symlinkCurrent(themesDir, "tokyo-night")
+
+  local staleTokens = { name = "some-other-theme", light = false, background = "#000000" }
+  mkdirp(caseDir .. "/state")
+  writeFile(caseDir .. "/state/theme.json", hs.json.encode(staleTokens))
+
+  local tokens = Theme.load(themesDir)
+  check("stale json: name mismatch -> falls back to TOML-derived name", tokens.name == "tokyo-night", tostring(tokens.name))
+  check("stale json: falls back to TOML-derived background (not stale #000000)", tokens.background == "#1a1b26", tostring(tokens.background))
+  check("stale json: derived surface present (fallback path)", type(tokens.surface) == "string" and tokens.surface ~= "", tostring(tokens.surface))
+  check("stale json: derived border present (fallback path)", type(tokens.border) == "string" and tokens.border ~= "", tostring(tokens.border))
+end
+
+--------------------------------------------------------------------------
+-- 11. state/theme.json present, name matches, but INCOMPLETE (missing a
+--     token this module's consumers require, e.g. a render-theme.py run
+--     from an older version of that script): falls back to TOML-derive
+--     rather than handing consumers a partial token table.
+--------------------------------------------------------------------------
+do
+  local caseDir = TMP_ROOT .. "/json-incomplete"
+  local themesDir = caseDir .. "/themes"
+  local themeDir = themesDir .. "/tokyo-night"
+  mkdirp(themeDir)
+  writeFile(themeDir .. "/colors.toml", table.concat({
+    "accent = \"#7aa2f7\"",
+    "background = \"#1a1b26\"",
+    "foreground = \"#a9b1d6\"",
+    "color1 = \"#f7768e\"",
+    "color2 = \"#9ece6a\"",
+    "color3 = \"#e0af68\"",
+    "color4 = \"#7aa2f7\"",
+    "color8 = \"#444b6a\"",
+  }, "\n"))
+  symlinkCurrent(themesDir, "tokyo-night")
+
+  -- Correct name, but no `surface`/`border` (and no color0..15) at all.
+  local incompleteTokens = {
+    name = "tokyo-night",
+    light = false,
+    background = "#111111",
+    foreground = "#222222",
+    accent = "#333333",
+  }
+  mkdirp(caseDir .. "/state")
+  writeFile(caseDir .. "/state/theme.json", hs.json.encode(incompleteTokens))
+
+  local tokens = Theme.load(themesDir)
+  check("incomplete json: falls back to TOML-derived background (not the incomplete json's)", tokens.background == "#1a1b26", tostring(tokens.background))
+  check("incomplete json: derived surface present (fallback path)", type(tokens.surface) == "string" and tokens.surface ~= "", tostring(tokens.surface))
+  check("incomplete json: derived border present (fallback path)", type(tokens.border) == "string" and tokens.border ~= "", tostring(tokens.border))
+end
+
+--------------------------------------------------------------------------
 -- Report. Returned (not printed) as the chunk's final value -- see the
 -- note on `-q` above.
 --------------------------------------------------------------------------

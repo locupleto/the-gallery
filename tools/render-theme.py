@@ -37,10 +37,18 @@ from a flat 16-slot ANSI palette:
 Every derived token below prefers a literal key if the file has it, and
 otherwise computes it from Omarchy's real keys -- so both shapes render
 identically.
+
+This script is the SINGLE derivation of every Gallery theme token, including
+the Gallery-only `surface`/`border` pair (see mix_hex below). state/theme.json
+is not just a dump for external consumers: Gallery.spoon/lib/theme.lua reads
+it back (when its `name` matches the resolved current theme) instead of
+re-deriving tokens itself, so this script's output is authoritative -- see
+the header comment atop lib/theme.lua for the fallback relationship.
 """
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -103,6 +111,34 @@ def hex_to_rgb_int(value: str) -> tuple[int, int, int]:
 def hex_to_rgb_float(value: str) -> tuple[float, float, float]:
     r, g, b = hex_to_rgb_int(value)
     return r / 255.0, g / 255.0, b / 255.0
+
+
+def clamp_byte(n: float) -> int:
+    """Port of Gallery.spoon/lib/theme.lua's clampByte: clamp to 0..255 and
+    round half-up (Lua's math.floor(n + 0.5)), NOT Python's banker's-rounding
+    round() -- the two disagree on exact .5 boundaries, which matters for
+    byte-identical hex output with the Lua side."""
+    if n < 0:
+        return 0
+    if n > 255:
+        return 255
+    return int(math.floor(n + 0.5))
+
+
+def mix_hex(from_hex: str, toward_hex: str, pct: float) -> str:
+    """Port of Gallery.spoon/lib/theme.lua's mixHex: mix `from_hex` toward
+    `toward_hex` by `pct` (0..1) and return "#rrggbb". Falls back to
+    `from_hex` unchanged if either color fails to parse, exactly like the
+    Lua original (which returns fromHex when hexToRgb yields nil)."""
+    try:
+        fr, fg, fb = hex_to_rgb_int(from_hex)
+        tr, tg, tb = hex_to_rgb_int(toward_hex)
+    except ValueError:
+        return from_hex
+    r = clamp_byte(fr + (tr - fr) * pct)
+    g = clamp_byte(fg + (tg - fg) * pct)
+    b = clamp_byte(fb + (tb - fb) * pct)
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def resolve_current_theme_dir() -> Path:
@@ -191,6 +227,18 @@ def build_tokens(raw: dict, theme_dir: Path) -> tuple[dict, bool]:
         if color_key in raw and raw[color_key]:
             continue
         tokens[color_key] = pick(*fallback_keys, default=foreground)
+
+    # surface/border: Gallery.spoon/lib/theme.lua's own extra UI tokens
+    # (not part of any upstream Omarchy shape) -- derived here, byte-
+    # identically to theme.lua's mixHex-based derivation, so theme.lua can
+    # consume this script's theme.json instead of re-deriving them itself.
+    # surface prefers Omarchy's own lighter_background verbatim; border is
+    # always the mix (no upstream key to prefer instead).
+    surface_pref = tokens.get("lighter_background")
+    tokens["surface"] = surface_pref if surface_pref else mix_hex(
+        tokens["background"], tokens["foreground"], 0.12
+    )
+    tokens["border"] = mix_hex(tokens["background"], tokens["foreground"], 0.25)
 
     return tokens, light
 
