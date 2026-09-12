@@ -53,7 +53,7 @@ shift + lalt - 9 : yabai -m window --space 9 && skhd -k "ctrl - 9"
 
 # --- displays ----------------------------------------------------------------
 ## send the window to the other display and follow it
-shift + lalt - s : (yabai -m window --display next || yabai -m window --display first) && (yabai -m display --focus next || yabai -m display --focus first)
+shift + lalt - s : export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; w=$(yabai -m query --windows --window); wid=$(echo "$w" | jq -r ".id"); src=$(echo "$w" | jq -r ".display"); tot=$(yabai -m query --displays | jq "length"); yabai -m window "$wid" --display $(( src % tot + 1 )) && yabai -m window --focus "$wid"
 
 # --- window state --------------------------------------------------------------
 ## toggle zoom (the window fills its display)
