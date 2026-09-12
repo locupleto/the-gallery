@@ -1,0 +1,658 @@
+#!/usr/bin/env python3
+"""yabai-layout — snapshot and restore yabai's BSP window layout, frame by frame.
+
+A TILER tool (`tiler/`, installed next to `tiler/learn`), distinct from
+`desktop.py`'s `save_layout`/`apply_layout`: those save a named, portable
+layout (fractions/roles, replayed through System Events or yabai's own
+placement); this one saves the EXACT live BSP tree of one desk — split
+ratios, swaps, zooms, floats, focus — so a `yabai --restart-service` (which
+rebuilds every tree from scratch and loses all of that) can be undone.
+
+    yabai-layout save    [--file PATH]              # PATH default: see below
+    yabai-layout restore [--file PATH] [--wait SEC]  # SEC default: 30
+    yabai-layout verify  [--file PATH]
+
+Default snapshot file: ~/.config/yabai/layout-snapshot.json
+
+No scripting addition, ever (SIP stays enabled): never `--load-sa`, and
+`yabai -m space --focus`/`--switch` are never called — only window-level
+commands, which work on background Spaces without switching to them.
+
+--- How restore rebuilds a Space (empirical yabai 7.1.25 findings) --------
+
+yabai does not persist ad hoc `--toggle float` state across a service
+restart (only rule-based manage=off survives), and a saved BSP tree cannot
+be replayed as a batch of frames — yabai only exposes structural primitives
+(insert direction, warp, ratio). So each Space is rebuilt leaf by leaf:
+
+  1. RECONSTRUCT THE TREE FROM SAVED FRAMES. A genuine BSP node's rect
+     always admits a full cut (a vertical or horizontal line with every
+     child rect entirely on one side); recurse to a binary tree, deriving
+     each node's split ratio from the child frames (see `_ratio_of`).
+     "first" = the top/left side, "second" = bottom/right — this is a
+     yabai invariant (confirmed empirically: split_child follows screen
+     position, not creation order).
+
+  2. REPLAY. `anchor` = the first (top/left-most) leaf; it never moves.
+     Every other saved-tiled window is floated up front (removes it from
+     whatever tree a restart or --balance left behind). Windows are then
+     re-inserted one at a time, pre-order, splitting the anchor's cell:
+
+         yabai -m window <anchor> --insert east|south   # per the cut axis
+         yabai -m window <a2>     --toggle float         # unfloat (lands
+                                                           # in the FOCUSED
+                                                           # space — ignore)
+         yabai -m window <a2>     --warp <anchor>         # re-insert here
+         yabai -m window <anchor> --ratio abs:<ratio>
+         yabai -m window <anchor> --insert east|south     # toggle off
+
+     THE KEY FINDING: `--toggle float` always un-floats into the
+     currently-FOCUSED Space's tree, never the window's own last Space —
+     even if the window was floating ON the target Space already. Doing
+     this while focus sits on a different (e.g. the user's live) Space
+     transiently splits ONE window there, but `--warp <anchor>` (which
+     DOES cross Spaces, and honours the anchor's pending `--insert`
+     direction/position) immediately re-homes it correctly, and the
+     disturbed Space's tree fully self-heals the instant the interloper
+     is warped away. `--warp` itself refuses a still-floating window
+     ("the acting window is not managed"), hence the toggle-then-warp
+     order. Verified end to end on a live 3-window Space (root + one
+     nested split, both axes) with the adjacent, focused Space checked
+     clean before and after. `--ratio abs:<r>` is only safe to call on a
+     window that is a direct child of the node just created (exactly the
+     anchor, right after its warp) — calling it on a window nested two+
+     levels inside a pre-existing tree was observed to reshuffle sibling
+     order elsewhere in the tree.
+
+  3. Windows present now but absent from the snapshot ("new") and windows
+     whose own saved `split_type` was "none" while ≥2 windows share the
+     Space ("orphans" — a live yabai quirk: stale/backgrounded windows
+     that are `is-floating: false` yet not actually threaded into the
+     tree) are floated out during the rebuild and released at the end for
+     yabai to place; both are reported, neither gates `verify`. Windows
+     with `stack-index > 0` are unsupported: the whole Space is left
+     untouched and reported.
+
+Ratio formula: ratio = (first_child_extent + gap/2) / node_extent, where
+node_extent is the bounding extent of the node's own children along the
+cut axis (window frames already exclude gaps). Verified exact for a
+2544px-wide 0.5 vertical split (1268/1268, gap 8): (1268 + 4) / 2544 = 0.5.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+DEFAULT_FILE = Path.home() / ".config/yabai/layout-snapshot.json"
+EPS_MARGIN = 2  # eps for cut-finding = window_gap + EPS_MARGIN, per the spec
+
+
+class LayoutError(Exception):
+    """A Space's saved frames don't admit a clean BSP bisection."""
+
+
+# --------------------------------------------------------------------------- #
+# yabai client
+# --------------------------------------------------------------------------- #
+
+def yabai(*args: str, check: bool = True) -> str:
+    """Run `yabai -m <args>`. Returns stripped stdout. Raises RuntimeError
+    (with yabai's stderr/stdout) on a non-zero exit unless check=False, in
+    which case failures are swallowed and "" is returned — used for
+    best-effort commands (toggling a window that may no longer exist,
+    clearing an --insert state, re-zooming, etc.)."""
+    proc = subprocess.run(["yabai", "-m", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        if check:
+            msg = proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}"
+            raise RuntimeError(f"yabai -m {' '.join(args)}: {msg}")
+        return ""
+    return proc.stdout.strip()
+
+
+def yabai_json(*args: str):
+    out = yabai(*args)
+    return json.loads(out) if out else []
+
+
+def query_windows():
+    return yabai_json("query", "--windows")
+
+
+def query_spaces():
+    return yabai_json("query", "--spaces")
+
+
+def query_window_by_id(win_id: int):
+    out = yabai("query", "--windows", "--window", str(win_id), check=False)
+    return json.loads(out) if out else None
+
+
+def query_displays():
+    return yabai_json("query", "--displays")
+
+
+def config_int(key: str, default: int) -> int:
+    out = yabai("config", key, check=False)
+    try:
+        return int(float(out))
+    except ValueError:
+        return default
+
+
+# --------------------------------------------------------------------------- #
+# save
+# --------------------------------------------------------------------------- #
+
+def cmd_save(args) -> int:
+    path = Path(args.file).expanduser()
+
+    windows_before = query_windows()
+    zoom_state = {w["id"]: (w["has-fullscreen-zoom"], w["has-parent-zoom"]) for w in windows_before}
+
+    # Un-zoom every zoomed window BEFORE recording frames: a zoomed window's
+    # frame hides its real tile, and it must be un-zoomed to read that frame.
+    for w in windows_before:
+        if w["has-fullscreen-zoom"]:
+            yabai("window", str(w["id"]), "--toggle", "zoom-fullscreen", check=False)
+        if w["has-parent-zoom"]:
+            yabai("window", str(w["id"]), "--toggle", "zoom-parent", check=False)
+    if any(zoom_state.values()):
+        time.sleep(0.2)
+
+    windows = query_windows()
+    spaces = query_spaces()
+    displays = query_displays()
+    # NB: a window's own "space" field (query --windows) is the Space's
+    # mission-control INDEX, not its internal "id" — confirmed empirically
+    # (a Space with id=12/index=8 shows "space": 8 on its windows). Index is
+    # therefore the key used everywhere windows are matched to a Space;
+    # "id" is carried along as informational metadata only.
+    space_by_index = {s["index"]: s for s in spaces}
+
+    gap = config_int("window_gap", 8)
+    padding = {
+        "top": config_int("top_padding", 8),
+        "bottom": config_int("bottom_padding", 8),
+        "left": config_int("left_padding", 8),
+        "right": config_int("right_padding", 8),
+    }
+
+    focused_window = None
+    spaces_out: dict[str, dict] = {}
+    for s in spaces:
+        spaces_out[str(s["index"])] = {
+            "space_id": s["id"],
+            "space_index": s["index"],
+            "display": s["display"],
+            "type": s["type"],
+            "windows": [],
+        }
+
+    for w in windows:
+        if w.get("has-focus"):
+            focused_window = w["id"]
+        fz, pz = zoom_state.get(w["id"], (False, False))
+        sp = space_by_index.get(w["space"], {})
+        rec = {
+            "id": w["id"],
+            "app": w["app"],
+            "title": w["title"],
+            "display": w["display"],
+            "space_id": sp.get("id"),
+            "space_index": w["space"],
+            "frame": w["frame"],
+            "is_floating": w["is-floating"],
+            "is_visible": w["is-visible"],
+            "is_minimized": w["is-minimized"],
+            "has_fullscreen_zoom": fz,
+            "has_parent_zoom": pz,
+            "stack_index": w["stack-index"],
+            # Auxiliary, yabai-internal: used only by restore to filter out
+            # "orphan" windows (is-floating false but not actually threaded
+            # into the Space's tree) before bisecting the saved frames.
+            "split_type": w["split-type"],
+            "split_child": w["split-child"],
+        }
+        key = str(w["space"])
+        spaces_out.setdefault(key, {
+            "space_id": sp.get("id"), "space_index": w["space"],
+            "display": w["display"], "type": "bsp", "windows": [],
+        })
+        spaces_out[key]["windows"].append(rec)
+
+    snapshot = {
+        "version": 1,
+        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "config": {"window_gap": gap, "padding": padding},
+        "displays": [{"id": d["id"], "index": d["index"], "frame": d["frame"]} for d in displays],
+        "focused_window": focused_window,
+        "spaces": spaces_out,
+    }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snapshot, indent=2) + "\n")
+    n_windows = sum(len(s["windows"]) for s in spaces_out.values())
+    print(f"[yabai-layout] saved {n_windows} windows across {len(spaces_out)} spaces -> {path}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# geometry / bisection
+# --------------------------------------------------------------------------- #
+
+def _l(w):
+    return w["frame"]["x"]
+
+
+def _r(w):
+    return w["frame"]["x"] + w["frame"]["w"]
+
+
+def _t(w):
+    return w["frame"]["y"]
+
+
+def _b(w):
+    return w["frame"]["y"] + w["frame"]["h"]
+
+
+def _find_cut(rects, axis, eps):
+    """A clean full cut along `axis` ('x': vertical line, left/right;
+    'y': horizontal line, top/bottom). Candidates are each rect's
+    trailing edge; returns (first_side, second_side) or None."""
+    lo, hi = (_l, _r) if axis == "x" else (_t, _b)
+    candidates = sorted({hi(r) for r in rects})
+    for c in candidates[:-1]:
+        first = [r for r in rects if hi(r) <= c + eps]
+        second = [r for r in rects if lo(r) >= c - eps]
+        if not first or not second:
+            continue
+        if len(first) + len(second) != len(rects):
+            continue
+        if set(id(r) for r in first) & set(id(r) for r in second):
+            continue
+        return first, second
+    return None
+
+
+def _ratio_of(first, whole, axis, gap):
+    if axis == "x":
+        node_extent = max(_r(w) for w in whole) - min(_l(w) for w in whole)
+        first_extent = max(_r(w) for w in first) - min(_l(w) for w in first)
+    else:
+        node_extent = max(_b(w) for w in whole) - min(_t(w) for w in whole)
+        first_extent = max(_b(w) for w in first) - min(_t(w) for w in first)
+    if node_extent <= 0:
+        return 0.5
+    return (first_extent + gap / 2.0) / node_extent
+
+
+def bisect_tree(rects, gap, eps):
+    """Recursively reconstruct the BSP tree from a set of saved window
+    frames. Raises LayoutError if some node's rect doesn't admit a clean
+    full cut (not a genuine BSP partition — caller should have already
+    filtered out orphans/stacks/floats/missing windows)."""
+    if len(rects) == 1:
+        return {"leaf": rects[0]}
+    cut = _find_cut(rects, "x", eps)
+    axis = "x"
+    if cut is None:
+        cut = _find_cut(rects, "y", eps)
+        axis = "y"
+    if cut is None:
+        names = ", ".join(f'{w["app"]}#{w["id"]}' for w in rects)
+        raise LayoutError(f"no clean bisection for {len(rects)} windows ({names})")
+    first, second = cut
+    ratio = _ratio_of(first, rects, axis, gap)
+    return {
+        "axis": axis,
+        "ratio": ratio,
+        "first": bisect_tree(first, gap, eps),
+        "second": bisect_tree(second, gap, eps),
+    }
+
+
+def first_leaf(node):
+    while "leaf" not in node:
+        node = node["first"]
+    return node["leaf"]
+
+
+# --------------------------------------------------------------------------- #
+# restore
+# --------------------------------------------------------------------------- #
+
+def wait_for_yabai(timeout: float, saved_ids: set[int]) -> bool:
+    """Poll until yabai answers --query --windows, at least one saved window
+    id shows up managed, and the window count holds still across two
+    consecutive polls — right after a restart yabai is still enumerating
+    windows, and rebuilding on a partial list would misplace the rest."""
+    deadline = time.time() + timeout
+    last_count = None
+    while time.time() < deadline:
+        try:
+            windows = query_windows()
+        except Exception:
+            windows = None
+        if windows is not None:
+            if not saved_ids or any(w["id"] in saved_ids for w in windows):
+                if last_count == len(windows):
+                    return True
+                last_count = len(windows)
+        time.sleep(0.5)
+    # One last try, in case saved_ids is empty or nothing ever matched.
+    try:
+        query_windows()
+        return True
+    except Exception:
+        return False
+
+
+def _classify(saved_windows):
+    """Split a Space's saved window list into: tiled (is_floating False,
+    is_minimized False), floats, and (within tiled) stacked vs. flat."""
+    tiled = [w for w in saved_windows if not w["is_floating"] and not w["is_minimized"]]
+    floats = [w for w in saved_windows if w["is_floating"] and not w["is_minimized"]]
+    stacked = [w for w in tiled if w.get("stack_index", 0) > 0]
+    flat = [w for w in tiled if w.get("stack_index", 0) == 0]
+    if len(flat) > 1:
+        clean = [w for w in flat if w.get("split_type") != "none"]
+        orphans = [w for w in flat if w.get("split_type") == "none"]
+    else:
+        clean = flat
+        orphans = []
+    return clean, orphans, stacked, floats
+
+
+def _float(win_id: int):
+    yabai("window", str(win_id), "--toggle", "float", check=False)
+
+
+def _unfloat_here(win_id: int):
+    yabai("window", str(win_id), "--toggle", "float", check=False)
+
+
+def _build(node, anchor_id, gap):
+    """Pre-order replay: split anchor_id's current cell to place the
+    "second" side, recurse into both sides. See module docstring for the
+    empirical basis of this exact command sequence."""
+    if "leaf" in node:
+        return
+    axis = node["axis"]
+    direction = "east" if axis == "x" else "south"
+    c1, c2 = node["first"], node["second"]
+    a2 = first_leaf(c2)["id"]
+
+    yabai("window", str(anchor_id), "--insert", direction, check=False)
+    _unfloat_here(a2)
+    time.sleep(0.15)
+    yabai("window", str(a2), "--warp", str(anchor_id), check=False)
+    time.sleep(0.15)
+    yabai("window", str(anchor_id), "--ratio", f"abs:{node['ratio']:.4f}", check=False)
+    yabai("window", str(anchor_id), "--insert", direction, check=False)  # clear pending state
+
+    _build(c1, anchor_id, gap)
+    _build(c2, a2, gap)
+
+
+def restore_space(space_snap, live_by_id, gap, eps, summary: list[str]):
+    space_index = space_snap.get("space_index")
+    saved = space_snap["windows"]
+    clean, orphans, stacked, floats = _classify(saved)
+
+    if stacked:
+        names = ", ".join(f'{w["app"]}#{w["id"]}' for w in stacked)
+        summary.append(f"space {space_index}: stacked windows unsupported ({names}) — left untouched")
+        return
+
+    present = {}
+    missing = []
+    for w in clean:
+        if w["id"] in live_by_id:
+            present[w["id"]] = w
+        else:
+            missing.append(w)
+
+    live_here = [w for w in live_by_id.values() if w["space"] == space_snap["space_index"]]
+    saved_clean_ids = {w["id"] for w in clean}
+    saved_orphan_ids = {w["id"] for w in orphans}
+    saved_float_ids = {w["id"] for w in floats}
+    new_ids = set()
+    for lw in live_here:
+        if lw["id"] in saved_clean_ids or lw["id"] in saved_orphan_ids or lw["id"] in saved_float_ids:
+            continue
+        if lw["is-floating"] or lw["is-minimized"]:
+            continue
+        new_ids.add(lw["id"])
+
+    # Float every present tiled/orphan/new window on this space except the
+    # anchor, so the rebuild starts from a single tiled leaf.
+    anchor_id = None
+    if len(present) == 1:
+        anchor_id = next(iter(present))
+    elif len(present) >= 2:
+        try:
+            tree = bisect_tree(list(present.values()), gap, eps)
+        except LayoutError as e:
+            summary.append(f"space {space_index}: {e} — left untouched")
+            return
+        anchor_id = first_leaf(tree)["id"]
+
+    orphan_ids_present = [w["id"] for w in orphans if w["id"] in live_by_id]
+    movable_ids = [wid for wid in list(present) + orphan_ids_present + list(new_ids) if wid != anchor_id]
+
+    # A window with no accessibility reference (a stale/"ghost" yabai record:
+    # is-floating false, can-move false, split-type "none", the owning
+    # app/window already gone — observed to survive even a full
+    # `--restart-service`) cannot be floated or warped. If the anchor itself
+    # is one, nothing on this Space is commandable — bail immediately.
+    if anchor_id is not None and not live_by_id.get(anchor_id, {}).get("has-ax-reference", True):
+        summary.append(f"space {space_index}: anchor window has no accessibility reference "
+                        f"({live_by_id[anchor_id]['app']}#{anchor_id}) — left untouched")
+        return
+
+    for wid in movable_ids:
+        _float(wid)
+    time.sleep(0.1)
+
+    # A ghost elsewhere in the Space doesn't always block the rebuild — an
+    # orphan (split_type "none") can be either truly detached from the tree
+    # (harmless to leave in place) or still occupying a real slot (blocks
+    # the anchor from reclaiming that space), and there is no way to tell
+    # apart from a window's own fields (observed both cases with identical
+    # fields). So check empirically: after floating everything else, the
+    # anchor should have expanded to the full bounding box of the saved
+    # tiled set. If a ghost is still wedged in the tree, it won't have.
+    if len(present) >= 2:
+        exp_w = max(_r(w) for w in present.values()) - min(_l(w) for w in present.values())
+        exp_h = max(_b(w) for w in present.values()) - min(_t(w) for w in present.values())
+        anchor_live = query_window_by_id(anchor_id)
+        blocked = False
+        if anchor_live:
+            f = anchor_live["frame"]
+            if abs(f["w"] - exp_w) > eps or abs(f["h"] - exp_h) > eps:
+                blocked = True
+        if blocked:
+            for wid in movable_ids:
+                _unfloat_here(wid)
+            ghost_names = ", ".join(
+                f'{live_by_id[w]["app"]}#{w}' for w in orphan_ids_present + list(new_ids)
+                if w in live_by_id and not live_by_id[w].get("has-ax-reference", True)
+            )
+            extra = f" (likely: {ghost_names})" if ghost_names else ""
+            summary.append(f"space {space_index}: an immovable window still occupies a tree "
+                            f"slot{extra} — could not fully evacuate, left as close to original "
+                            f"as possible (not gated)")
+            return
+        _build(tree, anchor_id, gap)
+
+    # Release orphans and new windows for yabai to place; report them.
+    for wid in orphan_ids_present:
+        _unfloat_here(wid)
+    for wid in new_ids:
+        _unfloat_here(wid)
+
+    restored = len(present)
+    parts = [f"{restored} restored"]
+    if missing:
+        parts.append(f"{len(missing)} missing")
+    if orphan_ids_present:
+        parts.append(f"{len(orphan_ids_present)} orphan (unsupported, released)")
+    if new_ids:
+        parts.append(f"{len(new_ids)} new (released)")
+    summary.append(f"space {space_index}: " + ", ".join(parts))
+
+
+def restore_floats(snapshot, live_by_id, summary: list[str]):
+    n = 0
+    for space in snapshot["spaces"].values():
+        for w in space["windows"]:
+            if not w["is_floating"] or w["is_minimized"]:
+                continue
+            if w["id"] not in live_by_id:
+                continue
+            lw = live_by_id[w["id"]]
+            if not lw["is-floating"]:
+                yabai("window", str(w["id"]), "--toggle", "float", check=False)
+            f = w["frame"]
+            yabai("window", str(w["id"]), "--move", f"abs:{f['x']:.0f}:{f['y']:.0f}", check=False)
+            yabai("window", str(w["id"]), "--resize", f"abs:{f['w']:.0f}:{f['h']:.0f}", check=False)
+            n += 1
+    if n:
+        summary.append(f"floats: {n} repositioned")
+
+
+def rezoom(snapshot, live_by_id, summary: list[str]):
+    n = 0
+    for space in snapshot["spaces"].values():
+        for w in space["windows"]:
+            if w["id"] not in live_by_id:
+                continue
+            if w.get("has_fullscreen_zoom"):
+                yabai("window", str(w["id"]), "--toggle", "zoom-fullscreen", check=False)
+                n += 1
+            if w.get("has_parent_zoom"):
+                yabai("window", str(w["id"]), "--toggle", "zoom-parent", check=False)
+                n += 1
+    if n:
+        summary.append(f"zoom: {n} windows re-zoomed")
+
+
+def cmd_restore(args) -> int:
+    path = Path(args.file).expanduser()
+    if not path.exists():
+        print(f"[yabai-layout] no snapshot at {path}", file=sys.stderr)
+        return 1
+    snapshot = json.loads(path.read_text())
+
+    saved_ids = {w["id"] for space in snapshot["spaces"].values() for w in space["windows"]}
+    if not wait_for_yabai(args.wait, saved_ids):
+        print(f"[yabai-layout] yabai did not answer within {args.wait}s", file=sys.stderr)
+        return 1
+
+    gap = snapshot["config"]["window_gap"]
+    eps = gap + EPS_MARGIN
+    summary: list[str] = []
+
+    for space in sorted(snapshot["spaces"].values(), key=lambda s: (s["space_index"] or 0)):
+        live_by_id = {w["id"]: w for w in query_windows()}
+        restore_space(space, live_by_id, gap, eps, summary)
+
+    live_by_id = {w["id"]: w for w in query_windows()}
+    restore_floats(snapshot, live_by_id, summary)
+    live_by_id = {w["id"]: w for w in query_windows()}
+    rezoom(snapshot, live_by_id, summary)
+
+    focused = snapshot.get("focused_window")
+    if focused is not None:
+        yabai("window", str(focused), "--focus", check=False)
+
+    print("[yabai-layout] restore summary:")
+    for line in summary:
+        print(f"  {line}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# verify
+# --------------------------------------------------------------------------- #
+
+def cmd_verify(args) -> int:
+    path = Path(args.file).expanduser()
+    if not path.exists():
+        print(f"[yabai-layout] no snapshot at {path}", file=sys.stderr)
+        return 1
+    snapshot = json.loads(path.read_text())
+    live_by_id = {w["id"]: w for w in query_windows()}
+
+    max_delta = 0.0
+    gating_ok = True
+    for space in sorted(snapshot["spaces"].values(), key=lambda s: (s["space_index"] or 0)):
+        clean, orphans, stacked, floats = _classify(space["windows"])
+        gating_ids = {w["id"] for w in clean}
+        unsupported_ids = {w["id"] for w in orphans} | {w["id"] for w in stacked}
+        for w in space["windows"]:
+            if w["id"] not in live_by_id:
+                continue
+            if w["is_floating"] or w["is_minimized"]:
+                continue
+            lw = live_by_id[w["id"]]
+            sf, lf = w["frame"], lw["frame"]
+            d_left = abs(sf["x"] - lf["x"])
+            d_top = abs(sf["y"] - lf["y"])
+            d_right = abs((sf["x"] + sf["w"]) - (lf["x"] + lf["w"]))
+            d_bottom = abs((sf["y"] + sf["h"]) - (lf["y"] + lf["h"]))
+            delta = max(d_left, d_top, d_right, d_bottom)
+            tag = ""
+            if w["id"] in unsupported_ids:
+                tag = " (unsupported, not gated)"
+            else:
+                max_delta = max(max_delta, delta)
+                if w["id"] in gating_ids and delta > 2:
+                    gating_ok = False
+            print(f"  space {space['space_index']} {w['app']}#{w['id']}: "
+                  f"delta L{d_left:.1f} T{d_top:.1f} R{d_right:.1f} B{d_bottom:.1f} "
+                  f"(max {delta:.1f}px){tag}")
+
+    print(f"[yabai-layout] max delta (gating windows): {max_delta:.1f}px — "
+          f"{'PASS' if gating_ok else 'FAIL'}")
+    return 0 if gating_ok else 1
+
+
+# --------------------------------------------------------------------------- #
+# main
+# --------------------------------------------------------------------------- #
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="yabai-layout", description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p_save = sub.add_parser("save", help="snapshot the current yabai layout")
+    p_save.add_argument("--file", default=str(DEFAULT_FILE))
+
+    p_restore = sub.add_parser("restore", help="replay a saved yabai layout")
+    p_restore.add_argument("--file", default=str(DEFAULT_FILE))
+    p_restore.add_argument("--wait", type=float, default=30.0)
+
+    p_verify = sub.add_parser("verify", help="compare live frames to a saved snapshot")
+    p_verify.add_argument("--file", default=str(DEFAULT_FILE))
+
+    args = ap.parse_args()
+    if args.cmd == "save":
+        return cmd_save(args)
+    if args.cmd == "restore":
+        return cmd_restore(args)
+    if args.cmd == "verify":
+        return cmd_verify(args)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

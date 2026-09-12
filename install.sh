@@ -11,6 +11,10 @@
 # No scripting addition is installed (no sudoers entry, no `yabai --load-sa`). SIP
 # stays enabled; Space switching remains the Mission Control Ctrl+N shortcuts.
 #
+# A yabai restart rebuilds every BSP tree from scratch (manual split ratios, swaps,
+# zoom all lost), so an actual restart is bracketed with tiler/yabai-layout
+# save/restore (installed next to yabairc, also for standalone use).
+#
 #   tiler/install.sh            install/refresh; restart a service only if its
 #                               effective config changed (see "services")
 #   tiler/install.sh --restart  restart both services even if unchanged
@@ -38,7 +42,7 @@ SKHD_RC="$HOME/.config/skhd/skhdrc"
 if [ "$UNINSTALL" = 1 ]; then
     command -v yabai >/dev/null && run yabai --stop-service || true
     command -v skhd  >/dev/null && run skhd  --stop-service || true
-    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn"
+    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn" "$(dirname "$YABAI_RC")/yabai-layout"
     run rm -rf "$HOME/Applications/Learn.app"
     echo "[tiler] services stopped, rc files removed. The voice assistant falls back"
     echo "        to System Events placement on its own (no restart needed)."
@@ -108,6 +112,10 @@ run install -m 644 skhdrc  "$SKHD_RC"
 run install -m 755 learn "$(dirname "$SKHD_RC")/learn"
 run install -m 644 learn.style.json "$(dirname "$SKHD_RC")/learn.style.json"
 if [ "$DRY" = 1 ]; then echo "[dry] learn install skhdrc"; else "$(dirname "$SKHD_RC")/learn" install "$PWD/skhdrc"; fi
+# yabai-layout: installed next to yabairc (same TCC reasoning) so the save/restore
+# wrapper below — and standalone use outside this repo — always run the installed
+# copy, never the checkout on the external volume.
+run install -m 755 yabai-layout "$(dirname "$YABAI_RC")/yabai-layout"
 
 # --- services --------------------------------------------------------------------------
 # A running service is restarted so a changed rc file takes effect
@@ -126,7 +134,16 @@ for f in yabai skhd; do
     if ! pgrep -xq "$f"; then
         "$f" --start-service && echo "[tiler] $f service started"
     elif [ "$RESTART" = 1 ] || [ "$before" != "$after" ]; then
-        "$f" --restart-service && echo "[tiler] $f service restarted"
+        if [ "$f" = "yabai" ]; then
+            # A restart wipes the live BSP tree (see header): snapshot it first,
+            # restart, then replay it back through the installed yabai-layout.
+            YL="$(dirname "$YABAI_RC")/yabai-layout"
+            "$YL" save
+            "$f" --restart-service && echo "[tiler] $f service restarted"
+            "$YL" restore --wait 40
+        else
+            "$f" --restart-service && echo "[tiler] $f service restarted"
+        fi
     else
         echo "[tiler] $f config unchanged, not restarting (--restart to force)"
     fi
