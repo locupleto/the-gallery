@@ -49,6 +49,19 @@ HS_INIT="${HOME_DIR}/.hammerspoon/init.lua"
 
 DRY_RUN=0
 UNINSTALL=0
+SKIP_TILER=0
+RESTART_TILER=0
+
+usage() {
+  cat <<'USAGE' >&2
+usage: install.sh [--dry-run] [--uninstall] [--skip-tiler] [--restart-tiler]
+  --dry-run        print what would happen, change nothing
+  --uninstall      remove the Gallery (and, unless --skip-tiler, the tiler)
+  --skip-tiler     do not run tiler/install.sh (yabai/skhd/borders/Learn)
+  --restart-tiler  pass --restart through to tiler/install.sh, forcing a
+                   yabai/skhd restart even if their config did not change
+USAGE
+}
 
 for arg in "$@"; do
   case "${arg}" in
@@ -58,8 +71,19 @@ for arg in "$@"; do
     --uninstall)
       UNINSTALL=1
       ;;
+    --skip-tiler)
+      SKIP_TILER=1
+      ;;
+    --restart-tiler)
+      RESTART_TILER=1
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
     *)
       echo "[gallery] unknown option: ${arg}" >&2
+      usage
       exit 1
       ;;
   esac
@@ -95,6 +119,16 @@ advise_optional_tools() {
 
 do_uninstall() {
   echo "[gallery] uninstalling"
+
+  if [ "${SKIP_TILER}" -eq 1 ]; then
+    echo "[gallery] --skip-tiler: not running tiler/install.sh --uninstall"
+  else
+    tiler_args=(--uninstall)
+    [ "${DRY_RUN}" -eq 1 ] && tiler_args+=(--dry-run)
+    echo "[gallery] running tiler/install.sh ${tiler_args[*]}"
+    "${SCRIPT_DIR}/tiler/install.sh" "${tiler_args[@]}"
+  fi
+
   if [ -d "${SPOON_DEST}" ]; then
     run rm -rf "${SPOON_DEST}"
   else
@@ -278,9 +312,25 @@ else
   echo "[gallery] ${HS_INIT} already references Gallery, leaving it untouched"
 fi
 
+# --- tiler (yabai, skhd, JankyBorders, Learn) --------------------------------------
+# The Gallery's tiling layer lives in tiler/ in this same repo. Its installer places
+# ~/.config/yabai/yabairc and ~/.config/skhd/skhdrc (which includes gallery.skhd,
+# copied into place by the next step) and starts/restarts the services itself,
+# restarting yabai only when its effective config actually changed -- see
+# tiler/install.sh for that logic, which is unchanged here.
+if [ "${SKIP_TILER}" -eq 1 ]; then
+  echo "[gallery] --skip-tiler: not running tiler/install.sh"
+else
+  tiler_args=()
+  [ "${DRY_RUN}" -eq 1 ] && tiler_args+=(--dry-run)
+  [ "${RESTART_TILER}" -eq 1 ] && tiler_args+=(--restart)
+  echo "[gallery] running tiler/install.sh ${tiler_args[*]}"
+  "${SCRIPT_DIR}/tiler/install.sh" "${tiler_args[@]}"
+fi
+
 # --- skhd bindings ----------------------------------------------------------------
 # Copied next to skhdrc, which includes it with `.load "gallery.skhd"` (added by
-# the tiler installer in ai_voice_assistant). skhd is reloaded if it is running.
+# tiler/install.sh in this repo). skhd is reloaded if it is running.
 SKHD_DIR="${HOME_DIR}/.config/skhd"
 if [ -d "${SKHD_DIR}" ]; then
   run install -m 644 "${SCRIPT_DIR}/skhd/gallery.skhd" "${SKHD_DIR}/gallery.skhd"
@@ -296,7 +346,9 @@ if [ -d "${SKHD_DIR}" ]; then
     if [ "${DRY_RUN}" -eq 1 ]; then echo "[dry] learn install (key sheet)"; else "${SKHD_DIR}/learn" install && echo "[gallery] key sheet regenerated"; fi
   fi
 else
-  echo "[gallery] no ~/.config/skhd; skipping key bindings (install the tiler first)"
+  # Only reachable with --skip-tiler: tiler/install.sh (just above) always
+  # creates ~/.config/skhd on a real run.
+  echo "[gallery] no ~/.config/skhd (--skip-tiler was given); skipping key bindings"
 fi
 
 # --- Omarchy theme compatibility symlinks ------------------------------------------

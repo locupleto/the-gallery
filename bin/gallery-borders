@@ -16,7 +16,7 @@
 # running, and only does a full `killall` + relaunch when it is not.
 #
 # This is the ONE place the borders style constants (inactive colour,
-# width, corner style) live -- the tiler's yabairc (ai_voice_assistant
+# width, corner style) live -- the tiler's yabairc (tiler/yabairc, same
 # repo) prefers this script when it is installed and only falls back to
 # its own hardcoded invocation when it is not (see that file's comment).
 #

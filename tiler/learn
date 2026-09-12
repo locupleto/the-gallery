@@ -224,7 +224,8 @@ EOF
 
 # load_includes <skhdrc> -- follows `.load "<file>"` directives in skhdrc
 # (skhd's own include syntax) so bindings defined in an included file (e.g.
-# gallery.skhd, installed by the-gallery) show up in the generated sheet.
+# gallery.skhd, copied into place by the Gallery's install.sh) show up in
+# the generated sheet.
 # <file> resolves relative to skhdrc's own directory first, falling back to
 # the installed skhd config dir; missing either way, it is skipped silently
 # (skhd itself tolerates a missing/empty include the same way). A synthetic

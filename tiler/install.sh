@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Install (or refresh) the optional tiling layer: yabai + skhd, configured from this
+# Install (or refresh) the Gallery's tiling layer: yabai + skhd, configured from this
 # repo. Run from a shell with access to this checkout (Terminal/Claude), on each
 # machine that should tile. Idempotent: re-run after editing tiler/yabairc or
-# tiler/skhdrc to push the new files and reload both services.
+# tiler/skhdrc to push the new files and reload both services. Also runs, in order,
+# as the first step of the Gallery's own install.sh (unless --skip-tiler).
 #
-# The rc files are COPIED, not symlinked: launchd starts yabai/skhd, and under launchd
-# macOS TCC denies reading the external volume this repo lives on (same reason the
-# assistant itself runs from ~/.ai_voice_assistant, see deploy/sync-to-home.sh).
+# The rc files are COPIED, not symlinked: launchd starts yabai/skhd, and under
+# launchd macOS TCC denies reading the external volume this repo lives on --
+# a symlink would just resolve back through that volume and fail the same way.
 #
 # No scripting addition is installed (no sudoers entry, no `yabai --load-sa`). SIP
 # stays enabled; Space switching remains the Mission Control Ctrl+N shortcuts.
@@ -44,8 +45,9 @@ if [ "$UNINSTALL" = 1 ]; then
     command -v skhd  >/dev/null && run skhd  --stop-service || true
     run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn" "$(dirname "$YABAI_RC")/yabai-layout"
     run rm -rf "$HOME/Applications/Learn.app"
-    echo "[tiler] services stopped, rc files removed. The voice assistant falls back"
-    echo "        to System Events placement on its own (no restart needed)."
+    echo "[tiler] services stopped, rc files removed (no restart needed). Note for"
+    echo "        external consumers: the voice assistant detects yabai's absence"
+    echo "        at runtime and falls back to System Events placement on its own."
     exit 0
 fi
 
@@ -103,8 +105,11 @@ skhd_before="$(effective "$SKHD_RC")"
 run install -d "$(dirname "$YABAI_RC")" "$(dirname "$SKHD_RC")"
 run install -m 755 yabairc "$YABAI_RC"
 run install -m 644 skhdrc  "$SKHD_RC"
-# skhdrc includes gallery.skhd (The Gallery key bindings, repo git/the-gallery).
-# Ensure the file exists so the include resolves even before the Gallery is installed.
+# skhdrc includes gallery.skhd (The Gallery key bindings, same repo now). The
+# Gallery installer's own "skhd bindings" step copies the real file in right
+# after this one runs; an empty placeholder is written here too so the include
+# still resolves -- and a standalone `tiler/install.sh` run (Gallery skipped
+# or not yet installed) works on its own.
 [ -e "$(dirname "$SKHD_RC")/gallery.skhd" ] || run install -m 644 /dev/null "$(dirname "$SKHD_RC")/gallery.skhd"
 # The Learn script lives next to skhdrc (skhd and Learn.app run under launchd, which
 # cannot read this volume); it also writes the generated key sheet into the vault

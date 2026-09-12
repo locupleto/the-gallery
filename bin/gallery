@@ -2077,6 +2077,43 @@ cmd_doctor() {
     echo "WARN    Hammerspoon is a login item (osascript error)"
   fi
 
+  # tiler (yabai + skhd): installed by tiler/install.sh, run as the first
+  # step of this repo's own install.sh (unless --skip-tiler).
+  if command -v yabai >/dev/null 2>&1; then
+    echo "OK      yabai on PATH"
+  else
+    echo "MISSING yabai on PATH"
+    ok=0
+  fi
+
+  if pgrep -xq yabai; then
+    echo "OK      yabai running"
+  else
+    echo "MISSING yabai running"
+    ok=0
+  fi
+
+  if command -v skhd >/dev/null 2>&1; then
+    echo "OK      skhd on PATH"
+  else
+    echo "MISSING skhd on PATH"
+    ok=0
+  fi
+
+  if pgrep -xq skhd; then
+    echo "OK      skhd running"
+  else
+    echo "MISSING skhd running"
+    ok=0
+  fi
+
+  if [ -f "${HOME}/.config/skhd/skhdrc" ]; then
+    echo "OK      ${HOME}/.config/skhd/skhdrc exists"
+  else
+    echo "MISSING ${HOME}/.config/skhd/skhdrc exists (run tiler/install.sh)"
+    ok=0
+  fi
+
   if pgrep -x skhd >/dev/null 2>&1 \
     && grep -q '\.load "gallery\.skhd"' "${HOME}/.config/skhd/skhdrc" 2>/dev/null \
     && [ -f "${HOME}/.config/skhd/gallery.skhd" ]; then

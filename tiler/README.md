@@ -1,14 +1,13 @@
-# tiler/ — automatic tiling with yabai + skhd (optional)
+# tiler/ — the Gallery's tiling layer: yabai + skhd (optional)
 
-The voice assistant places windows through System Events on its own. With
-[yabai](https://github.com/asmvik/yabai) running, windows **tile themselves**
-(binary space partitioning, gaps, the 7:5 house split) and the assistant's
-desktop verbs talk to yabai instead — `desktop.py` detects it at runtime
-(`DESKTOP_TILER=auto`). Stop yabai and everything falls back to System
-Events; nothing else changes.
-
+This is The Gallery's tiling and hotkey layer -- "Omarchy on macOS" for window
+management. [yabai](https://github.com/asmvik/yabai) tiles windows
+automatically (binary space partitioning, gaps, the 7:5 house split) and
 [skhd](https://github.com/asmvik/skhd) adds keyboard control with **left
-Option as "super"**, the same muscle memory as Hyprland.
+Option as "super"**, the same muscle memory as Hyprland. JankyBorders draws a
+crisp accent outline around the focused window, following the active Gallery
+theme when the Gallery is installed. The Learn sheet (`super + space`) is
+Omarchy's cheat-sheet menu, rebuilt on this desk -- see "Learn" below.
 
 ## Install
 
@@ -17,6 +16,12 @@ tiler/install.sh              # brew install yabai + skhd, copy the rc files, st
 tiler/install.sh --dry-run    # show what it would do
 tiler/install.sh --uninstall  # stop both, remove the rc files (formulas stay)
 ```
+
+`./install.sh` at the Gallery root runs this as its first step (unless given
+`--skip-tiler`), so on a fresh machine one command installs tiling, hotkeys,
+theming and the plugin host together; `tiler/install.sh` still works
+standalone, with the same flags, for a tiling-only setup or a quick refresh
+after editing `yabairc`/`skhdrc`.
 
 Then, once per machine:
 
@@ -114,14 +119,6 @@ Edit here, re-run `tiler/install.sh` (copies + reloads). The files are copied,
 not symlinked: launchd-started yabai cannot read the external volume this repo
 lives on.
 
-## Voice
-
-With the tiler active, "put Safari on the right column" swaps tiles, "Safari
-on the left third" floats it at that size, "fill the screen" zooms, and new
-verbs appear: "balance the windows", "rotate the layout", "float that",
-"stack the windows", "back to tiling", "send Safari to space three". See
-`desktop.py` and the README's desktop-control section.
-
 ## Upgrade / disable
 
 ```bash
@@ -134,6 +131,15 @@ yabai ships a signed release binary, so its Accessibility grant survives
 upgrades. skhd is compiled by Homebrew with an ad-hoc signature, so after
 `brew upgrade skhd` expect to remove and re-add it in the Accessibility list.
 
-Disable at any time with `yabai --stop-service` — the assistant notices within
-seconds and returns to System Events placement. `DESKTOP_TILER=off` in the
-assistant's environment forces that even while yabai runs.
+Disable at any time with `yabai --stop-service`; see "Consumers" below for
+what notices.
+
+## Consumers
+
+The one consumer outside this repo is the voice assistant (`ai_voice_assistant`).
+Its `desktop.py` detects yabai at runtime (`DESKTOP_TILER=auto`) and routes
+window-placement verbs through yabai while it is running, falling back to
+System Events the moment yabai stops (`DESKTOP_TILER=off` forces that
+fallback even while yabai runs). Its fast brain reads the generated
+`~/.config/skhd/Tiler-Keys.md` key sheet, so voice verbs never drift out of
+sync with the Learn menu. That is the only link between the two projects.

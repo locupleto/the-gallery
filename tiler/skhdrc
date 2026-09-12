@@ -139,8 +139,9 @@ lalt - space : "$HOME/.config/skhd/learn" open menu
 shift + lalt - space : "$HOME/.config/skhd/learn" open show Tiler-Keys
 
 # === The Gallery (Hammerspoon plugin host) — bindings in gallery.skhd (below) ===
-# Bindings live in gallery.skhd next to this file, installed by the-gallery's
-# install.sh (repo git/the-gallery). skhd stays the only hotkey grabber; the
-# Gallery binds no keys of its own. tiler/install.sh creates an empty file if
-# the Gallery is not installed, so this include never fails.
+# Bindings live in gallery.skhd next to this file, copied into place by the
+# Gallery's own install.sh (same repo, tiler/ + skhd/). skhd stays the only
+# hotkey grabber; the Gallery binds no keys of its own. tiler/install.sh
+# creates an empty file if the Gallery step has not run yet, so this include
+# never fails.
 .load "gallery.skhd"

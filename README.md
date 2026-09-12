@@ -15,6 +15,8 @@ Gallery itself.
 - `themes/` — vendored Omarchy colour themes (see `themes/UPSTREAM.md`) plus
   `tools/render-theme.py`, which renders the active theme into CSS, JSON, an
   iTerm2 profile, and a shell fragment.
+- `tiler/` — yabai + skhd tiling and hotkeys (left Option as "super"),
+  JankyBorders, and the Learn cheat-sheet menu. See `tiler/README.md`.
 
 ## Install
 
@@ -25,6 +27,18 @@ Gallery itself.
 This copies the Spoon and bundled plugins onto the boot volume (see the
 rationale comment in `install.sh` for why they are copied rather than
 symlinked) and wires `~/.hammerspoon/init.lua` to load Gallery.
+
+## Tiling and hotkeys
+
+`install.sh` installs the tiler first (yabai, skhd, JankyBorders, Learn) via
+`tiler/install.sh`, then copies the Gallery's own key bindings into place.
+skhd is the only hotkey grabber on the system: Gallery bindings live in
+`skhd/gallery.skhd`, included by `tiler/skhdrc` with `.load "gallery.skhd"`,
+so the Gallery never registers its own hotkeys. Pass `--skip-tiler` to
+`install.sh` to skip the tiler step (e.g. on a machine that should run only
+the plugin host and theming). See `tiler/README.md` for the full key table,
+Learn, and the once-per-machine manual steps (Accessibility, Mission Control
+shortcuts, Secure Keyboard Entry).
 
 ## Usage
 
