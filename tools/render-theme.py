@@ -11,6 +11,7 @@ Gallery.spoon and `gallery theme set` manage) and writes:
   ~/.config/gallery/state/theme.json
   ~/.config/gallery/state/theme.sh
   ~/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json
+  ~/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json
   ~/.config/btop/themes/gallery.theme
   ~/.config/btop/btop.conf (color_theme key only, rewritten in place)
 
@@ -61,6 +62,8 @@ ITERM_DYNAMIC_PROFILES_DIR = (
     Path.home() / "Library" / "Application Support" / "iTerm2" / "DynamicProfiles"
 )
 ITERM_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-theme.json"
+CONSOLE_STATE_PATH = STATE_DIR / "console.json"
+ITERM_CONSOLE_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-console.json"
 BTOP_CONFIG_DIR = Path.home() / ".config" / "btop"
 BTOP_THEME_PATH = BTOP_CONFIG_DIR / "themes" / "gallery.theme"
 BTOP_CONF_PATH = BTOP_CONFIG_DIR / "btop.conf"
@@ -151,6 +154,23 @@ def resolve_current_theme_dir() -> Path:
     if not resolved.is_dir():
         sys.exit(f"render-theme: current theme target is not a directory: {resolved}")
     return resolved
+
+
+def read_console_mode() -> str:
+    """Read the iTerm console mode ("theme" or "native") that `gallery
+    console theme|native|toggle` records in CONSOLE_STATE_PATH. Defaults to
+    "native" (untouched Default colours) if the file is missing, unreadable,
+    or carries anything other than {"mode": "theme"|"native"} -- same
+    missing-file-means-default tolerance as bg_read_choice in bin/gallery."""
+    try:
+        data = json.loads(CONSOLE_STATE_PATH.read_text())
+    except (OSError, ValueError):
+        return "native"
+    if isinstance(data, dict):
+        mode = data.get("mode")
+        if mode in ("theme", "native"):
+            return mode
+    return "native"
 
 
 def theme_name_from_dir(theme_dir: Path) -> str:
@@ -336,6 +356,51 @@ def render_iterm_profile(tokens: dict, name: str) -> str:
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
 
 
+def render_iterm_console_profile(tokens: dict, name: str, mode: str) -> str:
+    """Render the "Console" dynamic profile: the user's everyday iTerm2
+    terminal, NOT the floating Gallery TUI host. The mechanism (proven
+    manually before this was automated) is iTerm2's own dynamic-profile
+    parent/child inheritance: this profile carries
+    "Dynamic Profile Parent Name": "Default", so iTerm resolves any key it
+    does NOT itself define by falling through to the user's own "Default"
+    profile (their Homebrew-shell colours, unrelated to Gallery). The user
+    makes "Console" their default profile once, by hand, in iTerm2's
+    Settings -- this script never touches which profile IS the default.
+
+    native mode: the profile carries nothing but Name/Guid/parent, so it is
+    byte-for-byte the inherited Default -- no color keys at all, meaning
+    "iTerm console follows its own Default colours, Gallery has no opinion".
+
+    theme mode: adds the active Gallery theme's colours as overrides, same
+    token set render_iterm_profile uses for the floating Gallery profile,
+    EXCEPT the background is tokens["background"] (the theme's own ordinary
+    background), not tokens["surface_background"] (that is the Gallery UI
+    panel's deliberately-darker tint, not what an everyday terminal should
+    show). No window-behaviour keys here either (Close Sessions On End,
+    Window Type, etc.) -- those make sense only for the floating, ephemeral
+    Gallery TUI host, never for an always-open everyday terminal.
+    """
+    profile = {
+        "Name": "Console",
+        "Guid": "gallery-console",
+        "Dynamic Profile Parent Name": "Default",
+    }
+    if mode == "theme":
+        profile["Use Separate Colors for Light and Dark Mode"] = False
+        profile["Background Color"] = iterm_color_dict(tokens["background"])
+        profile["Foreground Color"] = iterm_color_dict(tokens["foreground"])
+        profile["Bold Color"] = iterm_color_dict(tokens["foreground"])
+        profile["Cursor Color"] = iterm_color_dict(tokens["cursor"])
+        profile["Cursor Text Color"] = iterm_color_dict(tokens["background"])
+        profile["Selection Color"] = iterm_color_dict(tokens["selection_background"])
+        profile["Selected Text Color"] = iterm_color_dict(tokens["selection_foreground"])
+        for i in range(16):
+            profile[f"Ansi {i} Color"] = iterm_color_dict(tokens[f"color{i}"])
+
+    doc = {"Profiles": [profile]}
+    return json.dumps(doc, indent=2, sort_keys=True) + "\n"
+
+
 # --- btop -------------------------------------------------------------------
 
 def render_btop_theme(tokens: dict, name: str) -> str:
@@ -464,10 +529,13 @@ def main(argv: list[str]) -> int:
             print(f"{k} = {v}")
         return 0
 
+    console_mode = read_console_mode()
+
     write_file(STATE_DIR / "theme.css", render_css(tokens))
     write_file(STATE_DIR / "theme.json", render_json(tokens, name, light))
     write_file(STATE_DIR / "theme.sh", render_shell(tokens, name))
     write_file(ITERM_PROFILE_PATH, render_iterm_profile(tokens, name))
+    write_file(ITERM_CONSOLE_PROFILE_PATH, render_iterm_console_profile(tokens, name, console_mode))
     write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
     update_btop_conf("gallery")
 
@@ -476,6 +544,7 @@ def main(argv: list[str]) -> int:
     print(f"  {STATE_DIR / 'theme.json'}")
     print(f"  {STATE_DIR / 'theme.sh'}")
     print(f"  {ITERM_PROFILE_PATH}")
+    print(f"  {ITERM_CONSOLE_PROFILE_PATH} (console: {console_mode})")
     print(f"  {BTOP_THEME_PATH}")
     print(f"  {BTOP_CONF_PATH} (color_theme = gallery)")
     return 0

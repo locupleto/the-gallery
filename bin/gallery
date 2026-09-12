@@ -32,6 +32,10 @@
 #   gallery bg next [theme]
 #   gallery bg prev [theme]
 #   gallery bg apply [theme]
+#   gallery console status
+#   gallery console theme
+#   gallery console native
+#   gallery console toggle
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -52,6 +56,7 @@ THEME_DIR="${CONFIG_DIR}/themes"
 # to point at a repo checkout's tools/hooks/ instead of the installed copy.
 THEME_HOOKS_DIR="${GALLERY_THEME_HOOKS_DIR:-${CONFIG_DIR}/hooks/theme-set.d}"
 BACKGROUNDS_STATE_FILE="${CONFIG_DIR}/state/backgrounds.json"
+CONSOLE_STATE_FILE="${CONFIG_DIR}/state/console.json"
 # Installed by install.sh from this repo's patches/ directory -- see that
 # directory's own README.md for the mechanism (macOS replacements for a
 # plugin's own files, applied on top of the installed plugin dir).
@@ -111,6 +116,10 @@ commands:
   bg next [theme]                 cycle to the next background, and apply it
   bg prev [theme]                 cycle to the previous background, and apply it
   bg apply [theme]                re-apply the active background
+  console status                  show whether the iTerm console follows the theme
+  console theme                   make the iTerm console follow the active theme
+  console native                  restore the iTerm console to its own Default colours
+  console toggle                  flip between theme and native
   reload                          request a Hammerspoon config reload
   log                             tail the Gallery log
   doctor                          check the local Gallery install
@@ -1582,6 +1591,164 @@ cmd_bg() {
   esac
 }
 
+# --- iTerm console mode ------------------------------------------------------
+#
+# The user's everyday iTerm2 terminal (their "Console" profile, a Dynamic
+# Profile child of their own "Default" -- see tools/render-theme.py's
+# render_iterm_console_profile for the parent/child mechanism) can either
+# follow the active Gallery theme's colours or stay on its own untouched
+# Default colours. Recorded in CONSOLE_STATE_FILE as {"mode": "theme"} or
+# {"mode": "native"}; missing/invalid means native. Switching modes re-runs
+# the renderer, which rewrites gallery-console.json and iTerm picks the
+# change up live in already-open Console-profile sessions.
+
+# console_read_mode -- prints "theme" or "native" (default "native" if
+# CONSOLE_STATE_FILE is missing, unreadable, or carries anything else).
+console_read_mode() {
+  if [ ! -f "${CONSOLE_STATE_FILE}" ]; then
+    printf 'native'
+    return 0
+  fi
+  python3 -c '
+import json, sys
+
+path = sys.argv[1]
+mode = "native"
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        val = data.get("mode")
+        if val in ("theme", "native"):
+            mode = val
+except Exception:
+    pass
+sys.stdout.write(mode)
+' "${CONSOLE_STATE_FILE}"
+}
+
+# console_write_mode <mode> -- atomically records "theme" or "native" in
+# CONSOLE_STATE_FILE (temp file + os.replace, same pattern as
+# bg_write_choice above).
+console_write_mode() {
+  local mode="$1"
+  mkdir -p "$(dirname "${CONSOLE_STATE_FILE}")"
+  python3 -c '
+import json, os, sys, tempfile
+
+path, mode = sys.argv[1], sys.argv[2]
+
+d = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".console.", suffix=".json", dir=d)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"mode": mode}, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+except Exception:
+    os.unlink(tmp)
+    raise
+' "${CONSOLE_STATE_FILE}" "${mode}"
+}
+
+cmd_console_status() {
+  local mode
+  mode="$(console_read_mode)"
+  if [ "${mode}" = "theme" ]; then
+    echo "console: theme (following $(theme_current_name || true))"
+  else
+    echo "console: native (iTerm Default profile colours)"
+  fi
+
+  local default_guid
+  default_guid="$(defaults read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)"
+  if [ "${default_guid}" = "gallery-console" ]; then
+    echo "default profile: Console (ok)"
+  else
+    echo "default profile: not Console -- in iTerm2: Settings > Profiles > Console > Other Actions > Set as Default (one-time)"
+  fi
+
+  if [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ]; then
+    echo "gallery-console.json: exists"
+  else
+    echo "gallery-console.json: missing (run: gallery theme render)"
+  fi
+}
+
+# console_set_mode <theme|native> -- records the mode, then re-renders (which
+# rewrites gallery-console.json for the new mode) unless there is no current
+# theme to render from, in which case the mode is still recorded but the
+# render is skipped and reported as such.
+console_set_mode() {
+  local mode="$1"
+  console_write_mode "${mode}"
+
+  local current
+  current="$(theme_current_name)"
+  local label
+  if [ "${mode}" = "theme" ]; then
+    label="theme (following ${current:-no current theme})"
+  else
+    label="native (iTerm Default profile colours)"
+  fi
+
+  if [ -z "${current}" ]; then
+    echo "console: ${label} -- render skipped (no current theme set)"
+    return 0
+  fi
+
+  if ! run_theme_render; then
+    echo "gallery: console mode recorded but render failed" >&2
+    return 1
+  fi
+  echo "console: ${label}"
+}
+
+cmd_console_theme() {
+  console_set_mode theme
+}
+
+cmd_console_native() {
+  console_set_mode native
+}
+
+cmd_console_toggle() {
+  local mode
+  mode="$(console_read_mode)"
+  if [ "${mode}" = "theme" ]; then
+    console_set_mode native
+  else
+    console_set_mode theme
+  fi
+}
+
+cmd_console() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    status)
+      cmd_console_status
+      ;;
+    theme)
+      cmd_console_theme
+      ;;
+    native)
+      cmd_console_native
+      ;;
+    toggle)
+      cmd_console_toggle
+      ;;
+    "")
+      echo "usage: gallery console <status|theme|native|toggle>" >&2
+      exit 1
+      ;;
+    *)
+      echo "gallery: unknown console subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 find_render_tool() {
   if [ -f "${RENDER_TOOL_INSTALLED}" ]; then
     printf '%s\n' "${RENDER_TOOL_INSTALLED}"
@@ -1976,6 +2143,12 @@ else:
     echo "WARN    iTerm2 dynamic profile gallery-theme.json exists (run: gallery theme render)"
   fi
 
+  if [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ]; then
+    echo "OK      iTerm2 dynamic profile gallery-console.json exists"
+  else
+    echo "WARN    iTerm2 dynamic profile gallery-console.json exists (run: gallery theme render)"
+  fi
+
   # qml kind: the shim host and its venv are set up on first run of any qml
   # plugin (or `gallery-qml --setup`), not by install.sh -- see install.sh's
   # own comment on why. Their absence is a WARN, not a failure: a Mac that
@@ -2076,6 +2249,9 @@ case "${command}" in
     ;;
   bg)
     cmd_bg "$@"
+    ;;
+  console)
+    cmd_console "$@"
     ;;
   reload)
     cmd_reload

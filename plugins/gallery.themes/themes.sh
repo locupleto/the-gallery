@@ -27,12 +27,23 @@
 #                              backgrounds") and exit -- this is what fzf's
 #                              `transform-preview-label` shells out to, to
 #                              caption the preview pane's border
+#
+# Keys (inside the picker):
+#   Enter                      apply the highlighted theme, drop into its
+#                              backgrounds picker
+#   Esc                        close
+#   ctrl-t                     toggle whether the iTerm "Console" profile
+#                              (the user's everyday terminal) follows the
+#                              active theme or stays on its own Default
+#                              colours -- see `gallery console`; the header's
+#                              second line reflects the result
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 GALLERY_BIN="${HOME}/bin/gallery"
 THEME_DIR="${HOME}/.config/gallery/themes"
+CONSOLE_STATE_FILE="${HOME}/.config/gallery/state/console.json"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 # get_val FILE KEY -- print the (unquoted) value of a flat `key = "value"`
@@ -116,16 +127,52 @@ render_swatches() {
   done
 }
 
-# static_header -- the header's fixed first line: which theme is presently
-# active plus the key hints. Queries `gallery theme current` itself (rather
-# than taking it as an argument) so both the top-level --header (built once,
+# console_mode -- prints "theme" or "native" straight from
+# CONSOLE_STATE_FILE (default "native" if missing/unreadable/garbage), same
+# contract as bin/gallery's console_read_mode. Reads the state file directly
+# instead of shelling out to `gallery console status` -- this runs on every
+# `focus` event (i.e. every arrow key in the picker), and status's extra
+# `defaults read` call is needless work per keystroke.
+console_mode() {
+  if [[ ! -f "$CONSOLE_STATE_FILE" ]]; then
+    printf 'native'
+    return 0
+  fi
+  python3 -c '
+import json, sys
+
+mode = "native"
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        val = data.get("mode")
+        if val in ("theme", "native"):
+            mode = val
+except Exception:
+    pass
+sys.stdout.write(mode)
+' "$CONSOLE_STATE_FILE" 2>/dev/null || printf 'native'
+}
+
+# static_header -- the header's fixed first two lines: which theme is
+# presently active plus the key hints, then the iTerm console's current
+# mode. Queries `gallery theme current` and console_mode itself (rather than
+# taking them as arguments) so both the top-level --header (built once,
 # interactively) and every --swatches subprocess (fzf shells this whole
-# script back out to, fresh, on load/each highlight) print the identical
-# line without needing to thread state between processes.
+# script back out to, fresh, on load/each highlight) print identical lines
+# without needing to thread state between processes.
 static_header() {
-  local current
+  local current mode console_line
   current="$("${GALLERY_BIN}" theme current 2>/dev/null || true)"
-  printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n' "${current:-(none)}"
+  mode="$(console_mode)"
+  if [[ "$mode" == "theme" ]]; then
+    console_line="Console: follows theme  (ctrl-t toggles)"
+  else
+    console_line="Console: iTerm Default  (ctrl-t toggles)"
+  fi
+  printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n%s\n' \
+    "${current:-(none)}" "$console_line"
 }
 
 # --- preview pane (image only) ----------------------------------------------
@@ -317,6 +364,10 @@ fzf_args=(
   # change-header first is a best-effort "please wait" cue: fzf renders it
   # before the blocking execute-silent runs.
   --bind "enter:change-header(Applying theme, please wait...)+execute-silent(${gallery_q} theme set {1})+become(${bg_q} --from-themes)"
+  # ctrl-t: flip the iTerm console between following the theme and staying
+  # on its own Default colours, then refresh the header/preview-label so the
+  # "Console: ..." line reflects the new mode immediately.
+  --bind "ctrl-t:execute-silent(${gallery_q} console toggle)+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"
 )
 # `load`, not `start`: the list is streamed in, so pos() on `start` runs
 # against an empty list and does nothing. The initial header/preview-label

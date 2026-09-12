@@ -14,7 +14,7 @@ lalt + shift - 0 : "$HOME/bin/gallery" toggle gallery.sysmon
 lalt + ctrl - 0 : "$HOME/bin/gallery" toggle gallery.spaces
 ## Gallery: Radio Atlas (world radio globe)
 lalt + cmd - 0 : "$HOME/bin/gallery" toggle akshar.radio-atlas
-## Gallery: theme picker -- palette + wallpaper preview, Enter drops into that theme's backgrounds
+## Gallery: theme picker -- palette + wallpaper preview, Enter drops into that theme's backgrounds; ctrl-t inside toggles whether the iTerm console follows the theme
 shift + ctrl + lalt - space : "$HOME/bin/gallery" toggle gallery.themes
 ## Gallery: background picker (direct; image preview, current theme's wallpapers)
 shift + ctrl + lalt - b : "$HOME/bin/gallery" toggle gallery.backgrounds
