@@ -190,7 +190,7 @@ the voice assistant is the right Command key.
 > description lines there, not this note.
 
 EOF
-    awk '
+    { cat "$rc"; load_includes "$rc"; } | awk '
         function flush() {
             if (desc != "" && keys != "") printf("| %s | %s |\n", keys, desc)
             desc = ""; keys = ""
@@ -218,7 +218,31 @@ EOF
         }
         /^$/ { flush() }
         END { flush() }
-    ' "$rc"
+    '
+}
+
+# load_includes <skhdrc> -- follows `.load "<file>"` directives in skhdrc
+# (skhd's own include syntax) so bindings defined in an included file (e.g.
+# gallery.skhd, installed by the-gallery) show up in the generated sheet.
+# <file> resolves relative to skhdrc's own directory first, falling back to
+# the installed skhd config dir; missing either way, it is skipped silently
+# (skhd itself tolerates a missing/empty include the same way). A synthetic
+# "# --- <Section> ---" line is emitted ahead of each included file's
+# contents so the awk generator above gives it its own "## <Section>"
+# heading, named after the file's basename without ".skhd".
+load_includes() {
+    local rc="$1" rc_dir load_file load_path section
+    rc_dir="$(dirname "$rc")"
+    while IFS= read -r load_file; do
+        [ -n "$load_file" ] || continue
+        load_path="$rc_dir/$load_file"
+        [ -f "$load_path" ] || load_path="$HOME/.config/skhd/$load_file"
+        [ -f "$load_path" ] || continue
+        section="$(basename "$load_file" .skhd)"
+        section="$(printf '%s' "$section" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+        printf '# --- %s ---\n' "$section"
+        cat "$load_path"
+    done < <(sed -n 's/^\.load "\(.*\)"$/\1/p' "$rc")
 }
 
 install_all() {

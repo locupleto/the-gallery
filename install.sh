@@ -82,6 +82,9 @@ done
 run install -d "$(dirname "$YABAI_RC")" "$(dirname "$SKHD_RC")"
 run install -m 755 yabairc "$YABAI_RC"
 run install -m 644 skhdrc  "$SKHD_RC"
+# skhdrc includes gallery.skhd (The Gallery key bindings, repo git/the-gallery).
+# Ensure the file exists so the include resolves even before the Gallery is installed.
+[ -e "$(dirname "$SKHD_RC")/gallery.skhd" ] || run install -m 644 /dev/null "$(dirname "$SKHD_RC")/gallery.skhd"
 # The Learn script lives next to skhdrc (skhd and Learn.app run under launchd, which
 # cannot read this volume); it also writes the generated key sheet into the vault
 # and builds ~/Applications/Learn.app for Spotlight.
