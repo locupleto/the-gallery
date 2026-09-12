@@ -37,6 +37,13 @@
 #                              active theme or stays on its own Default
 #                              colours -- see `gallery console`; the header's
 #                              second line reflects the result
+#   ctrl-w                     cycle the JankyBorders focus-outline width
+#                              through the presets 3 -> 5 -> 8 -> 12 -> 3 --
+#                              see `gallery borders width`; the header's
+#                              third line reflects the result
+#   ctrl-b                     toggle whether the focus outline's colour is
+#                              mixed toward the theme's bright_foreground --
+#                              see `gallery borders bright`; same header line
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -44,6 +51,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 GALLERY_BIN="${HOME}/bin/gallery"
 THEME_DIR="${HOME}/.config/gallery/themes"
 CONSOLE_STATE_FILE="${HOME}/.config/gallery/state/console.json"
+BORDERS_STATE_FILE="${HOME}/.config/gallery/state/borders.json"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 # get_val FILE KEY -- print the (unquoted) value of a flat `key = "value"`
@@ -155,15 +163,99 @@ sys.stdout.write(mode)
 ' "$CONSOLE_STATE_FILE" 2>/dev/null || printf 'native'
 }
 
-# static_header -- the header's fixed first two lines: which theme is
-# presently active plus the key hints, then the iTerm console's current
-# mode. Queries `gallery theme current` and console_mode itself (rather than
-# taking them as arguments) so both the top-level --header (built once,
-# interactively) and every --swatches subprocess (fzf shells this whole
-# script back out to, fresh, on load/each highlight) print identical lines
-# without needing to thread state between processes.
+# borders_prefs -- prints "WIDTH BRIGHT" (bright as "on"/"off") straight
+# from BORDERS_STATE_FILE, default "5 off" if missing/unreadable/garbage --
+# same contract (and same per-keystroke direct-file-read reasoning) as
+# console_mode above, mirroring bin/gallery's own borders_read_prefs.
+borders_prefs() {
+  if [[ ! -f "$BORDERS_STATE_FILE" ]]; then
+    printf '5 off'
+    return 0
+  fi
+  python3 -c '
+import json, sys
+
+width = 5
+bright = False
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        w = data.get("width")
+        if isinstance(w, int) and not isinstance(w, bool):
+            width = max(1, min(12, w))
+        b = data.get("bright")
+        if isinstance(b, bool):
+            bright = b
+except Exception:
+    pass
+sys.stdout.write(str(width) + " " + ("on" if bright else "off"))
+' "$BORDERS_STATE_FILE" 2>/dev/null || printf '5 off'
+}
+
+# next_width -- prints the next width preset after the currently stored
+# width, cycling 3 -> 5 -> 8 -> 12 -> 3; a stored width that is not one of
+# the four presets (hand-edited borders.json) goes to 5. This is what
+# `themes.sh --next-width` prints, and what the picker's ctrl-w bind shells
+# out to (nested inside its own execute-silent, so it re-reads the prefs
+# fresh on every keypress rather than once at picker startup).
+next_width() {
+  local width
+  width="$(borders_prefs)"
+  width="${width%% *}"
+  case "$width" in
+    3) printf '5' ;;
+    5) printf '8' ;;
+    8) printf '12' ;;
+    12) printf '3' ;;
+    *) printf '5' ;;
+  esac
+}
+
+# width_radio WIDTH -- "(*)3 ( )5 ( )8 ( )12" with WIDTH's own preset
+# marked selected (bullet), or, if WIDTH isn't one of the four presets, all
+# four unselected plus a trailing "[WIDTH]" showing the actual value.
+width_radio() {
+  local width="$1" p mark parts=()
+  for p in 3 5 8 12; do
+    if [[ "$p" == "$width" ]]; then
+      mark="(•)"
+    else
+      mark="( )"
+    fi
+    parts+=("${mark}${p}")
+  done
+  printf '%s' "${parts[*]}"
+  case "$width" in
+    3|5|8|12) ;;
+    *) printf ' [%s]' "$width" ;;
+  esac
+}
+
+# bright_radio BRIGHT -- "(*)off ( )on" or "( )off (*)on" depending on
+# BRIGHT ("on"/"off"; anything else reads as "off").
+bright_radio() {
+  local bright="$1" off_mark on_mark
+  if [[ "$bright" == "on" ]]; then
+    off_mark="( )"
+    on_mark="(•)"
+  else
+    off_mark="(•)"
+    on_mark="( )"
+  fi
+  printf '%soff %son' "$off_mark" "$on_mark"
+}
+
+# static_header -- the header's fixed first three lines: which theme is
+# presently active plus the key hints, the iTerm console's current mode,
+# and the JankyBorders width/bright prefs. Queries `gallery theme current`,
+# console_mode, and borders_prefs itself (rather than taking them as
+# arguments) so both the top-level --header (built once, interactively) and
+# every --swatches subprocess (fzf shells this whole script back out to,
+# fresh, on load/each highlight) print identical lines without needing to
+# thread state between processes.
 static_header() {
-  local current mode console_line
+  local current mode console_line prefs width bright border_line
   current="$("${GALLERY_BIN}" theme current 2>/dev/null || true)"
   mode="$(console_mode)"
   if [[ "$mode" == "theme" ]]; then
@@ -171,8 +263,13 @@ static_header() {
   else
     console_line="Console: iTerm Default  (ctrl-t toggles)"
   fi
-  printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n%s\n' \
-    "${current:-(none)}" "$console_line"
+  prefs="$(borders_prefs)"
+  width="${prefs%% *}"
+  bright="${prefs##* }"
+  border_line="$(printf 'Border: width %s  ctrl-w cycles   bright %s  ctrl-b toggles' \
+    "$(width_radio "$width")" "$(bright_radio "$bright")")"
+  printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n%s\n%s\n' \
+    "${current:-(none)}" "$console_line" "$border_line"
 }
 
 # --- preview pane (image only) ----------------------------------------------
@@ -304,6 +401,10 @@ case "${1:-}" in
     print_dims "${2:?usage: themes.sh --dims <name>}"
     exit 0
     ;;
+  --next-width)
+    next_width
+    exit 0
+    ;;
   --list)
     if [[ ! -x "$GALLERY_BIN" ]]; then
       echo "gallery CLI not found at ${GALLERY_BIN}" >&2
@@ -368,6 +469,15 @@ fzf_args=(
   # on its own Default colours, then refresh the header/preview-label so the
   # "Console: ..." line reflects the new mode immediately.
   --bind "ctrl-t:execute-silent(${gallery_q} console toggle)+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"
+  # ctrl-w: cycle the JankyBorders focus-outline width through the presets
+  # 3 -> 5 -> 8 -> 12 -> 3. The `\$(...)` is escaped so it is NOT expanded
+  # by this script -- fzf's own execute-silent shell evaluates it fresh on
+  # every keypress, via `themes.sh --next-width` (next_width above), so the
+  # cycle always starts from whatever width is currently on disk.
+  --bind "ctrl-w:execute-silent(${gallery_q} borders width \$(${self_q} --next-width))+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"
+  # ctrl-b: toggle whether the focus outline's colour is mixed toward the
+  # theme's bright_foreground.
+  --bind "ctrl-b:execute-silent(${gallery_q} borders bright toggle)+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"
 )
 # `load`, not `start`: the list is streamed in, so pos() on `start` runs
 # against an empty list and does nothing. The initial header/preview-label

@@ -36,6 +36,9 @@
 #   gallery console theme
 #   gallery console native
 #   gallery console toggle
+#   gallery borders status
+#   gallery borders width <1-12>
+#   gallery borders bright on|off|toggle
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -57,6 +60,7 @@ THEME_DIR="${CONFIG_DIR}/themes"
 THEME_HOOKS_DIR="${GALLERY_THEME_HOOKS_DIR:-${CONFIG_DIR}/hooks/theme-set.d}"
 BACKGROUNDS_STATE_FILE="${CONFIG_DIR}/state/backgrounds.json"
 CONSOLE_STATE_FILE="${CONFIG_DIR}/state/console.json"
+BORDERS_STATE_FILE="${CONFIG_DIR}/state/borders.json"
 # Installed by install.sh from this repo's patches/ directory -- see that
 # directory's own README.md for the mechanism (macOS replacements for a
 # plugin's own files, applied on top of the installed plugin dir).
@@ -120,6 +124,9 @@ commands:
   console theme                   make the iTerm console follow the active theme
   console native                  restore the iTerm console to its own Default colours
   console toggle                  flip between theme and native
+  borders status                  show the focused-window border width/bright prefs
+  borders width <1-12>            set the focused-window border width (default 5)
+  borders bright on|off|toggle    mix the active border colour toward bright_foreground
   reload                          request a Hammerspoon config reload
   log                             tail the Gallery log
   doctor                          check the local Gallery install
@@ -1749,6 +1756,187 @@ cmd_console() {
   esac
 }
 
+# --- borders (JankyBorders focus-outline prefs) ------------------------------
+#
+# The focused-window frame (JankyBorders, driven by bin/gallery-borders)
+# follows the active theme's colour (Omarchy's own hyprland_active_border
+# override when the theme defines one, else accent -- see
+# tools/render-theme.py's build_border_tokens), plus two user prefs
+# recorded in BORDERS_STATE_FILE as {"width": <1-12>, "bright": bool}:
+# missing/invalid means {"width": 5, "bright": false}. Changing either pref
+# re-renders (which recomputes GALLERY_BORDER_* in state/theme.sh) and, if
+# gallery-borders is installed, applies it to the live daemon immediately --
+# same two-step console_set_mode already does for the iTerm console mode.
+
+# borders_read_prefs -- prints two lines: width (bare integer, already
+# clamped to 1..12) and bright ("on"/"off"). Same missing-file-means-
+# defaults tolerance as console_read_mode.
+borders_read_prefs() {
+  if [ ! -f "${BORDERS_STATE_FILE}" ]; then
+    printf '5\noff\n'
+    return 0
+  fi
+  python3 -c '
+import json, sys
+
+path = sys.argv[1]
+width = 5
+bright = False
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        w = data.get("width")
+        if isinstance(w, int) and not isinstance(w, bool):
+            width = max(1, min(12, w))
+        b = data.get("bright")
+        if isinstance(b, bool):
+            bright = b
+except Exception:
+    pass
+print(width)
+print("on" if bright else "off")
+' "${BORDERS_STATE_FILE}" 2>/dev/null || printf '5\noff\n'
+}
+
+# borders_write_prefs <width> <on|off> -- atomically records the prefs in
+# BORDERS_STATE_FILE (temp file + os.replace, same pattern as
+# console_write_mode).
+borders_write_prefs() {
+  local width="$1" bright="$2"
+  mkdir -p "$(dirname "${BORDERS_STATE_FILE}")"
+  python3 -c '
+import json, os, sys, tempfile
+
+path = sys.argv[1]
+width = int(sys.argv[2])
+bright = sys.argv[3] == "on"
+
+d = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".borders.", suffix=".json", dir=d)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"width": width, "bright": bright}, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+except Exception:
+    os.unlink(tmp)
+    raise
+' "${BORDERS_STATE_FILE}" "${width}" "${bright}"
+}
+
+# borders_apply_and_render -- re-renders the active theme (which recomputes
+# GALLERY_BORDER_* from the new prefs) and, if gallery-borders is installed,
+# re-invokes it so the live daemon picks the change up immediately, same as
+# the theme-set hook (tools/hooks/20-borders.sh) does on a theme change.
+borders_apply_and_render() {
+  local current
+  current="$(theme_current_name)"
+  if [ -z "${current}" ]; then
+    echo "borders: pref recorded -- render skipped (no current theme set)"
+    return 0
+  fi
+
+  if ! run_theme_render; then
+    echo "gallery: borders pref recorded but render failed" >&2
+    return 1
+  fi
+
+  local gallery_borders="${HOME}/bin/gallery-borders"
+  if [ -x "${gallery_borders}" ]; then
+    "${gallery_borders}" apply || echo "gallery: gallery-borders apply failed" >&2
+  fi
+}
+
+cmd_borders_status() {
+  local prefs width bright
+  prefs="$(borders_read_prefs)"
+  width="$(printf '%s\n' "${prefs}" | sed -n 1p)"
+  bright="$(printf '%s\n' "${prefs}" | sed -n 2p)"
+  echo "borders: width ${width}, bright ${bright}"
+
+  local theme_colors="${THEME_DIR}/current/colors.toml"
+  if [ -f "${theme_colors}" ] && grep -q '^hyprland_active_border[[:space:]]*=' "${theme_colors}"; then
+    echo "active border: theme override (hyprland_active_border)"
+  else
+    echo "active border: theme accent (no hyprland_active_border override)"
+  fi
+}
+
+cmd_borders_width() {
+  local n="${1:-}"
+  case "${n}" in
+    ''|*[!0-9]*)
+      echo "gallery: borders width must be an integer 1-12" >&2
+      exit 1
+      ;;
+  esac
+  if [ "${n}" -lt 1 ] || [ "${n}" -gt 12 ]; then
+    echo "gallery: borders width must be between 1 and 12" >&2
+    exit 1
+  fi
+
+  local prefs bright
+  prefs="$(borders_read_prefs)"
+  bright="$(printf '%s\n' "${prefs}" | sed -n 2p)"
+
+  borders_write_prefs "${n}" "${bright}"
+  borders_apply_and_render
+  echo "borders: width ${n}"
+}
+
+cmd_borders_bright() {
+  local mode="${1:-}"
+  local prefs width current_bright new_bright
+  prefs="$(borders_read_prefs)"
+  width="$(printf '%s\n' "${prefs}" | sed -n 1p)"
+  current_bright="$(printf '%s\n' "${prefs}" | sed -n 2p)"
+
+  case "${mode}" in
+    on) new_bright=on ;;
+    off) new_bright=off ;;
+    toggle)
+      if [ "${current_bright}" = "on" ]; then
+        new_bright=off
+      else
+        new_bright=on
+      fi
+      ;;
+    *)
+      echo "usage: gallery borders bright <on|off|toggle>" >&2
+      exit 1
+      ;;
+  esac
+
+  borders_write_prefs "${width}" "${new_bright}"
+  borders_apply_and_render
+  echo "borders: bright ${new_bright}"
+}
+
+cmd_borders() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    status)
+      cmd_borders_status
+      ;;
+    width)
+      cmd_borders_width "${1:-}"
+      ;;
+    bright)
+      cmd_borders_bright "${1:-}"
+      ;;
+    "")
+      echo "usage: gallery borders <status|width <1-12>|bright <on|off|toggle>>" >&2
+      exit 1
+      ;;
+    *)
+      echo "gallery: unknown borders subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 find_render_tool() {
   if [ -f "${RENDER_TOOL_INSTALLED}" ]; then
     printf '%s\n' "${RENDER_TOOL_INSTALLED}"
@@ -2186,6 +2374,12 @@ else:
     echo "WARN    iTerm2 dynamic profile gallery-console.json exists (run: gallery theme render)"
   fi
 
+  if [ -f "${BORDERS_STATE_FILE}" ]; then
+    echo "OK      gallery/state/borders.json exists"
+  else
+    echo "WARN    gallery/state/borders.json exists (absent -- defaults: width 5, bright off)"
+  fi
+
   # qml kind: the shim host and its venv are set up on first run of any qml
   # plugin (or `gallery-qml --setup`), not by install.sh -- see install.sh's
   # own comment on why. Their absence is a WARN, not a failure: a Mac that
@@ -2289,6 +2483,9 @@ case "${command}" in
     ;;
   console)
     cmd_console "$@"
+    ;;
+  borders)
+    cmd_borders "$@"
     ;;
   reload)
     cmd_reload

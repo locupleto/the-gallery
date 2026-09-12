@@ -50,6 +50,7 @@ gallery clone <id> <new-id> |
 gallery theme list | current | set <name> | render | next |
 gallery bg list | current | set <file> | next | prev | apply |
 gallery console status | theme | native | toggle |
+gallery borders status | width <n> | bright on|off|toggle |
 gallery reload | log | doctor | install
 ```
 
@@ -91,6 +92,18 @@ default profile shows a star in the list; `gallery console status` prints
 `default profile: Console (ok)` once it has taken. Writing the
 `Default Bookmark Guid` preference from the shell is not honoured while
 iTerm runs, so the CLI never tries.
+
+`borders ...` controls the focused-window frame JankyBorders draws
+(`bin/gallery-borders`). The active colour follows Omarchy's own rule: a
+theme's `hyprland_active_border` in `colors.toml` if it defines one, else
+`accent`, with gradients (and their angle) honoured via JankyBorders' own
+`gradient(top_left=...,bottom_right=...)` syntax. Width is 1-12 (default
+5); "bright" mixes every active-border colour toward the theme's
+`bright_foreground` (falling back to `light_foreground`, then
+`foreground`) at a fixed ratio. Both prefs live in
+`~/.config/gallery/state/borders.json` and are re-applied on every theme
+render. Inside the theme picker, `ctrl-w` cycles width through the presets
+3/5/8/12 and `ctrl-b` toggles bright.
 
 Run `gallery` with no arguments, or see `bin/gallery`, for the full verb
 list.

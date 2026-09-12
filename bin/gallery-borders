@@ -16,32 +16,45 @@
 # running, and only does a full `killall` + relaunch when it is not.
 #
 # This is the ONE place the borders style constants (inactive colour,
-# width, corner style) live -- the tiler's yabairc (tiler/yabairc, same
-# repo) prefers this script when it is installed and only falls back to
-# its own hardcoded invocation when it is not (see that file's comment).
+# width, corner style) live -- but as of the "bright"/width/hyprland-
+# override work (2026-09-12) most of them are no longer hardcoded here:
+# they are read out of ~/.config/gallery/state/theme.sh
+# (GALLERY_BORDER_ACTIVE/_ACTIVE_HEX/_INACTIVE/_WIDTH), which
+# tools/render-theme.py derives from the active theme's colors.toml (its
+# own `hyprland_active_border`/`hyprland_inactive_border` override keys,
+# else `accent`/fully-transparent) plus the width/bright prefs `gallery
+# borders width|bright` records in state/borders.json. Only the corner
+# style (style=round) and the pre-hyprland-override fallback constants
+# below (for an older, un-rerendered theme.sh) are still hardcoded here.
+#
+# The tiler's yabairc (tiler/yabairc, same repo) prefers this script when
+# it is installed and only falls back to its own hardcoded invocation when
+# it is not (see that file's comment).
 #
 # Usage:
-#   gallery-borders [apply]   -- sync the border colour to the current
-#                                 Gallery theme (default action)
-#   gallery-borders status    -- print the daemon's pid and accent in use
+#   gallery-borders [apply]   -- sync the border colour/width to the
+#                                 current Gallery theme + borders prefs
+#                                 (default action)
+#   gallery-borders status    -- print the daemon's pid, active/inactive
+#                                 colour, width, and bright state in use
 #
 set -euo pipefail
 
 BORDERS_BIN="/opt/homebrew/bin/borders"
 THEME_STATE="${XDG_CONFIG_HOME:-$HOME/.config}/gallery/state/theme.sh"
 DEFAULT_ACCENT="#7aa2f7"
-
-# The only place the non-accent style constants live.
-STYLE_OPTS=(inactive_color=0x00000000 width=5.0 style=round)
+DEFAULT_WIDTH="5"
 
 die() {
   echo "gallery-borders: $*" >&2
   exit 1
 }
 
-# Reads GALLERY_ACCENT out of the theme-state file without polluting this
-# process's environment: the whole lookup runs inside the command
-# substitution's own subshell, so sourcing theme.sh here is subshell-safe.
+# Reads a single GALLERY_ACCENT / GALLERY_BORDER_* export out of the
+# theme-state file without polluting this process's environment: the whole
+# lookup runs inside the command substitution's own subshell, so sourcing
+# theme.sh here is subshell-safe. One function per variable so each caller
+# stays a plain command substitution.
 current_accent() {
   (
     unset GALLERY_ACCENT
@@ -53,8 +66,64 @@ current_accent() {
   )
 }
 
+current_border_active() {
+  (
+    unset GALLERY_BORDER_ACTIVE
+    if [ -f "${THEME_STATE}" ]; then
+      # shellcheck disable=SC1090
+      . "${THEME_STATE}" 2>/dev/null || true
+    fi
+    printf '%s' "${GALLERY_BORDER_ACTIVE:-}"
+  )
+}
+
+current_border_active_hex() {
+  (
+    unset GALLERY_BORDER_ACTIVE_HEX
+    if [ -f "${THEME_STATE}" ]; then
+      # shellcheck disable=SC1090
+      . "${THEME_STATE}" 2>/dev/null || true
+    fi
+    printf '%s' "${GALLERY_BORDER_ACTIVE_HEX:-}"
+  )
+}
+
+current_border_inactive() {
+  (
+    unset GALLERY_BORDER_INACTIVE
+    if [ -f "${THEME_STATE}" ]; then
+      # shellcheck disable=SC1090
+      . "${THEME_STATE}" 2>/dev/null || true
+    fi
+    printf '%s' "${GALLERY_BORDER_INACTIVE:-}"
+  )
+}
+
+current_border_width() {
+  (
+    unset GALLERY_BORDER_WIDTH
+    if [ -f "${THEME_STATE}" ]; then
+      # shellcheck disable=SC1090
+      . "${THEME_STATE}" 2>/dev/null || true
+    fi
+    printf '%s' "${GALLERY_BORDER_WIDTH:-}"
+  )
+}
+
+current_border_bright() {
+  (
+    unset GALLERY_BORDER_BRIGHT
+    if [ -f "${THEME_STATE}" ]; then
+      # shellcheck disable=SC1090
+      . "${THEME_STATE}" 2>/dev/null || true
+    fi
+    printf '%s' "${GALLERY_BORDER_BRIGHT:-}"
+  )
+}
+
 # "#rrggbb" -> "0xffRRGGBB" (opaque alpha). Falls back to the default
-# accent if the input is not a well-formed hex colour.
+# accent if the input is not a well-formed hex colour. Only used on the
+# pre-hyprland-override fallback path (GALLERY_BORDER_ACTIVE unset).
 to_argb() {
   local hex="$1"
   hex="${hex#\#}"
@@ -72,20 +141,48 @@ borders_pid() {
   pgrep -x borders 2>/dev/null | head -1 || true
 }
 
+# resolve_border_style -- prints five lines: active colour expression,
+# inactive colour expression, width (bare integer), the active colour's
+# "#rrggbb" (for display), and bright ("0"/"1"). Falls back to the
+# pre-hyprland-override behaviour (accent -> 0xffRRGGBB, inactive fully
+# transparent, width 5, bright 0) whenever GALLERY_BORDER_ACTIVE is unset
+# or empty -- i.e. theme.sh predates these exports (an older render).
+resolve_border_style() {
+  local active inactive width hex bright accent
+  active="$(current_border_active)"
+  inactive="$(current_border_inactive)"
+  width="$(current_border_width)"
+  hex="$(current_border_active_hex)"
+  bright="$(current_border_bright)"
+
+  if [ -z "${active}" ]; then
+    accent="$(current_accent)"
+    active="$(to_argb "${accent}")"
+    hex="${accent}"
+  fi
+  [ -n "${inactive}" ] || inactive="0x00000000"
+  [ -n "${width}" ] || width="${DEFAULT_WIDTH}"
+  [ -n "${hex}" ] || hex="${DEFAULT_ACCENT}"
+  [ -n "${bright}" ] || bright="0"
+
+  printf '%s\n' "${active}" "${inactive}" "${width}" "${hex}" "${bright}"
+}
+
 # Fully detach the daemon from this process (and from the caller that
 # invoked us, e.g. yabairc or a theme-set hook) so it survives both
 # yabairc finishing and `gallery theme set` returning. macOS ships no
 # `setsid`, so nohup + background + disown is the primary path; setsid is
 # used instead when present (e.g. via a Linux-ish coreutils install).
 launch_detached() {
-  local active_argb="$1"
+  local active="$1"
+  shift
   if command -v setsid >/dev/null 2>&1; then
     LANG="en_US.UTF-8" setsid "${BORDERS_BIN}" \
-      "active_color=${active_argb}" "${STYLE_OPTS[@]}" \
+      "active_color=${active}" "$@" \
       >/dev/null 2>&1 &
   else
     LANG="en_US.UTF-8" nohup "${BORDERS_BIN}" \
-      "active_color=${active_argb}" "${STYLE_OPTS[@]}" \
+      "active_color=${active}" "$@" \
       >/dev/null 2>&1 &
   fi
   disown
@@ -94,31 +191,51 @@ launch_detached() {
 cmd_apply() {
   [ -x "${BORDERS_BIN}" ] || die "borders not found at ${BORDERS_BIN}"
 
-  local accent argb pid
-  accent="$(current_accent)"
-  argb="$(to_argb "${accent}")"
+  local active inactive width hex bright pid
+  {
+    read -r active
+    read -r inactive
+    read -r width
+    read -r hex
+    read -r bright
+  } < <(resolve_border_style)
+
+  # Gradient expressions contain parentheses and commas (e.g.
+  # "gradient(top_left=0xee26a269,bottom_right=0xee2ec27e)") -- each is
+  # passed as a single, fully-quoted argv element below, never word-split.
+  local style_opts=("inactive_color=${inactive}" "width=${width}.0" "style=round")
   pid="$(borders_pid)"
 
   if [ -n "${pid}" ]; then
     # Already running: reconfigure in place (see header comment).
-    LANG="en_US.UTF-8" "${BORDERS_BIN}" "active_color=${argb}" "${STYLE_OPTS[@]}" \
+    LANG="en_US.UTF-8" "${BORDERS_BIN}" "active_color=${active}" "${style_opts[@]}" \
       >/dev/null 2>&1
-    echo "gallery-borders: reconfigured running daemon (pid ${pid}) -> active_color=${argb}"
+    echo "gallery-borders: reconfigured running daemon (pid ${pid}) -> active_color=${active}"
   else
     killall borders 2>/dev/null || true
-    launch_detached "${argb}"
-    echo "gallery-borders: launched daemon -> active_color=${argb}"
+    launch_detached "${active}" "${style_opts[@]}"
+    echo "gallery-borders: launched daemon -> active_color=${active}"
   fi
 }
 
 cmd_status() {
-  local pid accent
+  local active inactive width hex bright pid bright_label
+  {
+    read -r active
+    read -r inactive
+    read -r width
+    read -r hex
+    read -r bright
+  } < <(resolve_border_style)
   pid="$(borders_pid)"
-  accent="$(current_accent)"
+
+  bright_label="off"
+  [ "${bright}" = "1" ] && bright_label="on"
+
   if [ -n "${pid}" ]; then
-    echo "running (pid ${pid}), accent ${accent}"
+    echo "running (pid ${pid}), active ${active} (${hex}), inactive ${inactive}, width ${width}, bright ${bright_label}"
   else
-    echo "not running, accent would be ${accent}"
+    echo "not running, active would be ${active} (${hex}), inactive ${inactive}, width ${width}, bright ${bright_label}"
     exit 1
   fi
 }

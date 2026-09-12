@@ -2,10 +2,13 @@
 """render-theme.py -- render the active Gallery theme into every consumer
 this repo knows about: a CSS custom-property sheet, a JSON token dump, an
 iTerm2 dynamic profile, and a shell fragment (also consumed by the crystal
-widgets).
+widgets and by bin/gallery-borders for the JankyBorders focus outline).
 
 Reads ~/.config/gallery/themes/current/colors.toml (the `current` symlink
-Gallery.spoon and `gallery theme set` manage) and writes:
+Gallery.spoon and `gallery theme set` manage) and
+~/.config/gallery/state/borders.json (the width/bright prefs `gallery
+borders` writes -- missing/garbage means the defaults, see
+read_borders_prefs), and writes:
 
   ~/.config/gallery/state/theme.css
   ~/.config/gallery/state/theme.json
@@ -14,6 +17,15 @@ Gallery.spoon and `gallery theme set` manage) and writes:
   ~/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json
   ~/.config/btop/themes/gallery.theme
   ~/.config/btop/btop.conf (color_theme key only, rewritten in place)
+
+theme.json and theme.sh (NOT theme.css) also carry the derived JankyBorders
+tokens border_active/border_active_hex/border_inactive/border_width/
+border_bright -- see build_border_tokens below. border_active/border_inactive
+honour Omarchy's own hyprland_active_border / hyprland_inactive_border
+override keys (Hyprland colour syntax: rgba(hex8)/rgb(hex6)/bare #rrggbb,
+one or more space-separated colours, optional trailing "Ndeg"), translated
+to JankyBorders' own `0xAARRGGBB` / `gradient(...)` syntax by
+parse_hypr_gradient + janky_color.
 
 stdlib only -- no third-party TOML parser, since the upstream files this
 repo vendors (see tools/vendor-omarchy-themes.sh) are a flat `key = "value"`
@@ -51,6 +63,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -63,6 +76,7 @@ ITERM_DYNAMIC_PROFILES_DIR = (
 )
 ITERM_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-theme.json"
 CONSOLE_STATE_PATH = STATE_DIR / "console.json"
+BORDERS_STATE_PATH = STATE_DIR / "borders.json"
 ITERM_CONSOLE_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-console.json"
 BTOP_CONFIG_DIR = Path.home() / ".config" / "btop"
 BTOP_THEME_PATH = BTOP_CONFIG_DIR / "themes" / "gallery.theme"
@@ -144,6 +158,137 @@ def mix_hex(from_hex: str, toward_hex: str, pct: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+# --- Hyprland colour syntax -> JankyBorders colour syntax -------------------
+#
+# Omarchy's Hyprland template feeds `hyprland_active_border` /
+# `hyprland_inactive_border` straight into Hyprland's `general:col.*_border`
+# config keys, whose colour syntax is one or more space-separated colour
+# tokens -- `rgba(RRGGBBAA)`, `rgb(RRGGBB)`, or a bare `#rrggbb` -- plus an
+# optional trailing `NNNdeg` angle when there is more than one colour
+# (Hyprland's own gradient). JankyBorders (see `man borders`) instead wants
+# a single `0xAARRGGBB`, or `gradient(top_left=0xAARRGGBB,
+# bottom_right=0xAARRGGBB)` / `gradient(top_right=...,bottom_left=...)` for
+# a two-stop gradient, picking the axis from the angle. These two helpers
+# convert one to the other; janky_color does the final assembly.
+
+_HYPR_COLOR_RE = re.compile(r"rgba?\([0-9a-fA-F]+\)|#[0-9a-fA-F]{3,8}")
+_HYPR_ANGLE_RE = re.compile(r"(\d+)\s*deg\b")
+
+
+def parse_hypr_color(token: str) -> tuple[str, str]:
+    """Parse one Hyprland colour token -- rgba(RRGGBBAA), rgb(RRGGBB), or a
+    bare #rrggbb/#rgb -- into (hex6, alpha2), both lowercase, no leading
+    "#". Unrecognized input falls back to opaque black rather than raising,
+    since a hand-edited colors.toml should degrade, not crash the renderer."""
+    t = token.strip()
+
+    m = re.fullmatch(r"rgba\(([0-9a-fA-F]{8})\)", t)
+    if m:
+        h = m.group(1).lower()
+        return h[0:6], h[6:8]
+
+    m = re.fullmatch(r"rgb\(([0-9a-fA-F]{6})\)", t)
+    if m:
+        return m.group(1).lower(), "ff"
+
+    m = re.fullmatch(r"#?([0-9a-fA-F]{6})", t)
+    if m:
+        return m.group(1).lower(), "ff"
+
+    m = re.fullmatch(r"#?([0-9a-fA-F]{3})", t)
+    if m:
+        h = m.group(1).lower()
+        return "".join(c * 2 for c in h), "ff"
+
+    return "000000", "ff"
+
+
+def parse_hypr_gradient(value: str) -> tuple[list[tuple[str, str]], int | None]:
+    """Parse a full Hyprland colour value -- one or more colour tokens plus
+    an optional trailing angle, e.g. "rgba(26a269ee) rgba(2ec27eee) 45deg"
+    -- into (colours, angle). colours is a list of (hex6, alpha2) pairs in
+    the order they appear; angle is None if no "NNNdeg" token is present.
+    A value with no recognizable colour token at all falls back to a single
+    opaque-black colour, same as parse_hypr_color's own fallback."""
+    colours = [parse_hypr_color(m.group(0)) for m in _HYPR_COLOR_RE.finditer(value)]
+    if not colours:
+        colours = [("000000", "ff")]
+    angle_match = _HYPR_ANGLE_RE.search(value)
+    angle = int(angle_match.group(1)) if angle_match else None
+    return colours, angle
+
+
+def janky_color(colours: list[tuple[str, str]], angle: int | None) -> str:
+    """Render (colours, angle) -- parse_hypr_gradient's own return shape --
+    into a JankyBorders colour expression. One colour: a bare 0xAARRGGBB.
+    Two or more: a gradient using the first and last colour (Omarchy's own
+    Hyprland gradients are two-stop in practice), on the top_left/
+    bottom_right diagonal when the angle is absent or in [0,90] / >=270,
+    and on the top_right/bottom_left diagonal for an angle in (90,270)."""
+
+    def argb(pair: tuple[str, str]) -> str:
+        hex6, alpha2 = pair
+        return f"0x{alpha2}{hex6}"
+
+    if len(colours) <= 1:
+        return argb(colours[0])
+
+    first = argb(colours[0])
+    last = argb(colours[-1])
+    if angle is not None and 90 < angle < 270:
+        return f"gradient(top_right={first},bottom_left={last})"
+    return f"gradient(top_left={first},bottom_right={last})"
+
+
+def build_border_tokens(tokens: dict, raw: dict, prefs: dict) -> dict:
+    """Derive the JankyBorders-facing tokens (not part of the CSS/`border`
+    token theme.lua consumes): border_active, border_active_hex,
+    border_inactive, border_width, border_bright.
+
+    border_active honours Omarchy's own `hyprland_active_border` override
+    key when the current theme's colors.toml defines it, else falls back to
+    `accent`; border_inactive honours `hyprland_inactive_border` when
+    present, else stays fully transparent (JankyBorders' own
+    "no inactive outline" value). When prefs["bright"] is set, every
+    active-border colour is mixed toward bright_foreground (falling back to
+    light_foreground, then foreground) at a fixed 0.40 ratio via mix_hex,
+    alpha preserved -- border_active_hex reports the (possibly mixed)
+    first colour as "#rrggbb", for status lines/swatches."""
+    active_raw = raw.get("hyprland_active_border") or tokens["accent"]
+    inactive_raw = raw.get("hyprland_inactive_border")
+
+    active_colours, active_angle = parse_hypr_gradient(active_raw)
+
+    bright = bool(prefs.get("bright", False))
+    if bright:
+        bright_target = (
+            tokens.get("bright_foreground")
+            or tokens.get("light_foreground")
+            or tokens["foreground"]
+        )
+        active_colours = [
+            (mix_hex(f"#{hex6}", bright_target, 0.40).lstrip("#"), alpha2)
+            for hex6, alpha2 in active_colours
+        ]
+
+    border_active = janky_color(active_colours, active_angle)
+    border_active_hex = f"#{active_colours[0][0]}"
+
+    if inactive_raw:
+        inactive_colours, inactive_angle = parse_hypr_gradient(inactive_raw)
+        border_inactive = janky_color(inactive_colours, inactive_angle)
+    else:
+        border_inactive = "0x00000000"
+
+    return {
+        "border_active": border_active,
+        "border_active_hex": border_active_hex,
+        "border_inactive": border_inactive,
+        "border_width": int(prefs.get("width", 5)),
+        "border_bright": bright,
+    }
+
+
 def resolve_current_theme_dir() -> Path:
     if not CURRENT_LINK.exists():
         sys.exit(
@@ -171,6 +316,32 @@ def read_console_mode() -> str:
         if mode in ("theme", "native"):
             return mode
     return "native"
+
+
+def read_borders_prefs() -> dict:
+    """Read the JankyBorders picker prefs (`gallery borders width|bright`)
+    out of BORDERS_STATE_PATH: {"width": int, "bright": bool}. Same
+    missing-file/garbage-means-defaults tolerance as read_console_mode --
+    defaults are {"width": 5, "bright": False}. width is clamped to 1..12
+    regardless of what is on disk, in case it was hand-edited."""
+    defaults = {"width": 5, "bright": False}
+    try:
+        data = json.loads(BORDERS_STATE_PATH.read_text())
+    except (OSError, ValueError):
+        return dict(defaults)
+    if not isinstance(data, dict):
+        return dict(defaults)
+
+    width = data.get("width")
+    if isinstance(width, bool) or not isinstance(width, int):
+        width = defaults["width"]
+    width = max(1, min(12, width))
+
+    bright = data.get("bright")
+    if not isinstance(bright, bool):
+        bright = defaults["bright"]
+
+    return {"width": width, "bright": bright}
 
 
 def theme_name_from_dir(theme_dir: Path) -> str:
@@ -280,7 +451,7 @@ def render_css(tokens: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_json(tokens: dict, name: str, light: bool) -> str:
+def render_json(tokens: dict, name: str, light: bool, border_tokens: dict) -> str:
     payload = dict(tokens)
     payload["name"] = name
     payload["light"] = light
@@ -289,12 +460,13 @@ def render_json(tokens: dict, name: str, light: bool) -> str:
     payload["success"] = tokens["color2"]
     payload["warning"] = tokens["color3"]
     payload["info"] = tokens["color4"]
+    payload.update(border_tokens)
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
-def render_shell(tokens: dict, name: str) -> str:
+def render_shell(tokens: dict, name: str, border_tokens: dict) -> str:
     def q(value: str) -> str:
-        return "'" + value.replace("'", "'\\''") + "'"
+        return "'" + str(value).replace("'", "'\\''") + "'"
 
     lines = [
         "# Generated by tools/render-theme.py -- do not edit by hand.",
@@ -309,6 +481,16 @@ def render_shell(tokens: dict, name: str) -> str:
 
     r, g, b = hex_to_rgb_int(tokens["accent"])
     lines.append(f"export CRYSTAL_BAR_COLOR='rgba({r},{g},{b},1.0)'")
+
+    # JankyBorders focus-outline tokens -- see build_border_tokens. Consumed
+    # by bin/gallery-borders, which falls back to deriving these itself from
+    # GALLERY_ACCENT alone when they are absent (an older, un-rerendered
+    # theme.sh).
+    lines.append(f"export GALLERY_BORDER_ACTIVE={q(border_tokens['border_active'])}")
+    lines.append(f"export GALLERY_BORDER_ACTIVE_HEX={q(border_tokens['border_active_hex'])}")
+    lines.append(f"export GALLERY_BORDER_INACTIVE={q(border_tokens['border_inactive'])}")
+    lines.append(f"export GALLERY_BORDER_WIDTH={q(border_tokens['border_width'])}")
+    lines.append(f"export GALLERY_BORDER_BRIGHT={q('1' if border_tokens['border_bright'] else '0')}")
     return "\n".join(lines) + "\n"
 
 
@@ -520,11 +702,14 @@ def main(argv: list[str]) -> int:
     raw = parse_flat_toml(colors_path.read_text())
     name = theme_name_from_dir(theme_dir)
     tokens, light = build_tokens(raw, theme_dir)
+    borders_prefs = read_borders_prefs()
+    border_tokens = build_border_tokens(tokens, raw, borders_prefs)
 
     if print_only:
         payload = dict(tokens)
         payload["name"] = name
         payload["light"] = light
+        payload.update(border_tokens)
         for k, v in sorted(payload.items()):
             print(f"{k} = {v}")
         return 0
@@ -532,17 +717,21 @@ def main(argv: list[str]) -> int:
     console_mode = read_console_mode()
 
     write_file(STATE_DIR / "theme.css", render_css(tokens))
-    write_file(STATE_DIR / "theme.json", render_json(tokens, name, light))
-    write_file(STATE_DIR / "theme.sh", render_shell(tokens, name))
+    write_file(STATE_DIR / "theme.json", render_json(tokens, name, light, border_tokens))
+    write_file(STATE_DIR / "theme.sh", render_shell(tokens, name, border_tokens))
     write_file(ITERM_PROFILE_PATH, render_iterm_profile(tokens, name))
     write_file(ITERM_CONSOLE_PROFILE_PATH, render_iterm_console_profile(tokens, name, console_mode))
     write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
     update_btop_conf("gallery")
 
+    border_summary = (
+        f"borders: width {border_tokens['border_width']}, "
+        f"bright {'on' if border_tokens['border_bright'] else 'off'}"
+    )
     print(f"rendered theme '{name}' ({'light' if light else 'dark'})")
     print(f"  {STATE_DIR / 'theme.css'}")
     print(f"  {STATE_DIR / 'theme.json'}")
-    print(f"  {STATE_DIR / 'theme.sh'}")
+    print(f"  {STATE_DIR / 'theme.sh'} ({border_summary})")
     print(f"  {ITERM_PROFILE_PATH}")
     print(f"  {ITERM_CONSOLE_PROFILE_PATH} (console: {console_mode})")
     print(f"  {BTOP_THEME_PATH}")
