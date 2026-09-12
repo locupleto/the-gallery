@@ -2,11 +2,31 @@
 # Gallery TUI plugin: pick a Gallery theme in fzf (Omarchy's theme-menu, in
 # a floating terminal) and apply it via the gallery CLI.
 #
+# Layout note: fzf's preview pane cannot mix plain text with ANY image
+# protocol (iTerm OSC 1337, chafa's native passthrough, sixel) -- the image
+# gets dropped (or the text gets swallowed) the instant they share one
+# preview invocation, on this fzf build (0.74.4), empirically. So the
+# palette swatches live in the LIST-SIDE HEADER (rebuilt per highlighted
+# theme via `transform-header`) instead of the preview pane, and the
+# preview pane shows the theme's active background wallpaper alone, at
+# full chafa resolution -- same recipe gallery.backgrounds/backgrounds.sh
+# uses for its own image-only preview. Theme name + background filename go
+# in the preview pane's border label instead (`transform-preview-label`),
+# never mixed into the image bytes.
+#
 #   themes.sh                  run the interactive fzf picker (needs a tty)
 #   themes.sh --list           print the fzf input lines and exit (for testing, no tty needed)
-#   themes.sh --preview NAME   render NAME's palette card and exit (no tty needed;
-#                              this is what fzf itself shells back out to on
-#                              every highlight change)
+#   themes.sh --preview NAME   render NAME's background image alone and exit
+#                              (no tty needed; this is what fzf itself shells
+#                              back out to on every highlight change)
+#   themes.sh --swatches NAME  print the header block (static instructions
+#                              line + NAME's two-column palette grid) and
+#                              exit -- this is what fzf's `transform-header`
+#                              shells out to on load/every highlight change
+#   themes.sh --dims NAME      print "NAME  BG_FILE  WxH" (or "NAME  no
+#                              backgrounds") and exit -- this is what fzf's
+#                              `transform-preview-label` shells out to, to
+#                              caption the preview pane's border
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -27,7 +47,9 @@ get_val() {
 }
 
 # swatch LABEL HEX -- one truecolor block + label + hex value, or nothing if
-# HEX is empty/malformed (missing-key tolerance lives here).
+# HEX is empty/malformed (missing-key tolerance lives here). Fixed visible
+# width when HEX is present -- see CELL_WIDTH below, which depends on this
+# exact format string.
 swatch() {
   local label="$1" hex="$2" r g b
   [[ -n "$hex" ]] || return 0
@@ -42,58 +64,155 @@ swatch() {
   printf '\033[48;2;%d;%d;%dm   \033[0m  %-16s #%s\n' "$r" "$g" "$b" "$label" "$hex"
 }
 
-# render_preview NAME -- the palette card fzf's --preview shells out to:
-# truecolor swatches on top, and (below them) a chafa character-mode
-# thumbnail of the theme's active background. Native-protocol image output
-# (iTerm OSC 1337, what backgrounds.sh's own preview uses) cannot share a
-# preview pane with plain text -- see backgrounds.sh's render_preview
-# comment for the empirical details -- so the thumbnail here is rendered in
-# chafa's `-f symbols` character mode instead, which IS plain text and
-# composes fine with the swatches above it.
-render_preview() {
+# --- swatches (list-side header) -------------------------------------------
+
+# CELL_WIDTH -- the visible (non-ANSI) column width of one swatch() line:
+# 3 (block) + 2 (spacing) + 16 (label field) + 1 (space) + 1 (#) + 6 (hex).
+# Used to pad out a missing/malformed colour's cell to the same width, so
+# the right-hand column still lines up across rows even when a theme is
+# missing one of the left-hand keys.
+CELL_WIDTH=29
+
+# Two-column layout: 16 colours in 8 rows. Index i pairs LEFT_KEYS[i] with
+# RIGHT_KEYS[i]. The last right-hand slot is a spare -- most colors.toml
+# files don't define bright_foreground, in which case that cell is just
+# left blank (swatch()'s own missing-key tolerance handles it).
+LEFT_KEYS=(accent background foreground red yellow green cyan blue)
+RIGHT_KEYS=(magenta bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta bright_foreground)
+
+# swatch_cell LABEL HEX -- swatch()'s output, or CELL_WIDTH blank spaces if
+# HEX was missing/malformed (swatch() itself prints nothing in that case) --
+# keeps a two-up row's right column aligned regardless of which keys a given
+# colors.toml happens to define.
+swatch_cell() {
+  local label="$1" hex="$2" out
+  out="$(swatch "$label" "$hex")"
+  if [[ -z "$out" ]]; then
+    printf '%*s' "$CELL_WIDTH" ''
+  else
+    printf '%s' "$out"
+  fi
+}
+
+# render_swatches NAME -- the 8-row, two-column palette grid for NAME's
+# colors.toml (16 cells: see LEFT_KEYS/RIGHT_KEYS above). No name/heading
+# line here -- that's static_header's job -- just the grid itself.
+render_swatches() {
   local name="$1"
   local file="${THEME_DIR}/${name}/colors.toml"
-  local swatches rows_used cols rows thumb_rows bg_name bg_path
+  local i left_key right_key left_cell right_cell
 
-  swatches="$(
-    if [[ -f "$file" ]]; then
-      local key
-      for key in accent background foreground \
-                 red yellow green cyan blue magenta \
-                 bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta; do
-        swatch "$key" "$(get_val "$file" "$key")"
-      done
-    else
-      echo "(no colors.toml found)"
-    fi
-  )"
+  if [[ ! -f "$file" ]]; then
+    printf '(no colors.toml found)\n'
+    return 0
+  fi
 
-  printf '%s\n\n%s\n' "$name" "$swatches"
+  for i in "${!LEFT_KEYS[@]}"; do
+    left_key="${LEFT_KEYS[$i]}"
+    right_key="${RIGHT_KEYS[$i]}"
+    left_cell="$(swatch_cell "$left_key" "$(get_val "$file" "$left_key")")"
+    right_cell="$(swatch_cell "$right_key" "$(get_val "$file" "$right_key")")"
+    printf '%s  %s\n' "$left_cell" "$right_cell"
+  done
+}
 
-  # 2 header lines (name + blank) plus however many swatch lines actually
-  # printed (missing-key tolerance means this varies), plus the blank
-  # separator line printed below -- all subtracted from the preview
-  # window's total rows to size the thumbnail into whatever is left.
-  rows_used=$(( 2 + $(printf '%s\n' "$swatches" | wc -l) + 1 ))
-  cols="${FZF_PREVIEW_COLUMNS:-40}"
-  rows="${FZF_PREVIEW_LINES:-40}"
-  thumb_rows=$(( rows - rows_used ))
-  [[ "$thumb_rows" -lt 1 ]] && thumb_rows=1
+# static_header -- the header's fixed first line: which theme is presently
+# active plus the key hints. Queries `gallery theme current` itself (rather
+# than taking it as an argument) so both the top-level --header (built once,
+# interactively) and every --swatches subprocess (fzf shells this whole
+# script back out to, fresh, on load/each highlight) print the identical
+# line without needing to thread state between processes.
+static_header() {
+  local current
+  current="$("${GALLERY_BIN}" theme current 2>/dev/null || true)"
+  printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n' "${current:-(none)}"
+}
 
-  printf '\n'
+# --- preview pane (image only) ----------------------------------------------
+
+# image_dims FILE -- prints "WIDTH HEIGHT" (space-separated, via sips), or
+# nothing if the file isn't a readable image. Same recipe as
+# gallery.backgrounds/backgrounds.sh's image_dims.
+image_dims() {
+  local file="$1" dims width height
+  dims="$(sips -g pixelWidth -g pixelHeight "$file" 2>/dev/null)" || return 0
+  width="$(printf '%s\n' "$dims" | sed -n 's/^[[:space:]]*pixelWidth:[[:space:]]*//p')"
+  height="$(printf '%s\n' "$dims" | sed -n 's/^[[:space:]]*pixelHeight:[[:space:]]*//p')"
+  [[ -n "$width" && -n "$height" ]] && printf '%s %s\n' "$width" "$height"
+}
+
+# print_dims NAME -- "NAME  BG_FILENAME  WxH" (or "NAME  no backgrounds" if
+# the theme has none), for fzf's `transform-preview-label` bind. Deliberately
+# kept separate from render_preview: this is the ONLY thing that ends up as
+# the preview pane's border label, never mixed into the preview command's
+# own stdout (see render_preview's comment for why that separation matters).
+print_dims() {
+  local name="$1" bg_name bg_path dims
   bg_name="$("${GALLERY_BIN}" bg current "$name" 2>/dev/null || true)"
   if [[ -z "$bg_name" ]]; then
-    echo "no backgrounds"
-  elif ! command -v chafa >/dev/null 2>&1; then
-    echo "(install chafa for a thumbnail)"
-  else
-    bg_path="${THEME_DIR}/${name}/backgrounds/${bg_name}"
-    if [[ -r "$bg_path" ]]; then
-      chafa -f symbols --symbols block -s "${cols}x${thumb_rows}" "$bg_path" 2>/dev/null
-    else
-      echo "(background image not readable)"
-    fi
+    printf '%s  no backgrounds\n' "$name"
+    return 0
   fi
+  bg_path="${THEME_DIR}/${name}/backgrounds/${bg_name}"
+  dims="$(image_dims "$bg_path")"
+  if [[ -n "$dims" ]]; then
+    printf '%s  %s  %sx%s\n' "$name" "$bg_name" "${dims%% *}" "${dims##* }"
+  else
+    printf '%s  %s\n' "$name" "$bg_name"
+  fi
+}
+
+# render_preview NAME -- the image card fzf's --preview shells out to: NAME's
+# active background image ALONE, sized from $FZF_PREVIEW_COLUMNS /
+# $FZF_PREVIEW_LINES and the image's own aspect ratio (via sips) -- the exact
+# recipe gallery.backgrounds/backgrounds.sh's render_preview uses for its own
+# image-only preview (see that function's comment for the empirical detail
+# this depends on: on this fzf build, ANY plain stdout text sharing a preview
+# invocation with an image -- before OR after it -- causes fzf's
+# preview-window compositor to either drop the image or swallow the text.
+# Only an invocation that emits the image and nothing else renders
+# correctly). Theme name / background filename / pixel dimensions are never
+# mixed in here -- they go through print_dims / transform-preview-label
+# instead.
+render_preview() {
+  local name="$1" bg_name bg_path dims width height cols rows img_rows
+
+  if ! command -v chafa >/dev/null 2>&1; then
+    printf '(install chafa for a preview)\n'
+    return 0
+  fi
+
+  bg_name="$("${GALLERY_BIN}" bg current "$name" 2>/dev/null || true)"
+  if [[ -z "$bg_name" ]]; then
+    printf 'no backgrounds\n'
+    return 0
+  fi
+
+  bg_path="${THEME_DIR}/${name}/backgrounds/${bg_name}"
+  if [[ ! -r "$bg_path" ]]; then
+    printf '(background image not readable)\n'
+    return 0
+  fi
+
+  dims="$(image_dims "$bg_path")"
+  width="${dims%% *}"
+  height="${dims##* }"
+
+  cols="${FZF_PREVIEW_COLUMNS:-80}"
+  rows="${FZF_PREVIEW_LINES:-40}"
+  # Ask for a height that matches the image's own aspect ratio (scaled to
+  # $cols, correcting for terminal cells being roughly twice as tall as
+  # wide) rather than nearly the whole pane -- see backgrounds.sh's
+  # render_preview comment for why.
+  if [[ -n "$width" && -n "$height" && "$width" -gt 0 ]]; then
+    img_rows=$(( (cols * height) / (2 * width) ))
+    [[ "$img_rows" -lt 1 ]] && img_rows=1
+    [[ "$img_rows" -gt "$rows" ]] && img_rows="$rows"
+  else
+    img_rows="$rows"
+  fi
+
+  chafa -s "${cols}x${img_rows}" "$bg_path" 2>/dev/null
 }
 
 # Build the fzf input: one tab-delimited line per row.
@@ -127,6 +246,17 @@ case "${1:-}" in
     render_preview "${2:?usage: themes.sh --preview <name>}"
     exit 0
     ;;
+  --swatches)
+    name="${2:?usage: themes.sh --swatches <name>}"
+    static_header
+    printf '\n'
+    render_swatches "$name"
+    exit 0
+    ;;
+  --dims)
+    print_dims "${2:?usage: themes.sh --dims <name>}"
+    exit 0
+    ;;
   --list)
     if [[ ! -x "$GALLERY_BIN" ]]; then
       echo "gallery CLI not found at ${GALLERY_BIN}" >&2
@@ -155,9 +285,11 @@ BACKGROUNDS_SH="$(cd "$(dirname "$SELF")/../gallery.backgrounds" && pwd)/backgro
 
 current="$("${GALLERY_BIN}" theme current 2>/dev/null || true)"
 pos="$(current_pos "$current" || true)"
+header_line="$(static_header)"
 
 gallery_q="$(printf '%q' "$GALLERY_BIN")"
 bg_q="$(printf '%q' "$BACKGROUNDS_SH")"
+self_q="$(printf '%q' "$SELF")"
 
 fzf_args=(
   --delimiter=$'\t'
@@ -166,10 +298,18 @@ fzf_args=(
   --layout=reverse
   --border=rounded
   --no-multi
+  --ansi
   --prompt='Theme > '
-  --header="Current: ${current:-(none)} -- Enter applies theme and shows its backgrounds, Esc closes"
-  --preview="$(printf '%q' "$SELF") --preview {1}"
-  --preview-window=right:50%
+  --header="$header_line"
+  --preview="${self_q} --preview {1}"
+  --preview-window=right:50%,border-rounded
+  --preview-label=' Background '
+  # Rebuilds the ENTIRE header (static line + two-column swatch grid) and
+  # the preview pane's border label every time the highlighted row changes,
+  # by shelling this same script back out to itself in --swatches / --dims
+  # mode -- see those functions' comments. Chained with `+` so one focus
+  # event fires both transforms together.
+  --bind "focus:transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"
   # Enter applies the theme (execute-silent -- ~1-2s: renderers + hooks
   # incl. wallpaper) and then hands the SAME fzf process off to the
   # background picker for that theme via become(), which execve()s over
@@ -179,9 +319,13 @@ fzf_args=(
   --bind "enter:change-header(Applying theme, please wait...)+execute-silent(${gallery_q} theme set {1})+become(${bg_q} --from-themes)"
 )
 # `load`, not `start`: the list is streamed in, so pos() on `start` runs
-# against an empty list and does nothing.
+# against an empty list and does nothing. The initial header/preview-label
+# also have to be set here (chained onto the same bind), since `focus`
+# doesn't fire for the row fzf highlights by default before any navigation.
 if [[ -n "$pos" ]]; then
-  fzf_args+=(--bind "load:pos(${pos})")
+  fzf_args+=(--bind "load:pos(${pos})+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})")
+else
+  fzf_args+=(--bind "load:transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})")
 fi
 
 list_lines | fzf "${fzf_args[@]}" || true
