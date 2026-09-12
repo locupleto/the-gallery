@@ -161,8 +161,17 @@ render_preview() {
 # Returns non-zero (nothing printed) if `gallery bg list` isn't supported
 # yet by the installed CLI -- caller decides how to report that.
 list_lines() {
-  local out current name
-  out="$("${GALLERY_BIN}" bg list 2>/dev/null)" || return 1
+  local out err current name
+  # `gallery bg list` exits 1 both when the verb is unknown and when the
+  # theme simply has no wallpapers fetched yet. Only the former is a real
+  # failure; the latter is an empty list (the caller shows a hint).
+  if ! out="$("${GALLERY_BIN}" bg list 2>/dev/null)"; then
+    err="$("${GALLERY_BIN}" bg list 2>&1 >/dev/null || true)"
+    case "$err" in
+      *"no backgrounds for theme"*) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
   current="$("${GALLERY_BIN}" bg current 2>/dev/null)" || current=""
   printf '%s\n' "$out" | while IFS= read -r name; do
     [[ -n "$name" ]] || continue
@@ -243,14 +252,23 @@ fi
 THEMES_SH="$(cd "$(dirname "$SELF")/../gallery.themes" && pwd)/themes.sh"
 
 if [[ -z "$lines" ]]; then
-  echo "No backgrounds found for the current theme."
+  # Wallpapers are never in the repo; they are fetched per machine (see
+  # tools/fetch-omarchy-backgrounds.sh). Say so, with the command.
+  echo
+  echo "  No wallpapers fetched for theme '$(theme_name)' on this Mac."
+  echo "  The theme is applied; only the desktop picture is unchanged."
+  echo
+  echo "  Fetch them with (from the the-gallery checkout):"
+  echo "    tools/fetch-omarchy-backgrounds.sh $(theme_name)     # or --all"
+  echo
   if [[ "$from_themes" -eq 1 ]]; then
-    # Direct launch (key B): nothing to show, just close. Handed off from
-    # the theme picker: bounce back to it instead of dumping the user out.
-    sleep 1
+    # Handed off from the theme picker: bounce back to it instead of
+    # dumping the user out. Direct launch (key B): just close.
+    echo "  Returning to the theme picker..."
+    sleep 4
     exec "$THEMES_SH"
   fi
-  sleep 3
+  sleep 4
   exit 0
 fi
 
