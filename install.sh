@@ -82,6 +82,17 @@ require_hammerspoon() {
   fi
 }
 
+# Optional tools used by individual tui plugins. Missing ones only degrade
+# the plugin that needs them, so this is advisory, never fatal.
+advise_optional_tools() {
+  local tool
+  for tool in fzf chafa btop; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+      echo "[gallery] optional: ${tool} not found -- install with: brew install ${tool}" >&2
+    fi
+  done
+}
+
 do_uninstall() {
   echo "[gallery] uninstalling"
   if [ -d "${SPOON_DEST}" ]; then
@@ -117,6 +128,7 @@ if [ "${UNINSTALL}" -eq 1 ]; then
 fi
 
 require_hammerspoon
+advise_optional_tools
 
 echo "[gallery] installing Spoon to ${SPOON_DEST}"
 run mkdir -p "$(dirname "${SPOON_DEST}")"

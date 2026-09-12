@@ -14,9 +14,16 @@
 # exist or has no images, this is a silent no-op (logged, not an error):
 # most themes will simply have no wallpaper until fetched.
 #
-# Selection is deterministic: a file named "default.<ext>" wins if present;
-# otherwise the lexically first image (by filename) is used. Recognised
-# extensions (case-insensitive): jpg jpeg png heic webp.
+# Selection order:
+#   1. An explicit override given as $2 (a filename inside the theme's
+#      backgrounds dir, or an absolute path) -- used by `gallery bg set`/
+#      `next`/`prev` for instant-apply, overriding everything below.
+#   2. The filename recorded for this theme in state/backgrounds.json
+#      (see `gallery bg`), if that file still exists in the theme's
+#      backgrounds dir.
+#   3. A file named "default.<ext>" if present.
+#   4. Otherwise the lexically first image (by filename).
+# Recognised extensions (case-insensitive): jpg jpeg png heic webp.
 #
 # KNOWN macOS LIMITATION: "set picture of every desktop" (System Events)
 # only changes the picture for the CURRENT Space on each display. Other,
@@ -31,21 +38,18 @@
 #
 set -euo pipefail
 
-THEME="${1:?usage: 30-wallpaper.sh <theme-name>}"
+THEME="${1:?usage: 30-wallpaper.sh <theme-name> [filename-or-path]}"
+OVERRIDE="${2:-}"
 LOG_FILE="${HOME}/Library/Logs/gallery.log"
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/gallery"
 BG_DIR="${CONFIG_DIR}/themes/${THEME}/backgrounds"
+STATE_FILE="${CONFIG_DIR}/state/backgrounds.json"
 
 mkdir -p "$(dirname "${LOG_FILE}")"
 
 log() {
   printf '%s wallpaper: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "${LOG_FILE}"
 }
-
-if [ ! -d "${BG_DIR}" ]; then
-  log "no wallpaper for ${THEME}"
-  exit 0
-fi
 
 # is_image_ext <filename> -- true if the extension is one of the
 # recognised image types, case-insensitively. Written for bash 3.2
@@ -73,20 +77,74 @@ first_image() {
   return 0
 }
 
-# Prefer a file named default.<ext>; otherwise the lexically first image.
-# Pathname expansion already sorts its matches, so the first accepted match
-# is the deterministic choice. Glob on real wildcards ("default.*", "*")
-# and filter by extension in code: brace-expanding literal extensions would
-# defeat nullglob, since "default.jpg" with no such file is plain text, not
-# a pattern, and nullglob only elides patterns containing wildcards.
-shopt -s nullglob
-CHOSEN="$(first_image "${BG_DIR}"/default.*)"
-[ -n "${CHOSEN}" ] || CHOSEN="$(first_image "${BG_DIR}"/*)"
-shopt -u nullglob
+# recorded_choice -- prints the filename recorded for THEME in
+# state/backgrounds.json (written by `gallery bg set`/`next`/`prev`), or
+# nothing if the state file is missing, unreadable, or has no entry for
+# this theme. Uses only the python3 stdlib json module -- no jq dependency,
+# matching the CLI's own reader/writer.
+recorded_choice() {
+  [ -f "${STATE_FILE}" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -c '
+import json, sys
 
-if [ -z "${CHOSEN}" ]; then
-  log "no wallpaper for ${THEME}"
-  exit 0
+path, theme = sys.argv[1], sys.argv[2]
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)
+if isinstance(data, dict):
+    val = data.get(theme)
+    if isinstance(val, str) and val:
+        sys.stdout.write(val)
+' "${STATE_FILE}" "${THEME}"
+}
+
+if [ -n "${OVERRIDE}" ]; then
+  # Explicit override from `gallery bg` -- a bare filename resolves inside
+  # this theme's backgrounds dir; an absolute path is used as-is. This is
+  # the one case that does not need BG_DIR to exist.
+  case "${OVERRIDE}" in
+    /*) CHOSEN="${OVERRIDE}" ;;
+    *) CHOSEN="${BG_DIR}/${OVERRIDE}" ;;
+  esac
+  if [ ! -f "${CHOSEN}" ]; then
+    log "FAILED: override not found: ${CHOSEN}"
+    echo "gallery: 30-wallpaper.sh: override file not found: ${CHOSEN}" >&2
+    exit 1
+  fi
+else
+  if [ ! -d "${BG_DIR}" ]; then
+    log "no wallpaper for ${THEME}"
+    exit 0
+  fi
+
+  # Prefer the recorded per-theme choice (if the file still exists and is
+  # still a recognised image type); otherwise fall back to a file named
+  # default.<ext>; otherwise the lexically first image. Pathname expansion
+  # already sorts its matches, so the first accepted match is the
+  # deterministic choice. Glob on real wildcards ("default.*", "*") and
+  # filter by extension in code: brace-expanding literal extensions would
+  # defeat nullglob, since "default.jpg" with no such file is plain text,
+  # not a pattern, and nullglob only elides patterns containing wildcards.
+  CHOSEN=""
+  RECORDED="$(recorded_choice)"
+  if [ -n "${RECORDED}" ] && [ -f "${BG_DIR}/${RECORDED}" ] && is_image_ext "${RECORDED}"; then
+    CHOSEN="${BG_DIR}/${RECORDED}"
+  fi
+
+  if [ -z "${CHOSEN}" ]; then
+    shopt -s nullglob
+    CHOSEN="$(first_image "${BG_DIR}"/default.*)"
+    [ -n "${CHOSEN}" ] || CHOSEN="$(first_image "${BG_DIR}"/*)"
+    shopt -u nullglob
+  fi
+
+  if [ -z "${CHOSEN}" ]; then
+    log "no wallpaper for ${THEME}"
+    exit 0
+  fi
 fi
 
 APPLESCRIPT_SRC="$(cat <<EOF

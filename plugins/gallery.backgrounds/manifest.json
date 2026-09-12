@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.backgrounds",
+  "name": "Backgrounds",
+  "version": "0.1.0",
+  "kinds": ["tui"],
+  "entryPoints": {},
+  "gallery": {
+    "tui": {
+      "command": "~/.config/gallery/plugins/gallery.backgrounds/backgrounds.sh",
+      "args": [],
+      "grid": "6:6:1:1:4:4"
+    }
+  }
+}

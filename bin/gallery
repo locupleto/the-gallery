@@ -26,6 +26,12 @@
 #   gallery theme set <name>
 #   gallery theme render
 #   gallery theme next
+#   gallery bg list [theme]
+#   gallery bg current [theme]
+#   gallery bg set <file> [theme]
+#   gallery bg next [theme]
+#   gallery bg prev [theme]
+#   gallery bg apply [theme]
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -42,7 +48,10 @@ STAGING_DIR="${CONFIG_DIR}/staging"
 REMOVED_DIR="${CONFIG_DIR}/removed"
 GALLERY_JSON="${CONFIG_DIR}/gallery.json"
 THEME_DIR="${CONFIG_DIR}/themes"
-THEME_HOOKS_DIR="${CONFIG_DIR}/hooks/theme-set.d"
+# GALLERY_THEME_HOOKS_DIR overrides the installed hooks dir -- used by tests
+# to point at a repo checkout's tools/hooks/ instead of the installed copy.
+THEME_HOOKS_DIR="${GALLERY_THEME_HOOKS_DIR:-${CONFIG_DIR}/hooks/theme-set.d}"
+BACKGROUNDS_STATE_FILE="${CONFIG_DIR}/state/backgrounds.json"
 # Installed by install.sh from this repo's patches/ directory -- see that
 # directory's own README.md for the mechanism (macOS replacements for a
 # plugin's own files, applied on top of the installed plugin dir).
@@ -96,6 +105,12 @@ commands:
   theme set <name>                switch the active theme and re-render it
   theme render                    re-run the renderers for the active theme
   theme next                      switch to the next theme alphabetically
+  bg list [theme]                 list backgrounds for a theme (marks active)
+  bg current [theme]              print the active background's filename
+  bg set <file> [theme]           choose a background and apply it
+  bg next [theme]                 cycle to the next background, and apply it
+  bg prev [theme]                 cycle to the previous background, and apply it
+  bg apply [theme]                re-apply the active background
   reload                          request a Hammerspoon config reload
   log                             tail the Gallery log
   doctor                          check the local Gallery install
@@ -1196,6 +1211,377 @@ theme_names() {
   [ -n "${list}" ] && printf '%s' "${list}" | sort
 }
 
+# --- background verbs -------------------------------------------------------
+#
+# Per-theme wallpaper choice, recorded in BACKGROUNDS_STATE_FILE
+# (state/backgrounds.json: {"<theme>": "<basename>"}) and applied through
+# the theme-set.d hook tools/hooks/30-wallpaper.sh (installed as
+# 30-wallpaper.sh under THEME_HOOKS_DIR), which is the only thing that
+# actually knows how to set the desktop picture. These helpers just resolve
+# *which* background is active for a theme and read/write the state file;
+# `gallery theme set`/`next` do not touch this state at all -- the hook
+# reads it directly on every theme switch, so a previously recorded choice
+# is honoured automatically.
+
+# bg_is_image_ext <filename> -- same recognised-extension check as the
+# wallpaper hook (jpg jpeg png heic webp, case-insensitive). Kept in sync
+# with tools/hooks/30-wallpaper.sh's is_image_ext by hand; the two run in
+# separate processes so there is nothing to share directly.
+bg_is_image_ext() {
+  local ext
+  ext="$(printf '%s' "${1##*.}" | tr '[:upper:]' '[:lower:]')"
+  case "${ext}" in
+    jpg|jpeg|png|heic|webp) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# bg_dir_for <theme> -- prints the theme's backgrounds directory path.
+bg_dir_for() {
+  printf '%s/%s/backgrounds' "${THEME_DIR}" "$1"
+}
+
+# bg_list_images <theme> -- newline-separated, alphabetically sorted list
+# of recognised-image basenames in <theme>'s backgrounds dir, or nothing
+# if the dir is missing/empty.
+bg_list_images() {
+  local dir
+  dir="$(bg_dir_for "$1")"
+  [ -d "${dir}" ] || return 0
+  local f name list=""
+  shopt -s nullglob
+  for f in "${dir}"/*; do
+    [ -f "${f}" ] || continue
+    name="$(basename "${f}")"
+    if bg_is_image_ext "${name}"; then
+      list="${list}${name}
+"
+    fi
+  done
+  shopt -u nullglob
+  [ -n "${list}" ] && printf '%s' "${list}" | sort
+}
+
+# bg_read_choice <theme> -- prints the filename recorded for <theme> in
+# BACKGROUNDS_STATE_FILE, or nothing if unset/missing/unreadable.
+bg_read_choice() {
+  [ -f "${BACKGROUNDS_STATE_FILE}" ] || return 0
+  python3 -c '
+import json, sys
+
+path, theme = sys.argv[1], sys.argv[2]
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)
+if isinstance(data, dict):
+    val = data.get(theme)
+    if isinstance(val, str) and val:
+        sys.stdout.write(val)
+' "${BACKGROUNDS_STATE_FILE}" "$1"
+}
+
+# bg_write_choice <theme> <filename> -- atomically records <filename> as
+# the chosen background for <theme> in BACKGROUNDS_STATE_FILE, preserving
+# every other theme's entry (read-modify-write via a temp file + mv, so a
+# reader never sees a partially written file).
+bg_write_choice() {
+  mkdir -p "$(dirname "${BACKGROUNDS_STATE_FILE}")"
+  python3 -c '
+import json, os, sys, tempfile
+
+path, theme, filename = sys.argv[1], sys.argv[2], sys.argv[3]
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            data = loaded
+    except Exception:
+        data = {}
+data[theme] = filename
+
+d = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".backgrounds.", suffix=".json", dir=d)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+except Exception:
+    os.unlink(tmp)
+    raise
+' "${BACKGROUNDS_STATE_FILE}" "$1" "$2"
+}
+
+# bg_fallback_choice <theme> -- the hook's own fallback: a file named
+# default.<ext> if present, else the lexically first recognised image.
+# Mirrors tools/hooks/30-wallpaper.sh's own selection so `bg list/current`
+# can show the same answer the hook would apply with no recorded choice.
+bg_fallback_choice() {
+  local dir
+  dir="$(bg_dir_for "$1")"
+  local f name
+  shopt -s nullglob
+  for f in "${dir}"/default.*; do
+    [ -f "${f}" ] || continue
+    name="$(basename "${f}")"
+    if bg_is_image_ext "${name}"; then
+      printf '%s' "${name}"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  for f in "${dir}"/*; do
+    [ -f "${f}" ] || continue
+    name="$(basename "${f}")"
+    if bg_is_image_ext "${name}"; then
+      printf '%s' "${name}"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+  return 0
+}
+
+# bg_active_choice <theme> -- the background that is (or would be) applied
+# for <theme> right now: the recorded choice if it still exists on disk
+# and is still a recognised image, else the fallback. Prints nothing if
+# the theme has no usable backgrounds at all.
+bg_active_choice() {
+  local theme="$1" dir recorded
+  dir="$(bg_dir_for "${theme}")"
+  recorded="$(bg_read_choice "${theme}")"
+  if [ -n "${recorded}" ] && [ -f "${dir}/${recorded}" ] && bg_is_image_ext "${recorded}"; then
+    printf '%s' "${recorded}"
+    return 0
+  fi
+  bg_fallback_choice "${theme}"
+}
+
+# bg_resolve_theme <arg> -- prints <arg> if non-empty, else the current
+# theme name; exits 1 with a message if neither is available.
+bg_resolve_theme() {
+  local theme="$1"
+  if [ -z "${theme}" ]; then
+    theme="$(theme_current_name)"
+  fi
+  if [ -z "${theme}" ]; then
+    echo "gallery: no current theme set (run 'gallery theme set <name>' first)" >&2
+    exit 1
+  fi
+  if ! valid_id "${theme}"; then
+    echo "gallery: invalid theme name: ${theme}" >&2
+    exit 1
+  fi
+  if [ ! -d "${THEME_DIR}/${theme}" ]; then
+    echo "gallery: no such theme: ${theme}" >&2
+    exit 1
+  fi
+  printf '%s' "${theme}"
+}
+
+# bg_apply_hook <theme> <filename-or-path> -- invokes the installed
+# wallpaper hook directly with an explicit override, for instant-apply
+# from `bg set/next/prev/apply`. Not gated on the hook being executable
+# via THEME_HOOKS_DIR's usual directory scan (theme_set_notify runs every
+# hook there on `theme set`/`next`); this calls 30-wallpaper.sh by name
+# since it is the only hook that understands backgrounds.
+bg_apply_hook() {
+  local theme="$1" file="$2"
+  local hook="${THEME_HOOKS_DIR}/30-wallpaper.sh"
+  if [ ! -x "${hook}" ]; then
+    echo "gallery: wallpaper hook not found or not executable: ${hook}" >&2
+    return 1
+  fi
+  "${hook}" "${theme}" "${file}"
+}
+
+cmd_bg_list() {
+  local theme
+  theme="$(bg_resolve_theme "${1:-}")"
+  local images
+  images="$(bg_list_images "${theme}")"
+  if [ -z "${images}" ]; then
+    echo "gallery: no backgrounds for theme: ${theme}" >&2
+    exit 1
+  fi
+  local active
+  active="$(bg_active_choice "${theme}")"
+  local name
+  while IFS= read -r name; do
+    [ -n "${name}" ] || continue
+    if [ "${name}" = "${active}" ] && [ -t 1 ]; then
+      printf '%s *\n' "${name}"
+    else
+      printf '%s\n' "${name}"
+    fi
+  done <<< "${images}"
+}
+
+cmd_bg_current() {
+  local theme
+  theme="$(bg_resolve_theme "${1:-}")"
+  local active
+  active="$(bg_active_choice "${theme}")"
+  if [ -z "${active}" ]; then
+    echo "gallery: theme ${theme} has no backgrounds" >&2
+    exit 1
+  fi
+  echo "${active}"
+}
+
+# bg_set_and_maybe_apply <theme> <filename> -- records <filename> as the
+# choice for <theme>, then applies it immediately only if <theme> is the
+# current theme (an idle theme's wallpaper would have nothing to apply to,
+# and applying it would change the live desktop out from under whatever
+# theme is actually active).
+bg_set_and_maybe_apply() {
+  local theme="$1" file="$2"
+  bg_write_choice "${theme}" "${file}"
+  local current
+  current="$(theme_current_name)"
+  if [ "${theme}" = "${current}" ]; then
+    bg_apply_hook "${theme}" "${file}"
+    echo "background: ${file} (${theme})"
+  else
+    echo "background: ${file} (${theme}, recorded only -- ${theme} is not the current theme)"
+  fi
+}
+
+cmd_bg_set() {
+  local file="${1:?usage: gallery bg set <file> [theme]}"
+  local theme
+  theme="$(bg_resolve_theme "${2:-}")"
+
+  local base
+  base="$(basename "${file}")"
+  local dir
+  dir="$(bg_dir_for "${theme}")"
+  if [ ! -f "${dir}/${base}" ]; then
+    echo "gallery: no such background: ${base} (looked in ${dir})" >&2
+    exit 1
+  fi
+  if ! bg_is_image_ext "${base}"; then
+    echo "gallery: not a recognised image type: ${base}" >&2
+    exit 1
+  fi
+
+  bg_set_and_maybe_apply "${theme}" "${base}"
+}
+
+# bg_cycle <next|prev> <theme-arg> -- shared implementation for `bg next`/
+# `bg prev`: walks the sorted image list once to find the entry before/
+# after the current active choice, wrapping at either end.
+bg_cycle() {
+  local direction="$1"
+  local theme
+  theme="$(bg_resolve_theme "${2:-}")"
+
+  local images
+  images="$(bg_list_images "${theme}")"
+  if [ -z "${images}" ]; then
+    echo "gallery: no backgrounds for theme: ${theme}" >&2
+    exit 1
+  fi
+
+  local active
+  active="$(bg_active_choice "${theme}")"
+
+  local name last=""
+  while IFS= read -r name; do
+    [ -n "${name}" ] || continue
+    last="${name}"
+  done <<< "${images}"
+
+  local target="" first="" prev="" found=0
+  if [ "${direction}" = "next" ]; then
+    while IFS= read -r name; do
+      [ -n "${name}" ] || continue
+      [ -z "${first}" ] && first="${name}"
+      if [ "${found}" -eq 1 ]; then
+        target="${name}"
+        break
+      fi
+      [ "${name}" = "${active}" ] && found=1
+    done <<< "${images}"
+    [ -n "${target}" ] || target="${first}"
+  else
+    while IFS= read -r name; do
+      [ -n "${name}" ] || continue
+      if [ "${name}" = "${active}" ]; then
+        found=1
+        break
+      fi
+      prev="${name}"
+    done <<< "${images}"
+    if [ "${found}" -eq 1 ] && [ -n "${prev}" ]; then
+      target="${prev}"
+    else
+      target="${last}"
+    fi
+  fi
+
+  bg_set_and_maybe_apply "${theme}" "${target}"
+}
+
+cmd_bg_next() {
+  bg_cycle next "${1:-}"
+}
+
+cmd_bg_prev() {
+  bg_cycle prev "${1:-}"
+}
+
+cmd_bg_apply() {
+  local theme
+  theme="$(bg_resolve_theme "${1:-}")"
+  local active
+  active="$(bg_active_choice "${theme}")"
+  if [ -z "${active}" ]; then
+    echo "gallery: theme ${theme} has no backgrounds" >&2
+    exit 1
+  fi
+  bg_apply_hook "${theme}" "${active}"
+  echo "background: ${active} (${theme})"
+}
+
+cmd_bg() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    list)
+      cmd_bg_list "${1:-}"
+      ;;
+    current)
+      cmd_bg_current "${1:-}"
+      ;;
+    set)
+      cmd_bg_set "${1:-}" "${2:-}"
+      ;;
+    next)
+      cmd_bg_next "${1:-}"
+      ;;
+    prev)
+      cmd_bg_prev "${1:-}"
+      ;;
+    apply)
+      cmd_bg_apply "${1:-}"
+      ;;
+    "")
+      echo "usage: gallery bg <list|current|set|next|prev|apply>" >&2
+      exit 1
+      ;;
+    *)
+      echo "gallery: unknown bg subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 find_render_tool() {
   if [ -f "${RENDER_TOOL_INSTALLED}" ]; then
     printf '%s\n' "${RENDER_TOOL_INSTALLED}"
@@ -1687,6 +2073,9 @@ case "${command}" in
     ;;
   theme)
     cmd_theme "$@"
+    ;;
+  bg)
+    cmd_bg "$@"
     ;;
   reload)
     cmd_reload
