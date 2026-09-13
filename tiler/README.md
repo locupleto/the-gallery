@@ -64,12 +64,12 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + w | close window |
 | super + return | new iTerm window (first press: allow "skhd wants to control iTerm2") |
 | super + shift + r | restart yabai, reload skhd |
-| super + a / shift + a | ChatGPT / Grok web apps |
+| super + a / shift + a | Claude desktop app / ChatGPT app (both in /Applications) |
 | super + c | Calendar |
 | super + e | Gmail web app |
 | super + y | YouTube web app |
 | super + x | X web app |
-| super + g | Telegram (Omarchy's messaging slot) |
+| super + g / shift + g | Telegram (Omarchy's messaging slot) / Grok web app |
 | super + space | Learn menu: pick a cheat sheet (first press: allow "skhd wants to control iTerm2") |
 | super + shift + space | the tiler key sheet, generated from `skhdrc` |
 
