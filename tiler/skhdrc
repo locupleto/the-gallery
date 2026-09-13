@@ -113,12 +113,13 @@ shift + lalt - r : yabai --restart-service; skhd --reload
 # --- apps (Omarchy web-app keys) -------------------------------------------------
 # Safari web apps live in ~/Applications; open -a activates the one window they have.
 # Omarchy: a ChatGPT, shift+a Grok, c Calendar, e Email, y YouTube, x X, g messaging
-# (WhatsApp there; Telegram here; the AI key is Claude here, the desktop app in
-# /Applications). Split toggle moved to shift+e to free super+e.
+# (WhatsApp there; Telegram here; the AI keys are Claude (desktop app in
+# /Applications) and ChatGPT here, no Grok). Split toggle moved to shift+e to
+# free super+e.
 ## Claude desktop app
 lalt - a : open -a "/Applications/Claude.app"
-## Grok web app
-shift + lalt - a : open -a "$HOME/Applications/Grok.app"
+## ChatGPT app
+shift + lalt - a : open -a "/Applications/ChatGPT.app"
 ## Calendar
 lalt - c : open -a Calendar
 ## Gmail web app
