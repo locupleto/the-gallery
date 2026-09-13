@@ -607,7 +607,39 @@ qml_launch() {
   else
     nohup "${gallery_qml}" "${this_plugin_dir}" --title "${name}" >/dev/null 2>>"${log}" &
   fi
+  # Claim the pidfile now rather than waiting for the host to write it once
+  # QML has loaded (a second or more): gallery-qml execs into host.py, so
+  # this is the very pid the host will record. Until it exists a second
+  # toggle would see "not running" and launch a second host.
+  printf '%s' "$!" > "$(qml_pidfile "${name}")" 2>/dev/null || true
   disown
+}
+
+# qml_window_visible <title> -- 0 if yabai reports a window with this exact
+# title, 1 otherwise (or when yabai is missing: callers must treat that as
+# "unknown", not "hidden").
+qml_window_visible() {
+  local title="$1"
+  command -v yabai >/dev/null 2>&1 || return 2
+  yabai -m query --windows 2>/dev/null | python3 -c '
+import json, sys
+title = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(2)
+for w in data:
+    if isinstance(w, dict) and w.get("title") == title:
+        sys.exit(0)
+sys.exit(1)
+' "${title}" 2>/dev/null
+}
+
+# qml_pidfile_age_s <pidfile> -- seconds since the pidfile was written.
+qml_pidfile_age_s() {
+  local mtime
+  mtime="$(stat -f %m "$1" 2>/dev/null || echo 0)"
+  echo $(( $(date +%s) - mtime ))
 }
 
 # route_qml <verb> <id> <this-plugin-dir> <name> <entry> -- the whole
@@ -649,9 +681,26 @@ route_qml() {
       ;;
     toggle)
       if [ "${running}" -eq 1 ]; then
-        qml_kill "${pid}"
-        rm -f "${pidfile}" 2>/dev/null || true
-        echo "closed ${id}"
+        # Alive, but is there a window? Three cases: (a) still starting
+        # up (pidfile is seconds old, no window yet) -- a second keypress
+        # must not kill the host mid-launch; (b) alive with no window
+        # (a plugin hid itself and the host did not quit) -- close and
+        # relaunch in one go so a single press always yields a window;
+        # (c) visible -- an ordinary close.
+        local vis=0
+        qml_window_visible "Gallery: ${name}" || vis=$?
+        if [ "${vis}" -eq 1 ] && [ "$(qml_pidfile_age_s "${pidfile}")" -lt 5 ]; then
+          echo "opening ${id}"
+        elif [ "${vis}" -eq 1 ]; then
+          qml_kill "${pid}"
+          rm -f "${pidfile}" 2>/dev/null || true
+          qml_launch "${this_plugin_dir}" "${name}" "${entry}" || return 1
+          echo "opened ${id}"
+        else
+          qml_kill "${pid}"
+          rm -f "${pidfile}" 2>/dev/null || true
+          echo "closed ${id}"
+        fi
       else
         qml_launch "${this_plugin_dir}" "${name}" "${entry}" || return 1
         echo "opened ${id}"

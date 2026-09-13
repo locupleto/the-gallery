@@ -92,7 +92,13 @@ local function runCommand(ctx, id, record, cfg)
     args = {}
   end
   if type(command) ~= "string" or command == "" then
-    ctx.log("WARN", "widget " .. id .. " has no command configured")
+    -- Once per widget, not once per poll: a QML bar-widget (Radio Atlas)
+    -- legitimately has no command for this feed and would otherwise log
+    -- the same line every ten seconds for as long as Hammerspoon runs.
+    if not record.warnedNoCommand then
+      record.warnedNoCommand = true
+      ctx.log("WARN", "widget " .. id .. " has no command configured")
+    end
     return
   end
 

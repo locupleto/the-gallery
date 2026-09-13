@@ -267,6 +267,44 @@ def install_escape_to_close(window, app):
     window.keyReleaseEvent = key_release
 
 
+def visible_plugin_windows():
+    return [
+        w for w in QGuiApplication.allWindows()
+        if w.isVisible() and w.parent() is None and isinstance(w, QQuickWindow)
+    ]
+
+
+def install_quit_on_hide(window, app):
+    """A plugin that hides its own window (Radio Atlas's Escape does
+    `panel.visible = false` and then calls a shell.hide() that does not
+    exist here) would otherwise leave this process alive with no window:
+    the pidfile still says "open", so the next `gallery toggle` spends
+    itself killing an invisible host instead of showing one. Treat "last
+    window hidden" exactly like "last window closed": quit, so the pidfile
+    goes away and the next toggle launches afresh. Debounced slightly so a
+    plugin that hides and re-shows within a frame is not caught out."""
+
+    def check_quit():
+        if not visible_plugin_windows():
+            app.quit()
+
+    def on_visible_changed(visible):
+        if not visible:
+            QTimer.singleShot(150, check_quit)
+
+    window.visibleChanged.connect(on_visible_changed)
+
+
+def bring_to_front(window):
+    """The host is launched from skhd/nohup, i.e. by a process that is not
+    the active application, so macOS does not hand it key focus on its
+    own. Without focus the plugin's key handlers (Escape included) never
+    see a keypress. Ask for it explicitly; the yabai float rule keeps the
+    window on top regardless."""
+    window.raise_()
+    window.requestActivate()
+
+
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     plugin_dir = Path(args.plugin_dir).resolve()
@@ -278,6 +316,14 @@ def main(argv=None):
 
     ensure_runtime_env()
     qInstallMessageHandler(qml_message_handler)
+
+    # Claim the pidfile before Qt/QML start up (a second or more): until it
+    # exists bin/gallery believes the plugin is not running, so two quick
+    # toggles would launch two hosts. bin/gallery also writes it at launch
+    # time; this is the same pid, since gallery-qml execs into us.
+    title_slug = slugify(args.title)
+    pidfile = pidfile_path(title_slug)
+    pidfile.write_text(str(os.getpid()))
 
     # Its own process group, so quitting can take any helper processes the
     # plugin spawned (Process/execDetached) down with it instead of leaving
@@ -323,6 +369,10 @@ def main(argv=None):
     engine.load(QUrl.fromLocalFile(str(entry_path)))
     if not engine.rootObjects():
         print(f"gallery-qml: failed to load {entry_path}", file=sys.stderr)
+        try:
+            pidfile.unlink()
+        except FileNotFoundError:
+            pass
         sys.exit(1)
 
     root = engine.rootObjects()[0]
@@ -348,10 +398,6 @@ def main(argv=None):
         # Parent it into the loaded plugin's own object tree so it is driven
         # by the same event source as the plugin's working QML timers.
         poll_timer_obj.setParent(root)
-
-    title_slug = slugify(args.title)
-    pidfile = pidfile_path(title_slug)
-    pidfile.write_text(str(os.getpid()))
 
     def cleanup():
         try:
@@ -387,11 +433,7 @@ def main(argv=None):
     def plugin_windows():
         """Visible top-level windows the plugin created itself (Radio Atlas
         opens its own FloatingWindow from open()); never our wrapper."""
-        return [
-            w for w in QGuiApplication.allWindows()
-            if w is not window and w.isVisible() and w.parent() is None
-               and isinstance(w, QQuickWindow)
-        ]
+        return [w for w in visible_plugin_windows() if w is not window]
 
     def adopt(plugin_window):
         # The plugin's own window becomes THE Gallery window: same title
@@ -402,6 +444,8 @@ def main(argv=None):
         install_escape_to_close(plugin_window, app)
         if window.isVisible():
             window.hide()
+        install_quit_on_hide(plugin_window, app)
+        bring_to_front(plugin_window)
 
     adopted = {"done": False}
 
@@ -423,6 +467,7 @@ def main(argv=None):
             center_on_cursor_screen(window)
             window.show()
             install_escape_to_close(window, app)
+            bring_to_front(window)
         watch = QTimer(); watch.setInterval(100)
         ticks = {"n": 0}
         def _tick():
@@ -436,6 +481,8 @@ def main(argv=None):
         center_on_cursor_screen(window)
         window.show()
         install_escape_to_close(window, app)
+        install_quit_on_hide(window, app)
+        bring_to_front(window)
     # QGuiApplication quits on its own when the last window closes; wiring
     # QQuickWindow.closing to a Python slot instead raises a TypeError in
     # PySide6 (QQuickCloseEvent* is not convertible) on every close.
