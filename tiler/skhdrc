@@ -114,7 +114,7 @@ shift + lalt - r : yabai --restart-service; skhd --reload
 # Safari web apps live in ~/Applications; open -a activates the one window they have.
 # Omarchy: a ChatGPT, shift+a Grok, c Calendar, e Email, y YouTube, x X, g messaging
 # (WhatsApp there; Telegram here; the AI keys are Claude (desktop app in
-# /Applications) and ChatGPT here, no Grok). Split toggle moved to shift+e to
+# /Applications) and ChatGPT here; Grok sits on shift+g). Split toggle moved to shift+e to
 # free super+e.
 ## Claude desktop app
 lalt - a : open -a "/Applications/Claude.app"
@@ -130,6 +130,8 @@ lalt - y : open -a "$HOME/Applications/YouTube.app"
 lalt - x : open -a "$HOME/Applications/X.app"
 ## Telegram (Omarchy's messaging slot)
 lalt - g : open -a Telegram
+## Grok web app
+shift + lalt - g : open -a "$HOME/Applications/Grok.app"
 
 # --- learn (cheat sheets, Omarchy's "Learn" menu) --------------------------------
 # tiler/learn opens a floating iTerm window (yabairc floats titles starting with
