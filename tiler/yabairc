@@ -35,8 +35,13 @@ yabai -m config mouse_follows_focus     off
 # --- windows that must never be tiled ----------------------------------------
 yabai -m rule --add app="^(System Settings|System Preferences|Calculator|Activity Monitor|Archive Utility|Installer|Software Update|Logi Options\+?|iStat Menus|CleanMyMac X|Digital Colou?r Meter|Font Book|Migration Assistant)$" manage=off
 yabai -m rule --add app="^Finder$" title="(Copy|Info|Connect|Move|Delete|Get Info)" manage=off
-# Sheets, popovers, floating panels and anything that is not a standard window.
-yabai -m rule --add subrole!="^AXStandardWindow$" manage=off
+# Sheets, popovers, dialogs and floating panels. A POSITIVE list on purpose: the
+# old form (subrole!="^AXStandardWindow$") also matched a window whose subrole
+# could not be read yet at creation (e.g. created while the screen was locked)
+# and floated it for good -- Outlook's main window ended up under a full-width
+# Safari tile that way. Rules are evaluated once, at creation, so an unknown
+# subrole must be left to yabai's default handling, not floated.
+yabai -m rule --add label=tiler-float-nonstandard subrole="^AX(Dialog|SystemDialog|Sheet|Popover|FloatingWindow|Unknown)$" manage=off
 # The Learn cheat-sheet window (tiler/learn): a floating, centred iTerm window.
 yabai -m rule --add app="^iTerm2$" title="^Learn: " manage=off grid=6:6:1:1:4:4
 yabai -m rule --apply
