@@ -193,15 +193,44 @@ NERD_FONT_CANDIDATES = (
     "FiraCode Nerd Font",
 )
 
+# Same state dir bin/gallery's FONT_STATE_FILE and pidfile_path above both
+# point at -- `gallery font set|native` writes {"family": ..., "size": ...,
+# "weight": ...} here; missing/garbage means no preference (see
+# read_font_pref_family below, the same tolerance as
+# tools/render-theme.py's read_font_prefs).
+FONT_STATE_PATH = Path(os.path.expanduser("~/.config/gallery/state/font.json"))
+
+
+def read_font_pref_family():
+    """Best-effort read of the Gallery-wide font family preference, or None
+    if the file is missing, unreadable, or carries no usable family."""
+    try:
+        data = json.loads(FONT_STATE_PATH.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    family = data.get("family")
+    if isinstance(family, str) and family.strip():
+        return family.strip()
+    return None
+
 
 def install_font_substitutions():
     """Omarchy's Style.fontFamily is the fontconfig alias "monospace", which
     on Omarchy resolves to a Nerd Font; its plugins draw icons from the
     private-use glyphs of that font. On macOS Qt maps "monospace" to Menlo,
     which has no such glyphs, so icons render as boxes. Route the alias to
-    an installed Nerd Font instead ($GALLERY_FONT wins)."""
+    an installed Nerd Font instead: $GALLERY_FONT wins outright (an explicit
+    per-invocation override); otherwise the `gallery font set` preference
+    (if any) goes first in the fallback list, ahead of the hardcoded
+    NERD_FONT_CANDIDATES."""
     families = set(QFontDatabase.families())
-    wanted = [os.environ.get("GALLERY_FONT", "")] + list(NERD_FONT_CANDIDATES)
+    candidates = list(NERD_FONT_CANDIDATES)
+    font_pref = read_font_pref_family()
+    if font_pref:
+        candidates.insert(0, font_pref)
+    wanted = [os.environ.get("GALLERY_FONT", "")] + candidates
     for family in wanted:
         if family and family in families:
             for alias in ("monospace", "Monospace", "mono"):

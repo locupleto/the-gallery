@@ -64,6 +64,7 @@ gallery clone <id> <new-id> |
 gallery theme list | current | set <name> | render | next |
 gallery bg list | current | set <file> | next | prev | apply |
 gallery console status | theme | native | toggle |
+gallery font status | set <family> [size] [weight] | native | list |
 gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
 gallery reload | log | doctor | install
@@ -107,6 +108,22 @@ default profile shows a star in the list; `gallery console status` prints
 `default profile: Console (ok)` once it has taken. Writing the
 `Default Bookmark Guid` preference from the shell is not honoured while
 iTerm runs, so the CLI never tries.
+
+`font ...` records a single Gallery-wide monospace font preference in
+`~/.config/gallery/state/font.json` (`{"family", "size", "weight"}`;
+missing means "native" -- no font opinion, everything inherits its host's
+own default font exactly as before this feature existed). `font set
+<family> [size] [weight]` validates the family against `fc-list` (size
+defaults 13, weight Regular), records it, and re-renders; `font native`
+clears it. The renderer resolves the family/weight to the PostScript name
+iTerm2's "Normal Font" profile key wants (via `fc-list`) and adds it to
+both the floating Gallery profile and the Console profile (theme mode
+only), alongside `"Use Non-ASCII Font": false` so Nerd Font glyphs come
+from the same face; if resolution fails it warns to stderr and renders
+without a font opinion rather than crashing. `font list` shows installed
+Nerd Fonts. The QML plugin host (`qml/host.py`) reads the same file and,
+when a family is set and installed, puts it first in the "monospace" alias
+fallback list it already resolves Omarchy's icon font from.
 
 `widgets ...` does the same for the Übersicht crystal widgets
 (locupleto/crystal-widgets-v2), and is just as optional: `native` (the

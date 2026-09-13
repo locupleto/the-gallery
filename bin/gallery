@@ -36,6 +36,10 @@
 #   gallery console theme
 #   gallery console native
 #   gallery console toggle
+#   gallery font status
+#   gallery font set <family> [size] [weight]
+#   gallery font native
+#   gallery font list
 #   gallery widgets status
 #   gallery widgets available
 #   gallery widgets theme
@@ -65,6 +69,7 @@ THEME_DIR="${CONFIG_DIR}/themes"
 THEME_HOOKS_DIR="${GALLERY_THEME_HOOKS_DIR:-${CONFIG_DIR}/hooks/theme-set.d}"
 BACKGROUNDS_STATE_FILE="${CONFIG_DIR}/state/backgrounds.json"
 CONSOLE_STATE_FILE="${CONFIG_DIR}/state/console.json"
+FONT_STATE_FILE="${CONFIG_DIR}/state/font.json"
 WIDGETS_STATE_FILE="${CONFIG_DIR}/state/widgets.json"
 BORDERS_STATE_FILE="${CONFIG_DIR}/state/borders.json"
 # Installed by install.sh from this repo's patches/ directory -- see that
@@ -130,6 +135,11 @@ commands:
   console theme                   make the iTerm console follow the active theme
   console native                  restore the iTerm console to its own Default colours
   console toggle                  flip between theme and native
+  font status                     show the Gallery-wide monospace font preference
+  font set <family> [size] [weight]
+                                   set the font preference (size default 13, weight default Regular)
+  font native                     clear the preference -- everything inherits its own default font
+  font list                       list installed Nerd Fonts
   widgets status                  show whether the Übersicht crystal widgets follow the theme
   widgets available               exit 0 if Übersicht runs with the crystal widgets, else 1
   widgets theme                   make the crystal widgets follow the active theme
@@ -1816,6 +1826,189 @@ cmd_console() {
   esac
 }
 
+# --- Gallery-wide monospace font preference ----------------------------------
+#
+# One monospace font choice for every Gallery-rendered surface that takes a
+# font opinion: the floating Gallery iTerm profile and the Console profile
+# (theme mode only -- see render_iterm_console_profile in
+# tools/render-theme.py), and the QML plugin host's "monospace" alias (see
+# qml/host.py's install_font_substitutions). Recorded in FONT_STATE_FILE as
+# {"family": <str>, "size": <int>, "weight": <str>}; missing or invalid
+# means "native" -- no font opinion, everything inherits its host's own
+# default font exactly as before this feature existed. Unlike
+# CONSOLE_STATE_FILE/WIDGETS_STATE_FILE, native is the *absence* of the
+# file, not a {"mode": "native"} sentinel -- there is no natural default
+# family/size/weight to fall back to when "cleared". Switching re-renders
+# (which rewrites the iTerm profiles) the same two-step console_set_mode
+# already does.
+
+# font_read_prefs -- prints three lines (family, size, weight) if a valid
+# preference is recorded, otherwise prints nothing at all (native). Same
+# missing-file-means-native tolerance as console_read_mode.
+font_read_prefs() {
+  if [ ! -f "${FONT_STATE_FILE}" ]; then
+    return 0
+  fi
+  python3 -c '
+import json, sys
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)
+if not isinstance(data, dict):
+    sys.exit(0)
+family = data.get("family")
+size = data.get("size")
+weight = data.get("weight")
+if (
+    isinstance(family, str) and family.strip()
+    and isinstance(size, int) and not isinstance(size, bool)
+    and isinstance(weight, str) and weight.strip()
+):
+    print(family)
+    print(size)
+    print(weight)
+' "${FONT_STATE_FILE}" 2>/dev/null || true
+}
+
+# font_write_prefs <family> <size> <weight> -- atomically records the
+# preference in FONT_STATE_FILE (temp file + os.replace, same pattern as
+# console_write_mode).
+font_write_prefs() {
+  local family="$1" size="$2" weight="$3"
+  mkdir -p "$(dirname "${FONT_STATE_FILE}")"
+  python3 -c '
+import json, os, sys, tempfile
+
+path = sys.argv[1]
+family = sys.argv[2]
+size = int(sys.argv[3])
+weight = sys.argv[4]
+
+d = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".font.", suffix=".json", dir=d)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"family": family, "size": size, "weight": weight}, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+except Exception:
+    os.unlink(tmp)
+    raise
+' "${FONT_STATE_FILE}" "${family}" "${size}" "${weight}"
+}
+
+# font_clear_prefs -- removes FONT_STATE_FILE if present.
+font_clear_prefs() {
+  rm -f "${FONT_STATE_FILE}"
+}
+
+# font_status_line -- prints "native (inheriting iTerm Default font)" or
+# "<family> <size> <weight>", with no leading "font: " label (callers add
+# that so the same helper can be reused after a set/native render).
+font_status_line() {
+  local prefs family size weight
+  prefs="$(font_read_prefs)"
+  if [ -z "${prefs}" ]; then
+    printf 'native (inheriting iTerm Default font)'
+    return 0
+  fi
+  family="$(printf '%s\n' "${prefs}" | sed -n 1p)"
+  size="$(printf '%s\n' "${prefs}" | sed -n 2p)"
+  weight="$(printf '%s\n' "${prefs}" | sed -n 3p)"
+  printf '%s %s %s' "${family}" "${size}" "${weight}"
+}
+
+cmd_font_status() {
+  echo "font: $(font_status_line)"
+}
+
+# font_apply_and_render -- re-renders the active theme (which rewrites the
+# iTerm profiles for the new font preference) unless there is no current
+# theme to render from, in which case the preference is still recorded but
+# the render is skipped and reported as such -- same contract as
+# console_set_mode.
+font_apply_and_render() {
+  local current
+  current="$(theme_current_name)"
+  if [ -z "${current}" ]; then
+    echo "font: $(font_status_line) -- render skipped (no current theme set)"
+    return 0
+  fi
+
+  if ! run_theme_render; then
+    echo "gallery: font preference recorded but render failed" >&2
+    return 1
+  fi
+  echo "font: $(font_status_line)"
+}
+
+cmd_font_set() {
+  local family="${1:-}" size="${2:-13}" weight="${3:-Regular}"
+  if [ -z "${family}" ]; then
+    echo "usage: gallery font set <family> [size] [weight]" >&2
+    exit 1
+  fi
+  case "${size}" in
+    ''|*[!0-9]*)
+      echo "gallery: font size must be a positive integer" >&2
+      exit 1
+      ;;
+  esac
+
+  if command -v fc-list >/dev/null 2>&1; then
+    if [ -z "$(fc-list :family="${family}" 2>/dev/null)" ]; then
+      echo "gallery: font family not installed: ${family} (see: gallery font list)" >&2
+      exit 1
+    fi
+  else
+    echo "gallery: fc-list not found -- skipping family validation" >&2
+  fi
+
+  font_write_prefs "${family}" "${size}" "${weight}"
+  font_apply_and_render
+}
+
+cmd_font_native() {
+  font_clear_prefs
+  font_apply_and_render
+}
+
+# cmd_font_list -- installed Nerd Fonts, one family per line, deduplicated.
+cmd_font_list() {
+  if ! command -v fc-list >/dev/null 2>&1; then
+    echo "gallery: fc-list not found (install fontconfig, e.g. 'brew install fontconfig')" >&2
+    exit 1
+  fi
+  fc-list : family | tr ',' '\n' | grep -i 'nerd font' | sort -u
+}
+
+cmd_font() {
+  local sub="${1:-status}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    status)
+      cmd_font_status
+      ;;
+    set)
+      cmd_font_set "$@"
+      ;;
+    native)
+      cmd_font_native
+      ;;
+    list)
+      cmd_font_list
+      ;;
+    *)
+      echo "gallery: unknown font subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 # --- Übersicht crystal widgets mode ------------------------------------------
 #
 # The crystal widgets (locupleto/crystal-widgets-v2, an Übersicht desktop
@@ -2752,6 +2945,9 @@ case "${command}" in
     ;;
   console)
     cmd_console "$@"
+    ;;
+  font)
+    cmd_font "$@"
     ;;
   widgets)
     cmd_widgets "$@"

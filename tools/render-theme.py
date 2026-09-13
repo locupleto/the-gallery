@@ -65,6 +65,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -78,6 +79,7 @@ ITERM_DYNAMIC_PROFILES_DIR = (
 ITERM_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-theme.json"
 CONSOLE_STATE_PATH = STATE_DIR / "console.json"
 WIDGETS_STATE_PATH = STATE_DIR / "widgets.json"
+FONT_STATE_PATH = STATE_DIR / "font.json"
 CRYSTAL_CSS_PATH = STATE_DIR / "crystal.css"
 BORDERS_STATE_PATH = STATE_DIR / "borders.json"
 ITERM_CONSOLE_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-console.json"
@@ -338,6 +340,75 @@ def read_widgets_mode() -> str:
     return "native"
 
 
+def read_font_prefs() -> dict | None:
+    """Read the Gallery-wide monospace font preference that `gallery font
+    set|native` records in FONT_STATE_PATH: {"family": str, "size": int,
+    "weight": str}. Same missing-file-means-nothing-recorded tolerance as
+    read_console_mode/read_widgets_mode, except there is no sentinel value
+    for "native" here (unlike mode = "theme"|"native") -- native is simply
+    the absence of a usable file, so this returns None instead of a string,
+    and every caller below skips adding font keys entirely when it does."""
+    try:
+        data = json.loads(FONT_STATE_PATH.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    family = data.get("family")
+    size = data.get("size")
+    weight = data.get("weight")
+    if (
+        isinstance(family, str)
+        and family.strip()
+        and isinstance(size, int)
+        and not isinstance(size, bool)
+        and isinstance(weight, str)
+        and weight.strip()
+    ):
+        return {"family": family.strip(), "size": size, "weight": weight.strip()}
+    return None
+
+
+def resolve_iterm_font(family: str, weight: str) -> str | None:
+    """Resolve a (family, weight) pair to the PostScript name fc-list knows
+    it by, e.g. ("SauceCodePro Nerd Font Mono", "SemiBold") ->
+    "SauceCodeProNFM-SemiBold". iTerm2's "Normal Font" profile key wants
+    "<PostScriptName> <size>", not the human family/style pair -- there is
+    no other reliable way to get from one to the other than asking
+    fontconfig, which is why this shells out to fc-list rather than trying
+    to derive it. Returns None (never raises) if fc-list is missing, the
+    face is not installed, or its output cannot be parsed -- callers must
+    treat that as "skip the font keys, warn, keep rendering"."""
+    pattern = f":family={family}:style={weight}"
+    try:
+        result = subprocess.run(
+            ["fc-list", pattern, "-f", "%{postscriptname}\n"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        print(f"render-theme: fc-list not available, skipping font: {exc}", file=sys.stderr)
+        return None
+    if result.returncode != 0:
+        print(
+            f"render-theme: fc-list failed for {family!r} {weight!r}: "
+            f"{result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return None
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line:
+            return line
+    print(
+        f"render-theme: no installed font matches family={family!r} style={weight!r}, "
+        "skipping font keys (see: gallery font list)",
+        file=sys.stderr,
+    )
+    return None
+
+
 def read_borders_prefs() -> dict:
     """Read the JankyBorders picker prefs (`gallery borders width|bright`)
     out of BORDERS_STATE_PATH: {"width": int, "bright": bool}. Same
@@ -458,7 +529,7 @@ def css_var_name(key: str) -> str:
     return "--gallery-" + key.replace("_", "-")
 
 
-def render_css(tokens: dict) -> str:
+def render_css(tokens: dict, font_prefs: dict | None) -> str:
     lines = [":root {"]
     for key, value in tokens.items():
         lines.append(f"  {css_var_name(key)}:{value};")
@@ -467,6 +538,13 @@ def render_css(tokens: dict) -> str:
     lines.append(f"  {css_var_name('success')}:{tokens['color2']};")
     lines.append(f"  {css_var_name('warning')}:{tokens['color3']};")
     lines.append(f"  {css_var_name('info')}:{tokens['color4']};")
+    # `gallery font set` -- absent entirely in native mode (see
+    # read_font_prefs), same "no keys at all means inherit" contract as the
+    # iTerm profiles above.
+    if font_prefs:
+        family = font_prefs["family"].replace('"', '\\"')
+        lines.append(f'  {css_var_name("font-family")}:"{family}";')
+        lines.append(f'  {css_var_name("font-weight")}:{font_prefs["weight"]};')
     lines.append("}")
     return "\n".join(lines) + "\n"
 
@@ -562,7 +640,7 @@ def iterm_color_dict(hex_value: str) -> dict:
     }
 
 
-def render_iterm_profile(tokens: dict, name: str) -> str:
+def render_iterm_profile(tokens: dict, name: str, font_normal: str | None) -> str:
     profile = {
         "Name": "Gallery",
         "Guid": "gallery-theme",
@@ -590,6 +668,12 @@ def render_iterm_profile(tokens: dict, name: str) -> str:
     }
     for i in range(16):
         profile[f"Ansi {i} Color"] = iterm_color_dict(tokens[f"color{i}"])
+    if font_normal:
+        # "Use Non-ASCII Font": False keeps Nerd Font private-use glyphs
+        # (icons, powerline separators) coming from this same font instead
+        # of iTerm's separate non-ASCII font slot -- see `gallery font`.
+        profile["Normal Font"] = font_normal
+        profile["Use Non-ASCII Font"] = False
 
     doc = {"Profiles": [profile]}
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
@@ -601,7 +685,9 @@ CONSOLE_TRANSPARENCY = 0.12
 CONSOLE_BLUR_RADIUS = 9.0
 
 
-def render_iterm_console_profile(tokens: dict, name: str, mode: str) -> str:
+def render_iterm_console_profile(
+    tokens: dict, name: str, mode: str, font_normal: str | None
+) -> str:
     """Render the "Console" dynamic profile: the user's everyday iTerm2
     terminal, NOT the floating Gallery TUI host. The mechanism (proven
     manually before this was automated) is iTerm2's own dynamic-profile
@@ -624,6 +710,11 @@ def render_iterm_console_profile(tokens: dict, name: str, mode: str) -> str:
     show). No window-behaviour keys here either (Close Sessions On End,
     Window Type, etc.) -- those make sense only for the floating, ephemeral
     Gallery TUI host, never for an always-open everyday terminal.
+
+    font_normal (the resolved "<PostScriptName> <size>" from `gallery
+    font set`, or None for "native") is only ever applied in theme mode --
+    in native mode this profile carries no keys beyond Name/Guid/parent,
+    so it stays byte-for-byte the inherited Default, font included.
     """
     profile = {
         "Name": "Console",
@@ -647,6 +738,9 @@ def render_iterm_console_profile(tokens: dict, name: str, mode: str) -> str:
         profile["Selected Text Color"] = iterm_color_dict(tokens["selection_foreground"])
         for i in range(16):
             profile[f"Ansi {i} Color"] = iterm_color_dict(tokens[f"color{i}"])
+        if font_normal:
+            profile["Normal Font"] = font_normal
+            profile["Use Non-ASCII Font"] = False
 
     doc = {"Profiles": [profile]}
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
@@ -786,12 +880,27 @@ def main(argv: list[str]) -> int:
     console_mode = read_console_mode()
     widgets_mode = read_widgets_mode()
 
-    write_file(STATE_DIR / "theme.css", render_css(tokens))
+    # `gallery font set|native` -- font_prefs is None in native mode (or if
+    # the state file is missing/garbage); font_normal is additionally None
+    # whenever fc-list can't resolve the requested family/weight to a
+    # PostScript name (warns to stderr, never crashes the render -- see
+    # resolve_iterm_font).
+    font_prefs = read_font_prefs()
+    font_normal = None
+    if font_prefs:
+        ps_name = resolve_iterm_font(font_prefs["family"], font_prefs["weight"])
+        if ps_name:
+            font_normal = f"{ps_name} {font_prefs['size']}"
+
+    write_file(STATE_DIR / "theme.css", render_css(tokens, font_prefs))
     write_file(STATE_DIR / "theme.json", render_json(tokens, name, light, border_tokens))
     write_file(STATE_DIR / "theme.sh", render_shell(tokens, name, border_tokens, widgets_mode))
     write_file(CRYSTAL_CSS_PATH, render_crystal_css(tokens, name, widgets_mode))
-    write_file(ITERM_PROFILE_PATH, render_iterm_profile(tokens, name))
-    write_file(ITERM_CONSOLE_PROFILE_PATH, render_iterm_console_profile(tokens, name, console_mode))
+    write_file(ITERM_PROFILE_PATH, render_iterm_profile(tokens, name, font_normal))
+    write_file(
+        ITERM_CONSOLE_PROFILE_PATH,
+        render_iterm_console_profile(tokens, name, console_mode, font_normal),
+    )
     write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
     update_btop_conf("gallery")
 
@@ -808,6 +917,13 @@ def main(argv: list[str]) -> int:
     print(f"  {ITERM_CONSOLE_PROFILE_PATH} (console: {console_mode})")
     print(f"  {BTOP_THEME_PATH}")
     print(f"  {BTOP_CONF_PATH} (color_theme = gallery)")
+    if font_normal:
+        font_summary = f"font: {font_prefs['family']} {font_prefs['size']} {font_prefs['weight']}"
+    elif font_prefs:
+        font_summary = "font: native (requested font could not be resolved -- see warning above)"
+    else:
+        font_summary = "font: native"
+    print(f"  {font_summary}")
     return 0
 
 
