@@ -112,7 +112,10 @@ by the script).
   (`split_ratio 0.5`; the 7:5 house grid is applied only when asked for a
   "column" by voice), new windows on the
   display under the pointer, and `manage=off` rules for System Settings,
-  utilities, Finder dialogs and any non-standard window.
+  utilities, Finder dialogs and any non-standard window. Two signals
+  (`window_destroyed`, `application_terminated`) refocus the window under the
+  pointer, else the most recent one, whenever a close leaves no focused
+  window — macOS otherwise parks focus on a windowless app after Cmd+W.
 - `skhdrc` → `~/.config/skhd/skhdrc`: the table above.
 
 Edit here, re-run `tiler/install.sh` (copies + reloads). The files are copied,

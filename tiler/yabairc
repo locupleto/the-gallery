@@ -41,6 +41,21 @@ yabai -m rule --add subrole!="^AXStandardWindow$" manage=off
 yabai -m rule --add app="^iTerm2$" title="^Learn: " manage=off grid=6:6:1:1:4:4
 yabai -m rule --apply
 
+# --- keep something focused when a window goes away -------------------------
+# macOS leaves keyboard focus with the frontmost APPLICATION, so an app that
+# outlives its last window (Claude, Safari, Finder, the web apps: Cmd+W closes
+# the window, the app stays) leaves no focused window at all -- super+h/j/k/l
+# have no starting point and keystrokes go nowhere until you click. Hyprland
+# hands focus to the next window itself; here two signals do it: if no window
+# has focus after a destroy/quit, focus the one under the pointer, else the
+# most recently focused one. Labelled so a re-run replaces rather than stacks.
+yabai -m signal --remove tiler-refocus-destroyed >/dev/null 2>&1
+yabai -m signal --remove tiler-refocus-terminated >/dev/null 2>&1
+yabai -m signal --add label=tiler-refocus-destroyed event=window_destroyed \
+    action='yabai -m query --windows --window >/dev/null 2>&1 || yabai -m window --focus mouse >/dev/null 2>&1 || yabai -m window --focus recent >/dev/null 2>&1'
+yabai -m signal --add label=tiler-refocus-terminated event=application_terminated \
+    action='yabai -m query --windows --window >/dev/null 2>&1 || yabai -m window --focus mouse >/dev/null 2>&1 || yabai -m window --focus recent >/dev/null 2>&1'
+
 # --- active-window border (JankyBorders) -------------------------------------
 # A crisp accent outline around the FOCUSED window only (unfocused windows get
 # no border), so the active window is obvious across multiple displays instead
