@@ -595,6 +595,12 @@ def render_iterm_profile(tokens: dict, name: str) -> str:
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
 
 
+# iTerm2 "Transparency" is 0.0 (solid) .. 1.0 (invisible); "Blur Radius" is
+# the frosted-glass radius iTerm applies behind a transparent window.
+CONSOLE_TRANSPARENCY = 0.12
+CONSOLE_BLUR_RADIUS = 9.0
+
+
 def render_iterm_console_profile(tokens: dict, name: str, mode: str) -> str:
     """Render the "Console" dynamic profile: the user's everyday iTerm2
     terminal, NOT the floating Gallery TUI host. The mechanism (proven
@@ -626,6 +632,12 @@ def render_iterm_console_profile(tokens: dict, name: str, mode: str) -> str:
     }
     if mode == "theme":
         profile["Use Separate Colors for Light and Dark Mode"] = False
+        # Window glass, stated here rather than inherited: the user's Default
+        # profile carries ~20% transparency + blur, which read too light over
+        # a bright wallpaper. Keep the blur, darken the tint (less see-through).
+        profile["Transparency"] = CONSOLE_TRANSPARENCY
+        profile["Blur"] = True
+        profile["Blur Radius"] = CONSOLE_BLUR_RADIUS
         profile["Background Color"] = iterm_color_dict(tokens["background"])
         profile["Foreground Color"] = iterm_color_dict(tokens["foreground"])
         profile["Bold Color"] = iterm_color_dict(tokens["foreground"])
