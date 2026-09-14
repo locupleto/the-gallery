@@ -48,6 +48,9 @@
 #   gallery borders status
 #   gallery borders width <1-12>
 #   gallery borders bright on|off|toggle
+#   gallery home show
+#   gallery home save [--roam A,B] [--dry-run]
+#   gallery home apply
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -72,6 +75,15 @@ CONSOLE_STATE_FILE="${CONFIG_DIR}/state/console.json"
 FONT_STATE_FILE="${CONFIG_DIR}/state/font.json"
 WIDGETS_STATE_FILE="${CONFIG_DIR}/state/widgets.json"
 BORDERS_STATE_FILE="${CONFIG_DIR}/state/borders.json"
+# ~/.config/yabai/rules.local lives OUTSIDE ~/.config/gallery: it is yabai's
+# own machine-local file, sourced by tiler/yabairc (see that file's
+# "machine-local rules" block and tiler/rules.local.example), not something
+# the Gallery installs or owns. `gallery home save` only ever writes here.
+RULES_LOCAL_FILE="${HOME}/.config/yabai/rules.local"
+RULES_LOCAL_PREV_FILE="${RULES_LOCAL_FILE}.prev"
+# Apps that legitimately move around (terminals spawned wherever super+return
+# is pressed) never get a home-* rule. `home save --roam` adds to this list.
+HOME_DEFAULT_ROAM="iTerm2"
 # Installed by install.sh from this repo's patches/ directory -- see that
 # directory's own README.md for the mechanism (macOS replacements for a
 # plugin's own files, applied on top of the installed plugin dir).
@@ -148,6 +160,10 @@ commands:
   borders status                  show the focused-window border width/bright prefs
   borders width <1-12>            set the focused-window border width (default 5)
   borders bright on|off|toggle    mix the active border colour toward bright_foreground
+  home show                       print the window -> Space map and live home-* rules
+  home save [--roam A,B] [--dry-run]
+                                   snapshot the current layout into ~/.config/yabai/rules.local
+  home apply                      re-source ~/.config/yabai/rules.local and apply it live
   reload                          request a Hammerspoon config reload
   log                             tail the Gallery log
   doctor                          check the local Gallery install
@@ -2394,6 +2410,388 @@ cmd_borders() {
   esac
 }
 
+# --- home (yabai window -> Space snapshot) -----------------------------------
+#
+# yabai has no scripting addition and does not remember which Space a window
+# was on across a reboot (window ids are reassigned at login); the fix is a
+# labelled `yabai -m rule --add label=home-<slug> app=... space=<N>` rule,
+# evaluated at window creation -- see tiler/yabairc's "machine-local rules"
+# block and tiler/rules.local.example for the mechanism this verb automates.
+# `home save` snapshots the CURRENT layout into that file and makes it live;
+# `home show` is a read-only report of the same two things (live windows,
+# live home-* rules); `home apply` re-sources the file without a full yabai
+# restart (never restart yabai as a side effect here: a restart rebuilds
+# every BSP tree from scratch -- see the tiler/install.sh header).
+#
+# Title rules have a catch: yabai evaluates rules when a window is CREATED
+# and never again -- a title change only refreshes the stored title and
+# fires the window_title_changed signal (src/event_loop.c), and a Safari
+# window restored at login is created before its page title arrives. So the
+# generated file also installs one window_title_changed signal, filtered to
+# the title-pinned apps, that re-applies exactly those rules.
+#
+# JSON is parsed with python3 throughout, matching every other stateful verb
+# in this script (bg/console/font/widgets/borders); jq is not used here.
+
+# home_windows_json -- prints the raw `yabai -m query --windows` JSON. Tests
+# set GALLERY_HOME_WINDOWS_JSON to a fixture file so `home save --dry-run`
+# can run offline against a canned window list instead of live yabai.
+home_windows_json() {
+  if [ -n "${GALLERY_HOME_WINDOWS_JSON:-}" ]; then
+    cat "${GALLERY_HOME_WINDOWS_JSON}"
+    return 0
+  fi
+  command -v yabai >/dev/null 2>&1 || { echo "gallery: yabai not found on PATH" >&2; return 1; }
+  yabai -m query --windows
+}
+
+# PY_HOME_SHOW_WINDOWS -- filters to "managed standard windows" (the same
+# subrole/floating/app checks yabai itself uses to decide whether a window
+# is tiled at all) and prints "space N: App — title" lines, sorted by Space
+# then App then title. Deliberately does NOT apply `home save`'s roam/
+# Gallery:/Learn: exclusions: `home show` reports reality, not what would
+# end up pinned.
+read -r -d '' PY_HOME_SHOW_WINDOWS <<'PYEOF' || true
+import json, sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception as e:
+    print("gallery: could not parse yabai window JSON: %s" % e, file=sys.stderr)
+    sys.exit(1)
+if not isinstance(data, list):
+    print("gallery: unexpected yabai window JSON (not a list)", file=sys.stderr)
+    sys.exit(1)
+
+rows = []
+for w in data:
+    if not isinstance(w, dict):
+        continue
+    if w.get("subrole") != "AXStandardWindow":
+        continue
+    if w.get("is-floating") is not False:
+        continue
+    app = w.get("app") or ""
+    if not app:
+        continue
+    space = w.get("space")
+    if not isinstance(space, int):
+        continue
+    rows.append((space, app, w.get("title") or ""))
+
+rows.sort(key=lambda r: (r[0], r[1], r[2]))
+for space, app, title in rows:
+    print("space %d: %s — %s" % (space, app, title))
+PYEOF
+
+cmd_home_show() {
+  local windows
+  windows="$(home_windows_json)" || exit 1
+  printf '%s' "${windows}" | python3 -c "${PY_HOME_SHOW_WINDOWS}"
+
+  echo
+  echo "home rules:"
+  command -v yabai >/dev/null 2>&1 || { echo "gallery: yabai not found on PATH" >&2; exit 1; }
+  local rules
+  if ! rules="$(yabai -m rule --list 2>/dev/null)"; then
+    echo "  (yabai -m rule --list failed)"
+    return 0
+  fi
+  printf '%s' "${rules}" | python3 -c '
+import json, sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = []
+found = False
+for r in data:
+    if not isinstance(r, dict):
+        continue
+    label = r.get("label") or ""
+    if not label.startswith("home-"):
+        continue
+    found = True
+    parts = [label, "app=" + (r.get("app") or "")]
+    if r.get("title"):
+        parts.append("title=" + r.get("title"))
+    parts.append("space=" + str(r.get("space")))
+    print("  " + "  ".join(parts))
+if not found:
+    print("  (none)")
+'
+}
+
+# PY_HOME_SAVE_GENERATE -- argv: <roam-csv> <hostname> <iso-timestamp>,
+# stdin: `yabai -m query --windows` JSON. Prints the complete rules.local
+# file content described in bin/gallery's own "home save" comment above, to
+# stdout only -- `home save --dry-run` prints this verbatim, so nothing else
+# may go to stdout here.
+read -r -d '' PY_HOME_SAVE_GENERATE <<'PYEOF' || true
+import json, re, sys
+
+
+def slugify(app):
+    s = re.sub(r"[^a-z0-9]+", "-", app.lower())
+    return s.strip("-")
+
+
+# Escape regex metacharacters (backslash included) with a backslash, one
+# pass over the ORIGINAL string -- re.sub does not rescan its own
+# replacement text, so this cannot double-escape.
+def escape_regex(s):
+    return re.sub(r"([\\.\[\]()*+?{}|^$])", r"\\\1", s)
+
+
+# Embed an already regex-escaped string inside a single-quoted sh literal:
+# only a literal single quote needs further escaping there.
+def shell_single_quote_body(s):
+    return s.replace("'", "'\\''")
+
+
+def regex_value(s):
+    return "'^%s$'" % shell_single_quote_body(escape_regex(s))
+
+
+roam_csv, hostname, timestamp = sys.argv[1], sys.argv[2], sys.argv[3]
+roam_list = []
+seen = set()
+for name in roam_csv.split(","):
+    if name and name not in seen:
+        seen.add(name)
+        roam_list.append(name)
+roam = set(roam_list)
+
+try:
+    data = json.load(sys.stdin)
+except Exception as e:
+    print("gallery: could not parse yabai window JSON: %s" % e, file=sys.stderr)
+    sys.exit(1)
+if not isinstance(data, list):
+    print("gallery: unexpected yabai window JSON (not a list)", file=sys.stderr)
+    sys.exit(1)
+
+by_app = {}
+for w in data:
+    if not isinstance(w, dict):
+        continue
+    if w.get("subrole") != "AXStandardWindow":
+        continue
+    if w.get("is-floating") is not False:
+        continue
+    app = w.get("app") or ""
+    if not app:
+        continue
+    title = w.get("title") or ""
+    if title.startswith("Gallery: ") or title.startswith("Learn: "):
+        continue
+    if app in roam:
+        continue
+    space = w.get("space")
+    if not isinstance(space, int):
+        continue
+    by_app.setdefault(app, []).append((space, title, w.get("id")))
+
+blocks = []
+title_rules = []   # (app, label) for every title-pinned window
+for app in sorted(by_app.keys(), key=str.lower):
+    windows = by_app[app]
+    spaces = sorted(set(space for space, _title, _wid in windows))
+    slug = slugify(app)
+    lines = []
+    if len(spaces) == 1:
+        lines.append(
+            "yabai -m rule --add label=home-%s app=%s space=%d"
+            % (slug, regex_value(app), spaces[0])
+        )
+    else:
+        lines.append(
+            "# %s is on several Spaces: pinned per window by title "
+            "(brittle -- titles change)" % app
+        )
+        ordered = sorted(windows, key=lambda r: (r[0], r[1], r[2] or 0))
+        skipped = sum(1 for _space, title, _wid in ordered if not title)
+        if skipped:
+            lines.append(
+                "# %d window(s) with no title skipped (cannot pin by title)"
+                % skipped
+            )
+        k = 0
+        for space, title, _wid in ordered:
+            if not title:
+                continue
+            k += 1
+            label = "home-%s-%d" % (slug, k)
+            title_rules.append((app, label))
+            lines.append(
+                "yabai -m rule --add label=%s app=%s title=%s space=%d"
+                % (label, regex_value(app), regex_value(title), space)
+            )
+    blocks.append("\n".join(lines))
+
+# Rules match a window's title only at creation; re-apply the title rules
+# whenever one of their apps changes a title (see the section comment in
+# bin/gallery). The remove comes first so a save without title rules also
+# drops the signal a previous save installed.
+signal_lines = ["yabai -m signal --remove home-title-changed >/dev/null 2>&1"]
+if title_rules:
+    apps_re = "|".join(escape_regex(a) for a in sorted(set(a for a, _l in title_rules), key=str.lower))
+    action = "; ".join("yabai -m rule --apply %s" % l for _a, l in title_rules)
+    signal_lines.insert(0, "# Title rules only match at window creation (yabai never re-evaluates")
+    signal_lines.insert(1, "# them); this signal re-applies them when one of these apps changes a title.")
+    signal_lines.append(
+        "yabai -m signal --add label=home-title-changed event=window_title_changed "
+        "app='^(%s)$' action='%s'" % (shell_single_quote_body(apps_re), action)
+    )
+blocks.append("\n".join(signal_lines))
+
+header_lines = [
+    "#!/usr/bin/env sh",
+    "# Machine-local yabai rules: each app's home Space.",
+    "# Generated by `gallery home save` on %s at %s." % (hostname, timestamp),
+    "# Re-run `gallery home save` after rearranging; the previous file is kept as",
+    "# rules.local.prev. Hand edits are fine but are overwritten by the next save.",
+    "# Roaming (no rule): %s" % ", ".join(roam_list),
+    "# Sourced by ~/.config/yabai/yabairc; apply live with `gallery home apply`.",
+]
+out = "\n".join(header_lines) + "\n"
+if blocks:
+    out += "\n" + "\n\n".join(blocks) + "\n"
+sys.stdout.write(out)
+PYEOF
+
+cmd_home_save() {
+  local roam_extra="" dry_run=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --roam)
+        shift
+        roam_extra="${1:-}"
+        if [ -z "${roam_extra}" ]; then
+          echo "gallery: --roam requires a comma-separated app list" >&2
+          exit 1
+        fi
+        ;;
+      --dry-run)
+        dry_run=1
+        ;;
+      *)
+        echo "usage: gallery home save [--roam A,B] [--dry-run]" >&2
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  local roam_csv="${HOME_DEFAULT_ROAM}"
+  [ -n "${roam_extra}" ] && roam_csv="${roam_csv},${roam_extra}"
+
+  local windows
+  windows="$(home_windows_json)" || exit 1
+
+  local hostname_s timestamp
+  hostname_s="$(hostname -s 2>/dev/null || hostname)"
+  timestamp="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+
+  local content
+  if ! content="$(printf '%s' "${windows}" | python3 -c "${PY_HOME_SAVE_GENERATE}" "${roam_csv}" "${hostname_s}" "${timestamp}")"; then
+    echo "gallery: failed to generate rules.local from the current window layout" >&2
+    exit 1
+  fi
+
+  if [ "${dry_run}" -eq 1 ]; then
+    printf '%s\n' "${content}"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${RULES_LOCAL_FILE}")"
+  if [ -f "${RULES_LOCAL_FILE}" ]; then
+    cp "${RULES_LOCAL_FILE}" "${RULES_LOCAL_PREV_FILE}"
+  fi
+
+  local tmp
+  tmp="$(mktemp "$(dirname "${RULES_LOCAL_FILE}")/.rules.local.XXXXXXXX")"
+  printf '%s\n' "${content}" > "${tmp}"
+  chmod 644 "${tmp}"
+  mv "${tmp}" "${RULES_LOCAL_FILE}"
+
+  if command -v yabai >/dev/null 2>&1; then
+    # Drop every live home-* rule before re-sourcing: `--add` on an existing
+    # label REPLACES it, but an app dropped from the layout (or renamed)
+    # since the last save would otherwise leave its old rule live forever.
+    local label
+    while IFS= read -r label; do
+      [ -n "${label}" ] || continue
+      yabai -m rule --remove "${label}" >/dev/null 2>&1 || true
+    done < <(yabai -m rule --list 2>/dev/null | python3 -c '
+import json, sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = []
+for r in data:
+    if isinstance(r, dict):
+        label = r.get("label") or ""
+        if label.startswith("home-"):
+            print(label)
+')
+    # `sh <file>` rather than sourcing (`.`) it into this shell: every
+    # generated line is already a standalone `yabai -m rule --add ...`
+    # command, the file sets no variable this script reads afterwards, and
+    # a plain interpreter run cannot leak anything back into cmd_home_save.
+    sh "${RULES_LOCAL_FILE}"
+    yabai -m rule --apply
+  else
+    echo "gallery: yabai not found on PATH -- ${RULES_LOCAL_FILE} written but not applied" >&2
+  fi
+
+  local total_lines title_lines apps_pinned windows_pinned roam_display
+  total_lines="$(printf '%s\n' "${content}" | grep -c '^yabai -m rule --add ')" || true
+  title_lines="$(printf '%s\n' "${content}" | grep -c '^yabai -m rule --add .*[[:space:]]title=')" || true
+  apps_pinned=$((total_lines - title_lines))
+  windows_pinned="${title_lines}"
+  roam_display="$(printf '%s\n' "${content}" | sed -n 's/^# Roaming (no rule): //p')"
+
+  echo "home: ${apps_pinned} apps pinned, ${windows_pinned} windows pinned by title, roaming: ${roam_display} -> ${RULES_LOCAL_FILE}"
+}
+
+cmd_home_apply() {
+  if [ ! -f "${RULES_LOCAL_FILE}" ]; then
+    echo "gallery: ${RULES_LOCAL_FILE} not found -- run: gallery home save" >&2
+    exit 1
+  fi
+  command -v yabai >/dev/null 2>&1 || { echo "gallery: yabai not found on PATH" >&2; exit 1; }
+  sh "${RULES_LOCAL_FILE}"
+  yabai -m rule --apply
+  echo "home: applied ${RULES_LOCAL_FILE}"
+}
+
+cmd_home() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    show)
+      cmd_home_show
+      ;;
+    save)
+      cmd_home_save "$@"
+      ;;
+    apply)
+      cmd_home_apply
+      ;;
+    "")
+      echo "usage: gallery home <show|save [--roam A,B] [--dry-run]|apply>" >&2
+      exit 1
+      ;;
+    *)
+      echo "gallery: unknown home subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+
 find_render_tool() {
   if [ -f "${RENDER_TOOL_INSTALLED}" ]; then
     printf '%s\n' "${RENDER_TOOL_INSTALLED}"
@@ -2967,6 +3365,9 @@ case "${command}" in
     ;;
   borders)
     cmd_borders "$@"
+    ;;
+  home)
+    cmd_home "$@"
     ;;
   reload)
     cmd_reload

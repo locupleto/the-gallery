@@ -74,6 +74,7 @@ gallery console status | theme | native | toggle |
 gallery font status | set <family> [size] [weight] | native | list |
 gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
+gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery reload | log | doctor | install
 ```
 

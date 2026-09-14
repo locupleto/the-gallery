@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+# Machine-local yabai rules: which Space each app calls home.
+#
+# `gallery home save` generates this file from the current layout; keep it
+# as a template only.
+#
+# Copy to ~/.config/yabai/rules.local (NOT into the repo -- every Mac has its
+# own display count and Space layout) and edit the map. tiler/yabairc sources
+# the file if it exists; tiler/install.sh never touches it.
+#
+# Why: yabai does not remember where windows were across a reboot (window ids
+# are reassigned at login), and macOS's own Space restoration is best-effort and
+# gets reset by OS upgrades. A rule is evaluated at window creation, so every
+# login puts the app back on its Space deterministically. No scripting addition
+# needed: sending a window to a Space is an SA-free path (see `man yabai`, the
+# Rule section lists only sticky/sub-layer/opacity/scratchpad as SIP-gated).
+#
+# Space indices are ONE global Mission Control sequence across displays
+# (e.g. display 1 = Spaces 1-9, display 2 = Space 10), so a rule can send a
+# window to the other display. Indices shift if Spaces are added or removed --
+# re-check `yabai -m query --spaces` after rearranging Mission Control.
+#
+# Keep every rule labelled: yabai replaces a rule re-added with the same label,
+# so this file can be re-sourced live (`. ~/.config/yabai/rules.local &&
+# yabai -m rule --apply`) without duplicates. `--apply` moves already-open
+# windows; without it a rule only affects windows created afterwards.
+#
+# Leave roaming apps (terminals, the browser) OUT of this file: a pinned
+# `iTerm2` rule would drag every super+return terminal to one Space.
+#
+# Example map (Mac Studio, 2026-09-15):
+yabai -m rule --add label=home-gmail    app="^Gmail$"             space=2
+yabai -m rule --add label=home-outlook  app="^Microsoft Outlook$" space=3
+yabai -m rule --add label=home-github   app="^GitHub$"            space=4
+# VM windows are titled after the VM; UTM's own library window is titled "UTM"
+# and its dialogs stay wherever they pop up.
+yabai -m rule --add label=home-utm      app="^UTM$" title!="^UTM$" space=9
+yabai -m rule --add label=home-telegram app="^Telegram$"          space=10
+yabai -m rule --add label=home-signal   app="^Signal$"            space=10

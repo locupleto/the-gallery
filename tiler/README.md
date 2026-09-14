@@ -116,6 +116,15 @@ by the script).
   (`window_destroyed`, `application_terminated`) refocus the window under the
   pointer, else the most recent one, whenever a close leaves no focused
   window — macOS otherwise parks focus on a windowless app after Cmd+W.
+- `~/.config/yabai/rules.local` (optional, per machine, not in the repo):
+  app → home-Space rules, sourced by `yabairc` when present. yabai does not
+  remember window placement across a reboot and macOS's own Space restoration
+  is reset by OS upgrades; a labelled `app="^Telegram$" space=10` rule puts the
+  app back on its Space at every login. Template: `rules.local.example`. Apply
+  live without restarting yabai: `. ~/.config/yabai/rules.local && yabai -m
+  rule --apply`. `gallery home save` generates this file from the current
+  layout (snapshot the windows you have arranged instead of hand-writing the
+  map) and `gallery home apply` re-sources it live the same way.
 - `skhdrc` → `~/.config/skhd/skhdrc`: the table above.
 
 Edit here, re-run `tiler/install.sh` (copies + reloads). The files are copied,

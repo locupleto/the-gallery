@@ -151,4 +151,6 @@ say "running tests/qml_test.sh"; "${SCRIPT_DIR}/qml_test.sh" || fail "qml_test.s
 
 say "running tests/import_test.sh"; "${SCRIPT_DIR}/import_test.sh" || fail "import_test.sh failed"
 
+say "running tests/home_test.sh"; "${SCRIPT_DIR}/home_test.sh" || fail "home_test.sh failed"
+
 say "all checks passed"
