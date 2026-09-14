@@ -99,10 +99,12 @@ lalt - down  : yabai -m window --resize bottom:0:60  || yabai -m window --resize
 # --- launch / service ------------------------------------------------------------
 # New window in the DEFAULT browser via the assistant's own verb (resolves the browser
 # from LaunchServices, Cmd+N if running, launches otherwise). The assistant's runtime
-# is ~/.ai_voice_assistant on the Studio and the repo checkout on the laptop. First
+# is ~/.ai_voice_assistant on the Studio and the repo checkout on the laptop; test
+# for the venv's python, not the directory (the laptop has a bare
+# ~/.ai_voice_assistant state folder holding only a heartbeat file). First
 # press: allow "skhd wants to control System Events".
 ## new window in the default browser
-lalt - b : d="$HOME/.ai_voice_assistant"; [ -d "$d" ] || d="$HOME/Developer/projects/git/ai_voice_assistant"; "$d/venv/bin/python" "$d/desktop.py" exec "open a new browser window"
+lalt - b : d="$HOME/.ai_voice_assistant"; [ -x "$d/venv/bin/python" ] || d="$HOME/Developer/projects/git/ai_voice_assistant"; "$d/venv/bin/python" "$d/desktop.py" exec "open a new browser window"
 # New iTerm window (open -a only activates a running app). The first press raises
 # the Automation prompt "skhd wants to control iTerm2" — allow it once.
 ## new iTerm window
