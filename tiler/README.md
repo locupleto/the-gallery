@@ -62,7 +62,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + ← → ↑ ↓ | resize by 60 px |
 | super + m | minimize |
 | super + w | close window |
-| super + return | new iTerm window (first press: allow "skhd wants to control iTerm2") |
+| super + return | new iTerm window, launched if iTerm is not running (first press: allow "skhd wants to control iTerm2") |
 | super + shift + r | restart yabai, reload skhd |
 | super + a / shift + a | Claude desktop app / ChatGPT app (both in /Applications) |
 | super + c | Calendar |
@@ -139,7 +139,13 @@ what notices.
 
 ## Consumers
 
-The one consumer outside this repo is the voice assistant (`ai_voice_assistant`).
+The one consumer outside this repo is the voice assistant (`ai_voice_assistant`),
+and super+b is the one key that depends on it: the binding runs its
+`desktop.py` from `~/.ai_voice_assistant` when that holds a venv python (the
+Studio's synced runtime), else from the repo checkout under
+`~/Developer/projects/git` (the laptop, which also has a bare
+`~/.ai_voice_assistant` state folder, hence the test for the python and not
+the directory). `gallery doctor` reports which runtime it resolves.
 Its `desktop.py` detects yabai at runtime (`DESKTOP_TILER=auto`) and routes
 window-placement verbs through yabai while it is running, falling back to
 System Events the moment yabai stops (`DESKTOP_TILER=off` forces that
