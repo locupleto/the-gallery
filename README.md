@@ -1,22 +1,29 @@
 # The Gallery
 
-A Hammerspoon Spoon that hosts manifest-driven desktop plugins (panels,
-overlays, menus, services) on macOS. Modelled on Omarchy 4's plugin system:
-each plugin is a directory with a `manifest.json` declaring its id, kinds,
-and entry points, so plugins can be added and removed without touching
-Gallery itself.
+An Omarchy-style desktop for macOS. Three parts, in the order they matter
+day to day:
+
+1. **Tiling.** yabai + skhd with left Option as "super", Omarchy's key
+   bindings, a JankyBorders outline on the focused window, and a Learn menu
+   of cheat sheets (`tiler/`).
+2. **Themes.** Omarchy's colour themes rendered onto everything at once:
+   iTerm2, the focus outline, the wallpaper, Übersicht widgets, the font.
+3. **Plugins.** A Hammerspoon Spoon that hosts manifest-driven plugins
+   (floating TUIs, services, unmodified Omarchy QML plugins), modelled on
+   Omarchy 4's plugin system: each plugin is a directory with a
+   `manifest.json`, so plugins come and go without touching Gallery itself.
 
 ## What it is
 
+- `tiler/` — yabai + skhd tiling and hotkeys (left Option as "super"),
+  JankyBorders, and the Learn cheat-sheet menu. See `tiler/README.md`.
+- `themes/` — vendored Omarchy colour themes (see `themes/UPSTREAM.md`) plus
+  `tools/render-theme.py`, which renders the active theme into CSS, JSON, an
+  iTerm2 profile, and a shell fragment.
 - `Gallery.spoon` — the Hammerspoon Spoon that loads plugin manifests and
   manages plugin windows.
 - `plugins/` — bundled plugins, each a self-contained directory.
 - `bin/gallery` — a CLI for controlling Gallery from the shell.
-- `themes/` — vendored Omarchy colour themes (see `themes/UPSTREAM.md`) plus
-  `tools/render-theme.py`, which renders the active theme into CSS, JSON, an
-  iTerm2 profile, and a shell fragment.
-- `tiler/` — yabai + skhd tiling and hotkeys (left Option as "super"),
-  JankyBorders, and the Learn cheat-sheet menu. See `tiler/README.md`.
 
 ## Install
 
