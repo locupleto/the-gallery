@@ -97,10 +97,12 @@ hooks or the Spoon. Themes come from `themes/` (vendored via
 `bg ...` records a per-theme wallpaper choice in
 `~/.config/gallery/state/backgrounds.json` and applies it through the
 `30-wallpaper.sh` hook; `bg next`/`prev` cycle the current theme's
-`backgrounds/` directory. Because macOS only lets a script set the picture
-of the *visible* Space, the hook then walks every Space with yabai (skipping
-native-fullscreen ones) and applies it on each before returning you to where
-you were; `GALLERY_WALLPAPER_WALK=0` keeps it to the visible Space.
+`backgrounds/` directory. System Events only reaches the display default and
+the primary Space; a Space that was ever given its own picture keeps an
+override in `~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`
+that shadows it, so the hook then copies the new picture into every Space
+entry there and restarts WallpaperAgent. `GALLERY_WALLPAPER_ALL_SPACES=0`
+keeps it to the plain System Events apply.
 
 `console ...` decides whether your everyday iTerm2 terminal follows the
 theme. The renderer writes a second dynamic profile,

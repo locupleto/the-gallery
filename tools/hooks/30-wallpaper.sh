@@ -26,17 +26,21 @@
 # Recognised extensions (case-insensitive): jpg jpeg png heic webp.
 #
 # macOS LIMITATION, AND HOW THIS HOOK WORKS AROUND IT: "set picture of
-# every desktop" (System Events) only changes the picture for the currently
-# VISIBLE Space on each display -- there is no public API/AppleScript verb
-# that reaches every Space in one call. So after that first (guaranteed)
-# apply, this hook walks every Space with yabai: focus it, apply again,
-# and finally return each display to the Space it was showing. The walk is
-# best-effort -- it needs `yabai` on PATH and a live yabai, skips
-# native-fullscreen Spaces (they have no desktop picture), and a Space
-# that fails to focus is logged and skipped rather than failing the hook.
-# Set GALLERY_WALLPAPER_WALK=0 to keep the old visible-Space-only behaviour,
-# and GALLERY_WALLPAPER_WALK_DELAY (seconds, default 0.6) to tune the pause
-# that lets the Space-switch animation finish before the apply.
+# every desktop" (System Events) only writes the display-level default and
+# the primary Space's entry in the wallpaper store
+# (~/Library/Application Support/com.apple.wallpaper/Store/Index.plist).
+# Any Space that was ever given its own picture (System Settings, or an
+# earlier spanning setup) carries a per-Space override there that shadows
+# the default -- and System Events can neither read nor write those, so it
+# happily reports the new picture while the Space keeps its old one.
+# Walking the Spaces and re-applying does not help either, for the same
+# reason. So after the System Events apply, this hook copies the primary
+# Space's freshly written Desktop configuration into every other Space
+# entry in the store and restarts WallpaperAgent, which re-reads it. This
+# is best-effort: if the store is missing, unreadable, or does not yet show
+# the chosen picture on the primary entry, the step is logged and skipped
+# (the visible Space is still correct). Set GALLERY_WALLPAPER_ALL_SPACES=0
+# to keep the plain System Events behaviour.
 #
 # Set GALLERY_WALLPAPER_DRY_RUN=1 to print the chosen path and the
 # osascript this hook would run, without applying anything or touching the
@@ -44,16 +48,13 @@
 #
 set -euo pipefail
 
-# yabai lives in Homebrew's bin, which `gallery theme set` does not
-# guarantee is on PATH when it runs the hooks.
-export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
-
 THEME="${1:?usage: 30-wallpaper.sh <theme-name> [filename-or-path]}"
 OVERRIDE="${2:-}"
 LOG_FILE="${HOME}/Library/Logs/gallery.log"
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/gallery"
 BG_DIR="${CONFIG_DIR}/themes/${THEME}/backgrounds"
 STATE_FILE="${CONFIG_DIR}/state/backgrounds.json"
+STORE_FILE="${HOME}/Library/Application Support/com.apple.wallpaper/Store/Index.plist"
 
 mkdir -p "$(dirname "${LOG_FILE}")"
 
@@ -164,105 +165,76 @@ end tell
 EOF
 )"
 
-WALK="${GALLERY_WALLPAPER_WALK:-1}"
-WALK_DELAY="${GALLERY_WALLPAPER_WALK_DELAY:-0.6}"
+ALL_SPACES="${GALLERY_WALLPAPER_ALL_SPACES:-1}"
+SYNC_ERR="${TMPDIR:-/tmp}/gallery-wallpaper-sync.$$.err"
 
 # apply_visible -- sets the picture on the visible Space of every display.
 apply_visible() {
   echo "${APPLESCRIPT_SRC}" | osascript >/dev/null
 }
 
-# space_table -- prints one "index display visible fullscreen focused"
-# line per yabai Space (flags as 1/0), or nothing if yabai is missing or
-# not answering. Uses only the python3 stdlib, like recorded_choice.
-space_table() {
-  command -v yabai >/dev/null 2>&1 || return 0
-  yabai -m query --spaces 2>/dev/null | python3 -c '
-import json, sys
-try:
-    spaces = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for s in spaces:
-    print(s["index"], s["display"],
-          int(bool(s.get("is-visible"))),
-          int(bool(s.get("is-native-fullscreen"))),
-          int(bool(s.get("has-focus"))))
-' 2>/dev/null || true
-}
+# sync_store -- copies the primary Space's Desktop configuration into every
+# other Space entry of the wallpaper store (its Default and per-display
+# sub-entries) whose picture differs, and prints how many were rewritten.
+# Waits briefly for WallpaperAgent to have persisted the System Events
+# apply into the primary entry first. Returns 1 (reason on stderr) if the
+# store cannot be used, so the caller can log and move on. Uses only the
+# python3 stdlib, like recorded_choice.
+sync_store() {
+  [ -f "${STORE_FILE}" ] || { echo "store not found: ${STORE_FILE}" >&2; return 1; }
+  command -v python3 >/dev/null 2>&1 || { echo "python3 not available" >&2; return 1; }
+  python3 - "${STORE_FILE}" "${CHOSEN}" <<'PY'
+import copy, os, plistlib, sys, time, urllib.parse
 
-# focus_space <index> -- focuses a Space, treating yabai's "already
-# focused" refusal as success.
-focus_space() {
-  local out
-  if out="$(yabai -m space --focus "$1" 2>&1)"; then
-    return 0
-  fi
-  case "${out}" in
-    *"already focused"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+store, chosen = sys.argv[1], sys.argv[2]
+want = "file://" + urllib.parse.quote(os.path.abspath(chosen))
 
-# walk_spaces -- visits every non-fullscreen Space, applying the picture
-# on each, then restores the originally visible Space per display (the
-# focused display last, so keyboard focus ends up where it started).
-# Prints "applied/total" for the log line.
-walk_spaces() {
-  local table idx disp vis fs foc
-  local applied=0 total=0 failed=""
-  local restore="" restore_focused=""
+def picture(entry):
+    try:
+        cfg = plistlib.loads(entry["Default"]["Desktop"]["Content"]["Choices"][0]["Configuration"])
+        return cfg["url"]["relative"]
+    except Exception:
+        return None
 
-  table="$(space_table)"
-  if [ -z "${table}" ]; then
-    log "walk skipped: yabai unavailable"
-    return 0
-  fi
+# WallpaperAgent writes the store shortly after the System Events apply;
+# give it a moment before concluding the primary entry was not updated.
+deadline = time.time() + 5
+while True:
+    with open(store, "rb") as fh:
+        data = plistlib.load(fh)
+    spaces = data.get("Spaces")
+    primary = spaces.get("") if isinstance(spaces, dict) else None
+    if primary and picture(primary) == want:
+        break
+    if time.time() > deadline:
+        sys.stderr.write("primary Space entry does not show the chosen picture\n")
+        sys.exit(1)
+    time.sleep(0.5)
 
-  while read -r idx disp vis fs foc; do
-    [ -n "${idx}" ] || continue
-    if [ "${foc}" = "1" ]; then
-      restore_focused="${idx}"
-    elif [ "${vis}" = "1" ]; then
-      restore="${restore} ${idx}"
-    fi
-    [ "${fs}" = "1" ] && continue
-    total=$((total + 1))
-    if focus_space "${idx}"; then
-      sleep "${WALK_DELAY}"
-      if apply_visible; then
-        applied=$((applied + 1))
-      else
-        failed="${failed} ${idx}"
-      fi
-    else
-      failed="${failed} ${idx}"
-    fi
-  done <<EOF
-${table}
-EOF
-
-  for idx in ${restore} ${restore_focused}; do
-    focus_space "${idx}" || log "could not return to space ${idx}"
-  done
-
-  if [ -n "${failed}" ]; then
-    log "walk: applied on ${applied}/${total} spaces; skipped:${failed}"
-  else
-    log "walk: applied on ${applied}/${total} spaces"
-  fi
+src = primary["Default"]["Desktop"]
+stale = [u for u, e in spaces.items() if u and isinstance(e, dict) and picture(e) != want]
+for uuid in stale:
+    entry = spaces[uuid]
+    entry.setdefault("Default", {})["Desktop"] = copy.deepcopy(src)
+    for disp in entry.get("Displays", {}).values():
+        if isinstance(disp, dict):
+            disp["Desktop"] = copy.deepcopy(src)
+if stale:
+    with open(store, "wb") as fh:
+        plistlib.dump(data, fh, fmt=plistlib.FMT_BINARY)
+print(len(stale))
+PY
 }
 
 if [ "${GALLERY_WALLPAPER_DRY_RUN:-0}" = "1" ]; then
   echo "wallpaper (dry run): would apply ${CHOSEN}"
   echo "wallpaper (dry run): would run:"
   echo "${APPLESCRIPT_SRC}"
-  if [ "${WALK}" = "1" ]; then
-    table="$(space_table)"
-    if [ -n "${table}" ]; then
-      echo "wallpaper (dry run): would then walk spaces:$(printf '%s\n' "${table}" | awk '$4 == 0 { printf " %s", $1 }')"
+  if [ "${ALL_SPACES}" = "1" ]; then
+    if [ -f "${STORE_FILE}" ]; then
+      echo "wallpaper (dry run): would then sync every Space entry in ${STORE_FILE} and restart WallpaperAgent"
     else
-      echo "wallpaper (dry run): would skip the space walk (yabai unavailable)"
+      echo "wallpaper (dry run): would skip the Space sync (wallpaper store not found)"
     fi
   fi
   exit 0
@@ -276,5 +248,19 @@ else
   exit 1
 fi
 
-[ "${WALK}" = "1" ] && walk_spaces
+if [ "${ALL_SPACES}" = "1" ]; then
+  if N="$(sync_store 2>"${SYNC_ERR}")"; then
+    if [ "${N}" -gt 0 ]; then
+      # WallpaperAgent only re-reads the store on launch; launchd brings it
+      # straight back.
+      killall WallpaperAgent 2>/dev/null || true
+      log "synced ${N} other Space entries to ${CHOSEN}; WallpaperAgent restarted"
+    else
+      log "all Space entries already on ${CHOSEN}"
+    fi
+  else
+    log "Space sync skipped: $(tr '\n' ' ' <"${SYNC_ERR}")"
+  fi
+  rm -f "${SYNC_ERR}"
+fi
 exit 0
