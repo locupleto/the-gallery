@@ -25,18 +25,28 @@
 #   4. Otherwise the lexically first image (by filename).
 # Recognised extensions (case-insensitive): jpg jpeg png heic webp.
 #
-# KNOWN macOS LIMITATION: "set picture of every desktop" (System Events)
-# only changes the picture for the CURRENT Space on each display. Other,
-# not-currently-visible Spaces keep whatever wallpaper they already had --
-# there is no public API/AppleScript verb that reaches every Space on every
-# display in one call. Switching to each Space and re-running would work but
-# is not done here.
+# macOS LIMITATION, AND HOW THIS HOOK WORKS AROUND IT: "set picture of
+# every desktop" (System Events) only changes the picture for the currently
+# VISIBLE Space on each display -- there is no public API/AppleScript verb
+# that reaches every Space in one call. So after that first (guaranteed)
+# apply, this hook walks every Space with yabai: focus it, apply again,
+# and finally return each display to the Space it was showing. The walk is
+# best-effort -- it needs `yabai` on PATH and a live yabai, skips
+# native-fullscreen Spaces (they have no desktop picture), and a Space
+# that fails to focus is logged and skipped rather than failing the hook.
+# Set GALLERY_WALLPAPER_WALK=0 to keep the old visible-Space-only behaviour,
+# and GALLERY_WALLPAPER_WALK_DELAY (seconds, default 0.6) to tune the pause
+# that lets the Space-switch animation finish before the apply.
 #
 # Set GALLERY_WALLPAPER_DRY_RUN=1 to print the chosen path and the
 # osascript this hook would run, without applying anything or touching the
 # log file.
 #
 set -euo pipefail
+
+# yabai lives in Homebrew's bin, which `gallery theme set` does not
+# guarantee is on PATH when it runs the hooks.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
 
 THEME="${1:?usage: 30-wallpaper.sh <theme-name> [filename-or-path]}"
 OVERRIDE="${2:-}"
@@ -154,17 +164,117 @@ end tell
 EOF
 )"
 
+WALK="${GALLERY_WALLPAPER_WALK:-1}"
+WALK_DELAY="${GALLERY_WALLPAPER_WALK_DELAY:-0.6}"
+
+# apply_visible -- sets the picture on the visible Space of every display.
+apply_visible() {
+  echo "${APPLESCRIPT_SRC}" | osascript >/dev/null
+}
+
+# space_table -- prints one "index display visible fullscreen focused"
+# line per yabai Space (flags as 1/0), or nothing if yabai is missing or
+# not answering. Uses only the python3 stdlib, like recorded_choice.
+space_table() {
+  command -v yabai >/dev/null 2>&1 || return 0
+  yabai -m query --spaces 2>/dev/null | python3 -c '
+import json, sys
+try:
+    spaces = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for s in spaces:
+    print(s["index"], s["display"],
+          int(bool(s.get("is-visible"))),
+          int(bool(s.get("is-native-fullscreen"))),
+          int(bool(s.get("has-focus"))))
+' 2>/dev/null || true
+}
+
+# focus_space <index> -- focuses a Space, treating yabai's "already
+# focused" refusal as success.
+focus_space() {
+  local out
+  if out="$(yabai -m space --focus "$1" 2>&1)"; then
+    return 0
+  fi
+  case "${out}" in
+    *"already focused"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# walk_spaces -- visits every non-fullscreen Space, applying the picture
+# on each, then restores the originally visible Space per display (the
+# focused display last, so keyboard focus ends up where it started).
+# Prints "applied/total" for the log line.
+walk_spaces() {
+  local table idx disp vis fs foc
+  local applied=0 total=0 failed=""
+  local restore="" restore_focused=""
+
+  table="$(space_table)"
+  if [ -z "${table}" ]; then
+    log "walk skipped: yabai unavailable"
+    return 0
+  fi
+
+  while read -r idx disp vis fs foc; do
+    [ -n "${idx}" ] || continue
+    if [ "${foc}" = "1" ]; then
+      restore_focused="${idx}"
+    elif [ "${vis}" = "1" ]; then
+      restore="${restore} ${idx}"
+    fi
+    [ "${fs}" = "1" ] && continue
+    total=$((total + 1))
+    if focus_space "${idx}"; then
+      sleep "${WALK_DELAY}"
+      if apply_visible; then
+        applied=$((applied + 1))
+      else
+        failed="${failed} ${idx}"
+      fi
+    else
+      failed="${failed} ${idx}"
+    fi
+  done <<EOF
+${table}
+EOF
+
+  for idx in ${restore} ${restore_focused}; do
+    focus_space "${idx}" || log "could not return to space ${idx}"
+  done
+
+  if [ -n "${failed}" ]; then
+    log "walk: applied on ${applied}/${total} spaces; skipped:${failed}"
+  else
+    log "walk: applied on ${applied}/${total} spaces"
+  fi
+}
+
 if [ "${GALLERY_WALLPAPER_DRY_RUN:-0}" = "1" ]; then
   echo "wallpaper (dry run): would apply ${CHOSEN}"
   echo "wallpaper (dry run): would run:"
   echo "${APPLESCRIPT_SRC}"
+  if [ "${WALK}" = "1" ]; then
+    table="$(space_table)"
+    if [ -n "${table}" ]; then
+      echo "wallpaper (dry run): would then walk spaces:$(printf '%s\n' "${table}" | awk '$4 == 0 { printf " %s", $1 }')"
+    else
+      echo "wallpaper (dry run): would skip the space walk (yabai unavailable)"
+    fi
+  fi
   exit 0
 fi
 
-if echo "${APPLESCRIPT_SRC}" | osascript >/dev/null; then
+if apply_visible; then
   log "applied ${CHOSEN} for ${THEME}"
 else
   log "FAILED to apply ${CHOSEN} for ${THEME}"
   echo "gallery: 30-wallpaper.sh: osascript failed to apply ${CHOSEN}" >&2
   exit 1
 fi
+
+[ "${WALK}" = "1" ] && walk_spaces
+exit 0
