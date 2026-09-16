@@ -141,6 +141,17 @@ lalt - g : open -a Telegram
 ## Grok web app
 shift + lalt - g : open -a "$HOME/Applications/Grok.app"
 
+# --- folders (Finder) ------------------------------------------------------------
+# Omarchy's super+F opens the file manager; F is zoom here, so folders live on O.
+# `open <dir>` needs no Automation grant: it raises an existing Finder window on
+# that folder or opens a new one, which yabai tiles like any other window.
+## Finder: home folder
+lalt - o : open "$HOME"
+## Finder: Downloads
+shift + lalt - o : open "$HOME/Downloads"
+## Finder: Desktop
+ctrl + lalt - o : open "$HOME/Desktop"
+
 # --- learn (cheat sheets, Omarchy's "Learn" menu) --------------------------------
 # tiler/learn opens a floating iTerm window (yabairc floats titles starting with
 # "Learn") listing the vault's Cheat-Sheets, rendered with glow. Spotlight has the
