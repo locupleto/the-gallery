@@ -79,6 +79,16 @@ scan() {
     case " $yabai_ids " in *" $id "*) continue ;; esac
     printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$id" "$layer" "$pid" "$owner" "$name" "$x" "$y" "$w" "$h"
   done
+  # Second source: AX-less windows yabai DID record and still tiles. A hidden
+  # app's window born behind the lock (Calendar, 2026-09-18) is not on screen
+  # at all, yet its node keeps an empty slot in the BSP tree. Layer "tile".
+  ${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r --arg us "$US" '
+    .[] | select((.["has-ax-reference"] | not) and (.["is-floating"] | not) and (.["is-minimized"] | not))
+    | [.id, "tile", .pid, .app, (.title // ""), (.frame.x|floor), (.frame.y|floor), (.frame.w|floor), (.frame.h|floor)]
+    | map(tostring) | join($us)' | while IFS="$US" read -r id layer pid owner name x y w h; do
+    case " $IGNORE " in *" $owner "*) continue ;; esac
+    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$id" "$layer" "$pid" "$owner" "$name" "$x" "$y" "$w" "$h"
+  done
 }
 
 announce() {
