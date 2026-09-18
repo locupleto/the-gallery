@@ -29,7 +29,11 @@ yabai -m config mouse_modifier          alt
 yabai -m config mouse_action1           move
 yabai -m config mouse_action2           resize
 yabai -m config mouse_drop_action       swap
-yabai -m config focus_follows_mouse     off
+# Hyprland's follow_mouse=1: hovering a window focuses it, so window_origin_display
+# cursor (above) and "where focus is" always agree, as they do there. autofocus
+# moves focus without raising, so a floating window is not pulled over the tiles.
+# (Urban's choice 2026-09-18; was off.)
+yabai -m config focus_follows_mouse     autofocus
 yabai -m config mouse_follows_focus     off
 
 # --- windows that must never be tiled ----------------------------------------
