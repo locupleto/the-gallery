@@ -51,6 +51,7 @@
 #   gallery home show
 #   gallery home save [--roam A,B] [--dry-run]
 #   gallery home apply
+#   gallery ghosts [list|fix [OWNER|ID]|forget]
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -164,6 +165,9 @@ commands:
   home save [--roam A,B] [--dry-run]
                                    snapshot the current layout into ~/.config/yabai/rules.local
   home apply                      re-source ~/.config/yabai/rules.local and apply it live
+  ghosts [list]                   windows yabai cannot see (born behind the lock screen)
+  ghosts fix [OWNER|ID]           quit + relaunch the app owning ghost window(s)
+  ghosts forget                   clear the ghosts service's reported/handled state
   reload                          request a Hammerspoon config reload
   log                             tail the Gallery log
   doctor                          check the local Gallery install
@@ -2767,6 +2771,21 @@ cmd_home_apply() {
   echo "home: applied ${RULES_LOCAL_FILE}"
 }
 
+# `gallery ghosts`: windows the tiler cannot see (created behind the lock screen,
+# no accessibility reference, parked under every tile). The gallery.ghosts
+# service plugin runs `check` every 30 s; this verb is the hand-driven side.
+cmd_ghosts() {
+  local script="${HOME}/.config/gallery/plugins/gallery.ghosts/ghosts"
+  if [ ! -x "${script}" ]; then
+    echo "gallery: gallery.ghosts plugin is not installed (run gallery install)" >&2
+    exit 1
+  fi
+  case "${1:-list}" in
+    list|fix|forget|scan) "${script}" "$@" ;;
+    *) echo "usage: gallery ghosts [list|fix [OWNER|ID]|forget]" >&2; exit 1 ;;
+  esac
+}
+
 cmd_home() {
   local sub="${1:-}"
   [ $# -gt 0 ] && shift
@@ -3368,6 +3387,9 @@ case "${command}" in
     ;;
   home)
     cmd_home "$@"
+    ;;
+  ghosts)
+    cmd_ghosts "$@"
     ;;
   reload)
     cmd_reload

@@ -75,6 +75,7 @@ gallery font status | set <family> [size] [weight] | native | list |
 gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
+gallery ghosts [list] | fix [OWNER|ID] | forget |
 gallery reload | log | doctor | install
 ```
 
@@ -162,6 +163,21 @@ theme's `hyprland_active_border` in `colors.toml` if it defines one, else
 `~/.config/gallery/state/borders.json` and are re-applied on every theme
 render. Inside the theme picker, `ctrl-w` cycles width through the presets
 3/5/8/12 and `ctrl-b` toggles bright.
+
+`ghosts ...` deals with windows the tiler cannot see. A window created while
+the screen is locked -- usually an app's own updater quitting and relaunching
+it overnight -- gets no accessibility reference: yabai never sees it, cannot
+tile it, and macOS parks it at window layer -1 under every tile, where it
+shows only as ghost text through the terminal glass. Nothing gives such a
+window AX afterwards; the cure is a fresh one, i.e. relaunching the app. The
+`gallery.ghosts` service plugin compares the window server's on-screen list
+(via JXA, no extra grants) with yabai's every 30 s -- never while the screen
+is locked, since acting behind the lock is what makes ghosts -- relaunches
+apps that restore their own state (`RELAUNCH`, default Claude, Slack,
+Discord, Telegram, Signal) and announces the rest once, by notification and
+the estate voice. `gallery ghosts` lists them, `fix` relaunches on request.
+Overrides live in `~/.config/gallery/ghosts.conf`; the log is
+`~/Library/Logs/gallery-ghosts.log`.
 
 Run `gallery` with no arguments, or see `bin/gallery`, for the full verb
 list.

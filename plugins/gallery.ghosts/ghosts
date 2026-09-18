@@ -1,0 +1,177 @@
+#!/bin/sh
+# ghosts -- find windows the tiler cannot see, and get rid of them.
+#
+#   ghosts check            service run: skip while the screen is locked, else
+#                           scan, relaunch allow-listed apps, report the rest once
+#   ghosts list             human-readable scan
+#   ghosts scan             machine-readable scan (TSV: id layer pid owner name x y w h)
+#   ghosts fix [OWNER|ID]   quit + relaunch the app(s) owning ghost windows
+#   ghosts forget           clear the reported/handled state
+#
+# A window created while the screen is locked (typically an app's own updater
+# quitting and relaunching it, e.g. Claude's ShipIt at 08:27 on 2026-09-18) gets
+# no accessibility reference. yabai never sees it, cannot tile it, and macOS
+# leaves it at window layer -1 -- underneath every tile, visible only as ghost
+# text through the iTerm glass. Nothing can give that window AX afterwards; the
+# only cure is a fresh window, i.e. relaunching the app.
+#
+# Detection compares the window server's on-screen list (CGWindowListCopyWindowInfo,
+# reached through JXA's ObjC bridge so no Python, pyobjc or extra grants are
+# needed) with yabai's window list: a normal-layer window of real size that yabai
+# does not know is a ghost. Apps in RELAUNCH restore their own state and are
+# relaunched automatically; everything else is announced once and left for
+# `gallery ghosts fix`. Overrides: ~/.config/gallery/ghosts.conf (sh syntax,
+# sets RELAUNCH / IGNORE / ANNOUNCE).
+
+set -eu
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"   # ioreg is in /usr/sbin
+
+CONFIG_DIR="$HOME/.config/gallery"
+STATE_FILE="$CONFIG_DIR/state/ghosts.json"
+LOG_FILE="$HOME/Library/Logs/gallery-ghosts.log"
+
+# Apps whose windows are safe to relaunch unasked: they restore their own state.
+RELAUNCH="Claude Slack Discord Telegram Signal"
+# Window owners that legitimately live outside yabai's tree.
+IGNORE="Window Server borders Dock Hammerspoon Übersicht Notification Center Control Center Spotlight loginwindow Wallpaper WallpaperAgent screencapture Screenshot ScreenSaverEngine Siri Shortcuts CoreServicesUIAgent"
+# 1 = speak through the estate voice when available (tts-say), 0 = notification only.
+ANNOUNCE=1
+[ -f "$CONFIG_DIR/ghosts.conf" ] && . "$CONFIG_DIR/ghosts.conf"
+
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"; }
+
+# ioreg, not CGSessionCopyCurrentDictionary: the latter comes back empty from a
+# script while the screen is locked, which read as "unlocked" (seen 2026-09-18).
+screen_locked() {
+  ioreg -n Root -d1 -a 2>/dev/null | plutil -p - 2>/dev/null | grep -q '"CGSSessionScreenIsLocked" => true'
+}
+
+US=$(printf '\037')   # field separator: not IFS whitespace, so empty titles keep their column
+
+# All on-screen windows from the window server, US-separated, before any filtering.
+window_server_list() {
+  osascript -l JavaScript -e '
+    ObjC.import("CoreGraphics");
+    var opts = $.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements;
+    var arr = ObjC.castRefToObject($.CGWindowListCopyWindowInfo(opts, $.kCGNullWindowID));
+    var out = [];
+    for (var i = 0; i < arr.count; i++) {
+      var w = ObjC.deepUnwrap(arr.objectAtIndex(i)); var b = w.kCGWindowBounds;
+      out.push([w.kCGWindowNumber, w.kCGWindowLayer, w.kCGWindowOwnerPID,
+                String(w.kCGWindowOwnerName || "").replace(/[\u001f\n]/g, " "),
+                String(w.kCGWindowName || "").replace(/[\u001f\n]/g, " ").slice(0, 60),
+                Math.round(b.X), Math.round(b.Y), Math.round(b.Width), Math.round(b.Height)].join("\u001f"));
+    }
+    out.join("\n")' 2>/dev/null
+}
+
+# Ghosts: normal-ish layer (-20..0), at least 200x100, owner not ignored, and
+# not a window yabai holds an accessibility reference for. yabai does list some
+# AX-less windows (has-ax-reference false, blank title) -- those count as ghosts.
+scan() {
+  # GHOSTS_YABAI overrides the yabai binary (tests: point it at `false` and every
+  # tiled window must show up as a ghost).
+  yabai_ids=$(${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r '.[] | select(.["has-ax-reference"]) | .id' | tr '\n' ' ')
+  window_server_list | while IFS="$US" read -r id layer pid owner name x y w h; do
+    [ "$layer" -ge -20 ] && [ "$layer" -le 0 ] || continue
+    [ "$w" -ge 200 ] && [ "$h" -ge 100 ] || continue
+    case " $IGNORE " in *" $owner "*) continue ;; esac
+    case " $yabai_ids " in *" $id "*) continue ;; esac
+    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$id" "$layer" "$pid" "$owner" "$name" "$x" "$y" "$w" "$h"
+  done
+}
+
+announce() {
+  log "announce: $1"
+  osascript -e "display notification \"$1\" with title \"The Gallery\" subtitle \"Ghost window\"" >/dev/null 2>&1 || true
+  if [ "$ANNOUNCE" = 1 ] && [ -x "$HOME/bin/tts-say" ]; then
+    # Detached: the service runner waits for this process, not for the speech.
+    nohup "$HOME/bin/tts-say" --source gallery.ghosts "$1" >/dev/null 2>&1 </dev/null &
+  fi
+}
+
+# Graceful quit via NSRunningApplication (same as the Quit menu item), wait for
+# the process to go, then open the bundle again. An app that refuses to quit
+# (unsaved-changes dialog) is left alone and reported.
+relaunch_pid() {
+  pid=$1; owner=$2
+  path=$(osascript -l JavaScript -e '
+    ObjC.import("AppKit");
+    var app = $.NSRunningApplication.runningApplicationWithProcessIdentifier('"$pid"');
+    if (app.isNil()) { "" } else { var p = app.bundleURL.path.js; app.terminate(); p }' 2>/dev/null)
+  if [ -z "$path" ]; then log "relaunch $owner: pid $pid has no bundle (already gone?)"; return 1; fi
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ $i -lt 40 ]; do sleep 0.5; i=$((i+1)); done
+  if kill -0 "$pid" 2>/dev/null; then
+    log "relaunch $owner: did not quit within 20s, leaving it"
+    announce "$owner did not quit, so its ghost window is still beneath the tiles. Quit it yourself and relaunch."
+    return 1
+  fi
+  open -a "$path" && log "relaunched $owner from $path"
+}
+
+state_get() { [ -f "$STATE_FILE" ] && jq -r --arg id "$1" '.[$id].action // empty' "$STATE_FILE" 2>/dev/null || true; }
+state_set() {
+  mkdir -p "$(dirname "$STATE_FILE")"
+  [ -f "$STATE_FILE" ] || echo '{}' > "$STATE_FILE"
+  tmp=$(mktemp); jq --arg id "$1" --arg owner "$2" --arg action "$3" --argjson at "$(date +%s)" \
+    '.[$id] = {owner: $owner, action: $action, at: $at}' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+}
+state_prune() {  # keep only ids still on screen
+  [ -f "$STATE_FILE" ] || return 0
+  live=$(window_server_list | cut -d "$US" -f1 | jq -R . | jq -s .)
+  tmp=$(mktemp); jq --argjson live "$live" 'with_entries(select(.key as $k | $live | index($k)))' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+}
+
+cmd_check() {
+  if screen_locked; then exit 0; fi   # never act behind the lock: that is what creates ghosts
+  found=$(scan)
+  state_prune
+  [ -n "$found" ] || exit 0
+  printf '%s\n' "$found" | while IFS="$US" read -r id layer pid owner name x y w h; do
+    [ -n "$(state_get "$id")" ] && continue
+    log "ghost: id=$id layer=$layer pid=$pid owner=$owner name='$name' ${w}x${h} at $x,$y"
+    case " $RELAUNCH " in
+      *" $owner "*)
+        state_set "$id" "$owner" relaunching
+        if relaunch_pid "$pid" "$owner"; then
+          announce "$owner came up behind the lock screen and could not be tiled. I have relaunched it."
+        fi ;;
+      *)
+        state_set "$id" "$owner" reported
+        announce "$owner has a window beneath the tiles that cannot be tiled. Run gallery ghosts fix to relaunch it." ;;
+    esac
+  done
+}
+
+cmd_list() {
+  found=$(scan)
+  if [ -z "$found" ]; then echo "no ghost windows"; return 0; fi
+  printf 'ID\tLAYER\tPID\tOWNER\tTITLE\tFRAME\n'
+  printf '%s\n' "$found" | while IFS="$US" read -r id layer pid owner name x y w h; do
+    printf '%s\t%s\t%s\t%s\t%s\t%sx%s at %s,%s\n' "$id" "$layer" "$pid" "$owner" "${name:--}" "$w" "$h" "$x" "$y"
+  done
+}
+
+cmd_fix() {
+  want=${1:-}
+  found=$(scan)
+  [ -n "$found" ] || { echo "no ghost windows"; return 0; }
+  done_pids=" "
+  printf '%s\n' "$found" | while IFS="$US" read -r id layer pid owner name x y w h; do
+    if [ -n "$want" ] && [ "$want" != "$id" ] && [ "$want" != "$owner" ]; then continue; fi
+    case "$done_pids" in *" $pid "*) continue ;; esac
+    done_pids="$done_pids$pid "
+    echo "relaunching $owner (pid $pid, window $id)"
+    relaunch_pid "$pid" "$owner" && state_set "$id" "$owner" relaunched
+  done
+}
+
+case "${1:-list}" in
+  check)  cmd_check ;;
+  list)   cmd_list ;;
+  scan)   scan | tr '\037' '\t' ;;
+  fix)    cmd_fix "${2:-}" ;;
+  forget) rm -f "$STATE_FILE"; echo "state cleared" ;;
+  *) echo "usage: ghosts check|list|scan|fix [OWNER|ID]|forget" >&2; exit 2 ;;
+esac

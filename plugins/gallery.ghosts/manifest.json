@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.ghosts",
+  "name": "Ghost Windows",
+  "version": "0.1.0",
+  "kinds": ["service"],
+  "entryPoints": {},
+  "gallery": {
+    "service": {
+      "command": "~/.config/gallery/plugins/gallery.ghosts/ghosts",
+      "args": ["check"],
+      "interval": 30,
+      "restartOnFailure": false
+    }
+  }
+}

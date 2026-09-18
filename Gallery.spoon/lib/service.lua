@@ -105,6 +105,11 @@ runCommand = function(ctx, id, record, cfg)
     ctx.log("WARN", "service " .. id .. " has no command configured")
     return
   end
+  -- "~/..." as in the tui kind (bin/gallery-tui expand_home): hs.task does not
+  -- expand it, and plugin scripts live under ~/.config/gallery/plugins.
+  if command:sub(1, 2) == "~/" then
+    command = os.getenv("HOME") .. command:sub(2)
+  end
 
   local exitCode, stdout
   local newOk, task = pcall(hs.task.new, command, function(code, out, err)
