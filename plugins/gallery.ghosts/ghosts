@@ -20,8 +20,10 @@
 # needed) with yabai's window list: a normal-layer window of real size that yabai
 # does not know is a ghost. Apps in RELAUNCH restore their own state and are
 # relaunched automatically; everything else is announced once and left for
-# `gallery ghosts fix`. Overrides: ~/.config/gallery/ghosts.conf (sh syntax,
-# sets RELAUNCH / IGNORE / ANNOUNCE).
+# `gallery ghosts fix`. A ghost must persist for GRACE seconds first, so a
+# window caught mid-creation (briefly AX-less) is never acted on. Overrides:
+# ~/.config/gallery/ghosts.conf (sh syntax, sets RELAUNCH / IGNORE / ANNOUNCE /
+# GRACE).
 
 set -eu
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"   # ioreg is in /usr/sbin
@@ -36,6 +38,11 @@ RELAUNCH="Claude Slack Discord Telegram Signal"
 IGNORE="Window Server borders Dock Hammerspoon Übersicht Notification Center Control Center Spotlight loginwindow Wallpaper WallpaperAgent screencapture Screenshot ScreenSaverEngine Siri Shortcuts CoreServicesUIAgent"
 # 1 = speak through the estate voice when available (tts-say), 0 = notification only.
 ANNOUNCE=1
+# Seconds a ghost must persist across checks before anything is said or done. A
+# window is AX-less for an instant while it is being created; a file picker
+# (Telegram's Open panel, 2026-09-18 16:27) caught in that instant looked like
+# a ghost and was announced, then tiled normally. Real ghosts persist for hours.
+GRACE=60
 [ -f "$CONFIG_DIR/ghosts.conf" ] && . "$CONFIG_DIR/ghosts.conf"
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"; }
@@ -129,6 +136,7 @@ relaunch_pid() {
 }
 
 state_get() { [ -f "$STATE_FILE" ] && jq -r --arg id "$1" '.[$id].action // empty' "$STATE_FILE" 2>/dev/null || true; }
+state_at()  { [ -f "$STATE_FILE" ] && jq -r --arg id "$1" '.[$id].at // empty' "$STATE_FILE" 2>/dev/null || true; }
 state_set() {
   mkdir -p "$(dirname "$STATE_FILE")"
   [ -f "$STATE_FILE" ] || echo '{}' > "$STATE_FILE"
@@ -148,8 +156,16 @@ cmd_check() {
   found=$(scan)
   state_prune
   [ -n "$found" ] || exit 0
+  now=$(date +%s)
   printf '%s\n' "$found" | while IFS="$US" read -r id layer pid owner name x y w h; do
-    [ -n "$(state_get "$id")" ] && continue
+    action=$(state_get "$id")
+    case "$action" in
+      "")   state_set "$id" "$owner" seen
+            log "candidate: id=$id layer=$layer pid=$pid owner=$owner name='$name' ${w}x${h} at $x,$y (waiting ${GRACE}s)"
+            continue ;;
+      seen) [ $((now - $(state_at "$id"))) -ge "$GRACE" ] || continue ;;
+      *)    continue ;;   # already reported / relaunched
+    esac
     log "ghost: id=$id layer=$layer pid=$pid owner=$owner name='$name' ${w}x${h} at $x,$y"
     case " $RELAUNCH " in
       *" $owner "*)
