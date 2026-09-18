@@ -1,0 +1,50 @@
+#!/usr/bin/env sh
+# focus-dir — directional focus/swap that breaks ties like Hyprland, not yabai.
+#
+#   focus-dir focus west|south|north|east
+#   focus-dir swap  west|south|north|east
+#
+# yabai's own `window --focus west` (view_find_window_node_in_direction) accepts any
+# window that overlaps the source on the cross axis by even a pixel, measures the
+# distance along the direction only, and breaks ties by stacking order (most
+# recently focused). With two columns split at different heights both windows in
+# the next column tie on distance, so super+h from bottom-right can land top-left
+# depending on what was focused last — a diagonal move. This picker keeps yabai's
+# candidate rule but ranks by (distance, then LARGEST cross-axis overlap, then
+# window id), which is what Hyprland's movefocus does.
+#
+# Exit status 1 when no candidate exists so skhdrc's `|| yabai -m display --focus`
+# fallback still steps onto the next display. Installed by tiler/install.sh next
+# to skhdrc (launchd cannot read the external volume the checkout lives on).
+
+set -eu
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+action=${1:-focus}
+dir=${2:-}
+case "$action" in focus|swap) ;; *) echo "usage: $0 focus|swap west|south|north|east" >&2; exit 2 ;; esac
+case "$dir" in west|south|north|east) ;; *) echo "usage: $0 focus|swap west|south|north|east" >&2; exit 2 ;; esac
+
+# Managed, visible windows on the focused window's Space. Frames are used as-is:
+# yabai's node areas differ from them only by the gaps, which cancel out.
+target=$(yabai -m query --windows --space | jq -r --arg dir "$dir" '
+  def r: {x: .frame.x, y: .frame.y, X: (.frame.x + .frame.w), Y: (.frame.y + .frame.h)};
+  (map(select(.["has-focus"])) | first) as $src
+  | if $src == null then empty else
+    ($src | r) as $s
+    | map(select(.id != $src.id and .["is-visible"] and (.["is-floating"] | not) and (.["is-minimized"] | not)))
+    | map(. as $w | (r) as $t
+        | ( if   $dir == "west"  then {dist: ($s.x - $t.X), ovl: ([$s.Y, $t.Y] | min) - ([$s.y, $t.y] | max)}
+            elif $dir == "east"  then {dist: ($t.x - $s.X), ovl: ([$s.Y, $t.Y] | min) - ([$s.y, $t.y] | max)}
+            elif $dir == "north" then {dist: ($s.y - $t.Y), ovl: ([$s.X, $t.X] | min) - ([$s.x, $t.x] | max)}
+            else                      {dist: ($t.y - $s.Y), ovl: ([$s.X, $t.X] | min) - ([$s.x, $t.x] | max)}
+            end ) as $m
+        | select($m.dist >= -1 and $m.ovl > 0)
+        # a few px of gap difference must not decide between two neighbours
+        | {id: $w.id, bucket: (($m.dist + 1) / 16 | floor), ovl: $m.ovl})
+    | sort_by(.bucket, -.ovl, .id)
+    | first // empty | .id
+  end')
+
+[ -n "$target" ] || exit 1
+yabai -m window --"$action" "$target"

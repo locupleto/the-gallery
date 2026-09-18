@@ -43,7 +43,7 @@ SKHD_RC="$HOME/.config/skhd/skhdrc"
 if [ "$UNINSTALL" = 1 ]; then
     command -v yabai >/dev/null && run yabai --stop-service || true
     command -v skhd  >/dev/null && run skhd  --stop-service || true
-    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn" "$(dirname "$YABAI_RC")/yabai-layout"
+    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn" "$(dirname "$SKHD_RC")/focus-dir" "$(dirname "$YABAI_RC")/yabai-layout"
     run rm -rf "$HOME/Applications/Learn.app"
     echo "[tiler] services stopped, rc files removed (no restart needed). Note for"
     echo "        external consumers: the voice assistant detects yabai's absence"
@@ -115,6 +115,8 @@ run install -m 644 skhdrc  "$SKHD_RC"
 # cannot read this volume); it also writes the generated key sheet into the vault
 # and builds ~/Applications/Learn.app for Spotlight.
 run install -m 755 learn "$(dirname "$SKHD_RC")/learn"
+# focus-dir: the directional focus/swap picker skhdrc calls for super+h/j/k/l.
+run install -m 755 focus-dir "$(dirname "$SKHD_RC")/focus-dir"
 run install -m 644 learn.style.json "$(dirname "$SKHD_RC")/learn.style.json"
 if [ "$DRY" = 1 ]; then echo "[dry] learn install skhdrc"; else "$(dirname "$SKHD_RC")/learn" install "$PWD/skhdrc"; fi
 # yabai-layout: installed next to yabairc (same TCC reasoning) so the save/restore

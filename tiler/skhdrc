@@ -28,20 +28,25 @@
 ]
 
 # --- focus -------------------------------------------------------------------
+# Directional moves go through tiler/focus-dir rather than yabai's own `--focus DIR`:
+# yabai breaks distance ties by most-recently-focused, so with columns split at
+# different heights super+h from bottom-right can land top-left. focus-dir ranks
+# by largest overlap instead (Hyprland's rule). It exits 1 with no candidate, so
+# the display fallback still works.
 ## focus the window west / south / north / east (continues onto the next display)
-lalt - h : yabai -m window --focus west  || yabai -m display --focus west
-lalt - j : yabai -m window --focus south || yabai -m display --focus south
-lalt - k : yabai -m window --focus north || yabai -m display --focus north
-lalt - l : yabai -m window --focus east  || yabai -m display --focus east
+lalt - h : "$HOME/.config/skhd/focus-dir" focus west  || yabai -m display --focus west
+lalt - j : "$HOME/.config/skhd/focus-dir" focus south || yabai -m display --focus south
+lalt - k : "$HOME/.config/skhd/focus-dir" focus north || yabai -m display --focus north
+lalt - l : "$HOME/.config/skhd/focus-dir" focus east  || yabai -m display --focus east
 ## focus the previous window
 lalt - tab : yabai -m window --focus recent
 
 # --- move (swap tiles; fall through to the neighbouring display) ---------------
 ## swap the window west / south / north / east (moves to the next display at the edge)
-shift + lalt - h : yabai -m window --swap west  || (yabai -m window --display west && yabai -m display --focus west)
-shift + lalt - j : yabai -m window --swap south || (yabai -m window --display south && yabai -m display --focus south)
-shift + lalt - k : yabai -m window --swap north || (yabai -m window --display north && yabai -m display --focus north)
-shift + lalt - l : yabai -m window --swap east  || (yabai -m window --display east && yabai -m display --focus east)
+shift + lalt - h : "$HOME/.config/skhd/focus-dir" swap west  || (yabai -m window --display west && yabai -m display --focus west)
+shift + lalt - j : "$HOME/.config/skhd/focus-dir" swap south || (yabai -m window --display south && yabai -m display --focus south)
+shift + lalt - k : "$HOME/.config/skhd/focus-dir" swap north || (yabai -m window --display north && yabai -m display --focus north)
+shift + lalt - l : "$HOME/.config/skhd/focus-dir" swap east  || (yabai -m window --display east && yabai -m display --focus east)
 
 # --- Spaces: super+N switches, super+shift+N sends the window and follows ------
 ## switch to Space N (via the Mission Control Ctrl+N shortcut)
