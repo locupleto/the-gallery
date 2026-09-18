@@ -34,10 +34,10 @@ target=$(yabai -m query --windows --space | jq -r --arg dir "$dir" '
     ($src | r) as $s
     | map(select(.id != $src.id and .["is-visible"] and (.["is-floating"] | not) and (.["is-minimized"] | not)))
     | map(. as $w | (r) as $t
-        | ( if   $dir == "west"  then {dist: ($s.x - $t.X), ovl: ([$s.Y, $t.Y] | min) - ([$s.y, $t.y] | max)}
-            elif $dir == "east"  then {dist: ($t.x - $s.X), ovl: ([$s.Y, $t.Y] | min) - ([$s.y, $t.y] | max)}
-            elif $dir == "north" then {dist: ($s.y - $t.Y), ovl: ([$s.X, $t.X] | min) - ([$s.x, $t.x] | max)}
-            else                      {dist: ($t.y - $s.Y), ovl: ([$s.X, $t.X] | min) - ([$s.x, $t.x] | max)}
+        | ( if   $dir == "west"  then {dist: ($s.x - $t.X), ovl: (([$s.Y, $t.Y] | min) - ([$s.y, $t.y] | max))}
+            elif $dir == "east"  then {dist: ($t.x - $s.X), ovl: (([$s.Y, $t.Y] | min) - ([$s.y, $t.y] | max))}
+            elif $dir == "north" then {dist: ($s.y - $t.Y), ovl: (([$s.X, $t.X] | min) - ([$s.x, $t.x] | max))}
+            else                      {dist: ($t.y - $s.Y), ovl: (([$s.X, $t.X] | min) - ([$s.x, $t.x] | max))}
             end ) as $m
         | select($m.dist >= -1 and $m.ovl > 0)
         # a few px of gap difference must not decide between two neighbours
