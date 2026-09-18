@@ -175,7 +175,11 @@ window AX afterwards; the cure is a fresh one, i.e. relaunching the app. The
 is locked, since acting behind the lock is what makes ghosts -- relaunches
 apps that restore their own state (`RELAUNCH`, default Claude, Slack,
 Discord, Telegram, Signal) and announces the rest once, by notification and
-the estate voice. `gallery ghosts` lists them, `fix` relaunches on request.
+the estate voice. The opposite failure is caught too: an "orphan" is a
+window yabai sees but that has lost its node in the Space's tree (it reports
+`split-type` none while its neighbours report a split) and sits unmanaged on
+top of another tile; the watcher re-inserts it by toggling float twice.
+`gallery ghosts` lists them, `fix` relaunches or retiles on request.
 Overrides live in `~/.config/gallery/ghosts.conf`; the log is
 `~/Library/Logs/gallery-ghosts.log`.
 

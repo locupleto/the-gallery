@@ -5,7 +5,8 @@
 #                           scan, relaunch allow-listed apps, report the rest once
 #   ghosts list             human-readable scan
 #   ghosts scan             machine-readable scan (TSV: id layer pid owner name x y w h)
-#   ghosts fix [OWNER|ID]   quit + relaunch the app(s) owning ghost windows
+#   ghosts fix [OWNER|ID]   quit + relaunch the app(s) owning ghost windows;
+#                           re-insert orphans into the tree
 #   ghosts forget           clear the reported/handled state
 #
 # A window created while the screen is locked (typically an app's own updater
@@ -21,7 +22,15 @@
 # does not know is a ghost. Apps in RELAUNCH restore their own state and are
 # relaunched automatically; everything else is announced once and left for
 # `gallery ghosts fix`. A ghost must persist for GRACE seconds first, so a
-# window caught mid-creation (briefly AX-less) is never acted on. Overrides:
+# window caught mid-creation (briefly AX-less) is never acted on.
+#
+# A third class needs no relaunch: an "orphan" is a window yabai sees perfectly
+# well (AX, standard subrole, not floating) that has no node in its Space's BSP
+# tree, so it sits unmanaged on top of whichever tile it last had (an iTerm
+# window over Claude's tile, 2026-09-18 18:40; cause unknown, yabai logged
+# nothing). yabai reports split "none" for such a window while every real tile
+# on a Space with two or more of them reports a split. The cure is to toggle
+# float twice, which re-inserts it next to the focused window. Overrides:
 # ~/.config/gallery/ghosts.conf (sh syntax, sets RELAUNCH / IGNORE / ANNOUNCE /
 # GRACE).
 
@@ -96,6 +105,32 @@ scan() {
     case " $IGNORE " in *" $owner "*) continue ;; esac
     printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$id" "$layer" "$pid" "$owner" "$name" "$x" "$y" "$w" "$h"
   done
+  # Third source: orphans -- tileable windows on a visible bsp Space that have
+  # no node in its tree (split "none" while the Space holds two or more
+  # tileable windows). Layer "orphan"; the fix is retile_window, not a relaunch.
+  bsp_spaces=$(${GHOSTS_YABAI:-yabai} -m query --spaces 2>/dev/null | jq -c '[.[] | select(.type == "bsp" and .["is-visible"]) | .index]')
+  ${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r --arg us "$US" --argjson spaces "${bsp_spaces:-[]}" '
+    map(select(.["has-ax-reference"] and .subrole == "AXStandardWindow" and .["is-visible"]
+               and (.["is-floating"] | not) and (.["is-minimized"] | not) and (.["is-hidden"] | not)
+               and ([.space] | inside($spaces))))
+    | group_by(.space)[] | select(length >= 2) | .[] | select(.["split-type"] == "none")
+    | [.id, "orphan", .pid, .app, (.title // ""), (.frame.x|floor), (.frame.y|floor), (.frame.w|floor), (.frame.h|floor)]
+    | map(tostring) | join($us)' | while IFS="$US" read -r id layer pid owner name x y w h; do
+    case " $IGNORE " in *" $owner "*) continue ;; esac
+    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$id" "$layer" "$pid" "$owner" "$name" "$x" "$y" "$w" "$h"
+  done
+}
+
+# Put an orphan back into its Space's tree: floating it and un-floating it makes
+# yabai insert a fresh node (next to the focused window). Verified by the split
+# field turning non-"none".
+retile_window() {
+  id=$1; owner=$2
+  yabai -m window "$id" --toggle float >/dev/null 2>&1 && yabai -m window "$id" --toggle float >/dev/null 2>&1 || {
+    log "retile $owner: yabai refused window $id"; return 1; }
+  split=$(yabai -m query --windows --window "$id" 2>/dev/null | jq -r '.["split-type"] // "none"')
+  if [ "$split" = "none" ]; then log "retile $owner: window $id still has no node"; return 1; fi
+  log "retiled $owner window $id"
 }
 
 announce() {
@@ -167,6 +202,17 @@ cmd_check() {
       *)    continue ;;   # already reported / relaunched
     esac
     log "ghost: id=$id layer=$layer pid=$pid owner=$owner name='$name' ${w}x${h} at $x,$y"
+    if [ "$layer" = orphan ]; then
+      state_set "$id" "$owner" retiling
+      if retile_window "$id" "$owner"; then
+        state_set "$id" "$owner" retiled
+        announce "A $owner window had dropped out of the tiling tree. I have put it back."
+      else
+        state_set "$id" "$owner" reported
+        announce "A $owner window has dropped out of the tiling tree and would not go back. Run gallery ghosts fix."
+      fi
+      continue
+    fi
     case " $RELAUNCH " in
       *" $owner "*)
         state_set "$id" "$owner" relaunching
@@ -196,6 +242,11 @@ cmd_fix() {
   done_pids=" "
   printf '%s\n' "$found" | while IFS="$US" read -r id layer pid owner name x y w h; do
     if [ -n "$want" ] && [ "$want" != "$id" ] && [ "$want" != "$owner" ]; then continue; fi
+    if [ "$layer" = orphan ]; then
+      echo "retiling $owner window $id"
+      retile_window "$id" "$owner" && state_set "$id" "$owner" retiled
+      continue
+    fi
     case "$done_pids" in *" $pid "*) continue ;; esac
     done_pids="$done_pids$pid "
     echo "relaunching $owner (pid $pid, window $id)"
