@@ -127,9 +127,11 @@ state_set() {
   tmp=$(mktemp); jq --arg id "$1" --arg owner "$2" --arg action "$3" --argjson at "$(date +%s)" \
     '.[$id] = {owner: $owner, action: $action, at: $at}' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
-state_prune() {  # keep only ids still on screen
+state_prune() {  # keep only ids still known to the window server OR yabai
   [ -f "$STATE_FILE" ] || return 0
-  live=$(window_server_list | cut -d "$US" -f1 | jq -R . | jq -s .)
+  # Tile-class ghosts are not on screen, so the window-server list alone forgot
+  # them every run and they were announced again each time (2026-09-18).
+  live=$( { window_server_list | cut -d "$US" -f1; ${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r '.[].id'; } | jq -R . | jq -s .)
   tmp=$(mktemp); jq --argjson live "$live" 'with_entries(select(.key as $k | $live | index($k)))' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
 
