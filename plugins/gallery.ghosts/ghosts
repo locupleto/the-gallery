@@ -147,10 +147,18 @@ announce() {
 # (unsaved-changes dialog) is left alone and reported.
 relaunch_pid() {
   pid=$1; owner=$2
+  # Resolve the bundle BEFORE quitting anything. A degraded app (Notes, five
+  # days old and already AX-less, 2026-09-20) answered terminate() but then
+  # gave no bundleURL: the one-shot version quit it and, seeing no path,
+  # believed nothing had happened. Fall back to the executable's path.
   path=$(osascript -l JavaScript -e '
     ObjC.import("AppKit");
     var app = $.NSRunningApplication.runningApplicationWithProcessIdentifier('"$pid"');
-    if (app.isNil()) { "" } else { var p = app.bundleURL.path.js; app.terminate(); p }' 2>/dev/null)
+    if (app.isNil() || app.bundleURL.isNil()) { "" } else { app.bundleURL.path.js }' 2>/dev/null)
+  if [ -z "$path" ]; then
+    exe=$(ps -o comm= -p "$pid" 2>/dev/null || true)
+    case "$exe" in *.app/Contents/MacOS/*) path=${exe%%.app/Contents/MacOS/*}.app ;; esac
+  fi
   if [ -z "$path" ]; then
     # Not a running application. If the process is gone too, yabai was holding
     # stale records for an app that quit behind the lock (Screen Sharing,
@@ -160,6 +168,12 @@ relaunch_pid() {
     fi
     log "relaunch $owner: pid $pid already gone; yabai held stale windows"; return 0
   fi
+  # Graceful quit (same as the Quit menu item); SIGTERM if AppKit cannot see it.
+  quit=$(osascript -l JavaScript -e '
+    ObjC.import("AppKit");
+    var app = $.NSRunningApplication.runningApplicationWithProcessIdentifier('"$pid"');
+    if (app.isNil()) { "no" } else { app.terminate(); "yes" }' 2>/dev/null)
+  [ "$quit" = yes ] || kill -TERM "$pid" 2>/dev/null || true
   i=0
   while kill -0 "$pid" 2>/dev/null && [ $i -lt 40 ]; do sleep 0.5; i=$((i+1)); done
   if kill -0 "$pid" 2>/dev/null; then
