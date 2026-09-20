@@ -13,6 +13,127 @@ day to day:
    Omarchy 4's plugin system: each plugin is a directory with a
    `manifest.json`, so plugins come and go without touching Gallery itself.
 
+## The whole thing on one page
+
+Nothing here is a daemon of its own. The Gallery is three borrowed tools
+(skhd, yabai, Hammerspoon) wired together by shell scripts, a Lua Spoon,
+one Python renderer and a directory of small JSON manifests. Read the map
+top to bottom: keys go in at the top, pixels come out at the bottom.
+
+```
+                            ┌─────────────────────────────┐
+                            │ you   (left Option = super) │
+                            └──────────────┬──────────────┘
+                                           │  every hotkey on the Mac goes through here
+                                           ▼
+            ┌───────────────────────────── skhd ──────────────────────────────┐
+            │           tiler/skhdrc  ──.load──▶  skhd/gallery.skhd           │
+            └───┬──────────────────────────┬──────────────────────────────┬───┘
+          super+h/j/k/l               super+space              shift+ctrl+lalt+space,
+      super+1..9, f, t ...                                        lalt+shift+0, ...
+                │                          │                              │
+                ▼                          ▼                              ▼
+ ┌────────────────────────────┐  ┌──────────────────┐  ┌────────────────────────────────────┐
+ │ ① TILING          tiler/   │  │ Learn            │  │ ③ PLUGINS      bin/gallery (CLI)   │
+ │                            │  │                  │  │                                    │
+ │ yabai       bsp tiles,     │  │ cheat sheets:    │  │ a plugin is a directory with a     │
+ │             gaps, rules    │  │ Obsidian notes   │  │ manifest.json naming its kinds:    │
+ │ JankyBorders focus outline │  │ rendered by glow │  │                                    │
+ │ focus-dir   Hyprland-style │  │ in a floating,   │  │ tui, menu   floating iTerm2 +      │
+ │             neighbour pick │  │ centred iTerm2   │  │             fzf/glow/btop, put     │
+ │ rules.local app → Space    │  │ window           │  │             there by a yabai rule  │
+ │             ("home")       │  └──────────────────┘  │ panel,      Hammerspoon webview    │
+ │ ghosts      relaunch the   │                        │ overlay     (Gallery.spoon)        │
+ │             windows yabai  │                        │ qml         PySide6 host running   │
+ │             cannot see     │                        │             Omarchy QML unchanged  │
+ └────────────────────────────┘                        │ service,    background timers      │
+                                                       │ bar-widget  inside the Spoon       │
+                                                       └────────────────────────────────────┘
+                                                                          │
+                                           ┌──────────────────────────────┘
+                                           ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────┐
+ │ ② THEMES   one theme, rendered onto everything at once  (the flow below)                  │
+ │   iTerm2 windows · focus outline · wallpaper · panel CSS · btop · Übersicht widgets       │
+ └───────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Two rules keep the picture this simple:
+
+- **skhd is the only hotkey grabber.** The Gallery never registers keys of
+  its own; its bindings are one file, `skhd/gallery.skhd`, that the tiler's
+  `skhdrc` includes. Every key on the map above is a line in one of those
+  two files.
+- **Hammerspoon is optional for most of it.** `tui` and `menu` plugins are
+  pure shell + iTerm2 + yabai (`bin/gallery-tui`, `bin/gallery-menu`), so
+  the Themes picker, System Monitor and Learn all work with the Spoon
+  stopped. Only `panel`, `overlay`, `service` and `bar-widget` kinds live
+  inside Hammerspoon.
+
+### What happens when you change theme
+
+`gallery theme set <name>` (or `theme next`, or picking one in the Themes
+plugin) is the one command that touches everything. It fans out like this:
+
+```
+ gallery theme set <name>
+          │
+          ▼
+ ~/.config/gallery/themes/current ─▶ <name>/colors.toml        Omarchy's own theme files, vendored
+          │
+          ▼
+ render-theme.py     reads colors.toml + your prefs in state/{font,console,widgets,borders}.json
+          │
+          ├─▶ state/theme.css ─────────────────▶ panel / overlay plugins (webviews)
+          ├─▶ state/theme.json ────────────────▶ Gallery.spoon, gallery-borders
+          ├─▶ state/theme.sh ──────────────────▶ shell scripts, tui plugins, Learn
+          ├─▶ state/crystal.css ───────────────▶ Übersicht crystal widgets      (opt-in: gallery widgets)
+          ├─▶ iTerm2 …/gallery-theme.json ─────▶ every floating Gallery window
+          ├─▶ iTerm2 …/gallery-console.json ───▶ your everyday terminal         (opt-in: gallery console)
+          └─▶ btop theme ──────────────────────▶ System Monitor plugin
+          │
+          ▼
+ hooks/theme-set.d/*      every executable, in name order, theme name as $1
+     10-log-theme.sh       append a log line
+     20-borders.sh         recolour the JankyBorders focus outline
+     30-wallpaper.sh       put the theme's wallpaper on every Space
+          │
+          ▼
+ Gallery.spoon reloads over IPC — open panels pick up the new colours
+```
+
+`theme render` re-runs the renderer only (no hooks, no Spoon); everything
+else — `bg`, `console`, `font`, `widgets`, `borders` — just records a
+preference in `state/*.json` and triggers that same render.
+
+### Where it all lives
+
+`install.sh` copies the repo onto the boot volume (launchd-started tools
+cannot read an external disk; see the comment in the script), so the
+running system is always a copy:
+
+| In the repo | Installed to | Job |
+|---|---|---|
+| `tiler/yabairc`, `tiler/skhdrc`, `tiler/learn`, `tiler/focus-dir`, `tiler/yabai-layout` | `~/.config/yabai/`, `~/.config/skhd/` | tiling, hotkeys, Learn |
+| `skhd/gallery.skhd` | `~/.config/skhd/gallery.skhd` | the Gallery's own key bindings |
+| `Gallery.spoon/` (`init.lua` + `lib/*.lua`) | `~/.hammerspoon/Spoons/Gallery.spoon` | plugin host: manifests, panel/overlay/service/bar-widget kinds, IPC |
+| `plugins/*/manifest.json` | `~/.config/gallery/plugins/` | bundled plugins; `gallery add <git-url>` puts third-party ones beside them |
+| `themes/*/colors.toml` | `~/.config/gallery/themes/` | vendored Omarchy themes (+ any you drop in by hand) |
+| `tools/render-theme.py` | `~/.config/gallery/bin/render-theme.py` | the one renderer in the flow above |
+| `tools/hooks/*.sh` | `~/.config/gallery/hooks/theme-set.d/` | theme-set hooks; add your own beside them |
+| `qml/` (`host.py`, `shim/`, `vendor/`) | `~/.config/gallery/qml/` | PySide6 host + a Quickshell shim so Omarchy QML plugins run unmodified |
+| `patches/<plugin-id>/` | `~/.config/gallery/patches/` | macOS overrides laid over imported Linux plugins on every install/update |
+| `bin/gallery`, `gallery-tui`, `gallery-menu`, `gallery-qml`, `gallery-borders`, `gallery-hs` | `~/bin/` | the CLI and the helpers it shells out to |
+| — | `~/.config/gallery/state/` | generated: rendered theme files + your `*.json` preferences |
+| — | `~/.config/gallery/gallery.json` | which plugins are enabled |
+| — | `~/.config/gallery/feed/<id>.json` | `bar-widget` output, for Übersicht or anything else to read |
+
+Everything in the left column is re-created by `./install.sh`, so `git
+pull && ./install.sh` is the whole upgrade path. What is *yours* — the
+`state/` prefs, `gallery.json`, `ghosts.conf`, the `themes/current` link,
+themes you dropped in by hand, and plugins added with `gallery add` — is
+left alone by the installer.
+
 ## What it is
 
 - `tiler/` — yabai + skhd tiling and hotkeys (left Option as "super"),
