@@ -25,14 +25,19 @@ dir=${2:-}
 case "$action" in focus|swap) ;; *) echo "usage: $0 focus|swap west|south|north|east" >&2; exit 2 ;; esac
 case "$dir" in west|south|north|east) ;; *) echo "usage: $0 focus|swap west|south|north|east" >&2; exit 2 ;; esac
 
-# Managed, visible windows on the focused window's Space. Frames are used as-is:
+# Managed, visible windows: for focus on every display (yabai frames are global,
+# so the leftmost tile on the right monitor has the rightmost tile on the left
+# monitor as its true west neighbour -- otherwise the display fallback below
+# picks by its own rule and super+h twice does not return to where it started,
+# 2026-09-20); for swap only the focused window's Space. Frames are used as-is:
 # yabai's node areas differ from them only by the gaps, which cancel out.
-target=$(yabai -m query --windows --space | jq -r --arg dir "$dir" '
+target=$(yabai -m query --windows | jq -r --arg dir "$dir" --arg action "$action" '
   def r: {x: .frame.x, y: .frame.y, X: (.frame.x + .frame.w), Y: (.frame.y + .frame.h)};
   (map(select(.["has-focus"])) | first) as $src
   | if $src == null then empty else
     ($src | r) as $s
-    | map(select(.id != $src.id and .["is-visible"] and (.["is-floating"] | not) and (.["is-minimized"] | not)))
+    | map(select(.id != $src.id and .["is-visible"] and (.["is-floating"] | not) and (.["is-minimized"] | not)
+                 and ($action == "focus" or .space == $src.space)))
     | map(. as $w | (r) as $t
         | ( if   $dir == "west"  then {dist: ($s.x - $t.X), ovl: (([$s.Y, $t.Y] | min) - ([$s.y, $t.y] | max))}
             elif $dir == "east"  then {dist: ($t.x - $s.X), ovl: (([$s.Y, $t.Y] | min) - ([$s.y, $t.y] | max))}
