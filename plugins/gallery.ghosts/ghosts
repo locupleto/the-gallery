@@ -19,10 +19,15 @@
 # Detection compares the window server's on-screen list (CGWindowListCopyWindowInfo,
 # reached through JXA's ObjC bridge so no Python, pyobjc or extra grants are
 # needed) with yabai's window list: a normal-layer window of real size that yabai
-# does not know is a ghost. Apps in RELAUNCH restore their own state and are
-# relaunched automatically; everything else is announced once and left for
-# `gallery ghosts fix`. A ghost must persist for GRACE seconds first, so a
-# window caught mid-creation (briefly AX-less) is never acted on.
+# does not know is a ghost. The cure is a fresh window, so the owning app is
+# quit gracefully (its own unsaved-changes sheet still protects the user; an
+# app that declines is left alone) and reopened -- silently, log only. Apps in
+# NO_RELAUNCH are never restarted unasked because the restart itself is the
+# damage (terminals, VM hosts, calls); those, and an app that refused to quit,
+# get a single silent notification, the only two cases a human is needed
+# (policy 2026-09-20: the Gallery fixes, it does not nag). A ghost must persist
+# for GRACE seconds first, so a window caught mid-creation (briefly AX-less)
+# is never acted on.
 #
 # A third class needs no relaunch: an "orphan" is a window yabai sees perfectly
 # well (AX, standard subrole, not floating) that has no node in its Space's BSP
@@ -31,8 +36,8 @@
 # nothing). yabai reports split "none" for such a window while every real tile
 # on a Space with two or more of them reports a split. The cure is to toggle
 # float twice, which re-inserts it next to the focused window. Overrides:
-# ~/.config/gallery/ghosts.conf (sh syntax, sets RELAUNCH / IGNORE / ANNOUNCE /
-# GRACE).
+# ~/.config/gallery/ghosts.conf (sh syntax, sets NO_RELAUNCH / IGNORE /
+# ANNOUNCE / GRACE).
 
 set -eu
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"   # ioreg is in /usr/sbin
@@ -41,11 +46,14 @@ CONFIG_DIR="$HOME/.config/gallery"
 STATE_FILE="$CONFIG_DIR/state/ghosts.json"
 LOG_FILE="$HOME/Library/Logs/gallery-ghosts.log"
 
-# Apps whose windows are safe to relaunch unasked: they restore their own state.
-RELAUNCH="Claude Slack Discord Telegram Signal"
+# Apps never relaunched unasked: a restart loses a shell session, a running VM
+# or a call, which is worse than the ghost. Everything else is restarted.
+NO_RELAUNCH="iTerm2 Terminal kitty Alacritty WezTerm Ghostty UTM Parallels Desktop VMware Fusion VirtualBox zoom.us FaceTime Microsoft Teams"
 # Window owners that legitimately live outside yabai's tree.
 IGNORE="Window Server borders Dock Hammerspoon Übersicht Notification Center Control Center Spotlight loginwindow Wallpaper WallpaperAgent screencapture Screenshot ScreenSaverEngine Siri Shortcuts CoreServicesUIAgent"
-# 1 = speak through the estate voice when available (tts-say), 0 = notification only.
+# How to reach the user in the two cases that need one (NO_RELAUNCH app, app that
+# refused to quit): 0 = never, 1 = notification banner, 2 = banner + estate voice.
+# Successful fixes are never announced, only logged.
 ANNOUNCE=1
 # Seconds a ghost must persist across checks before anything is said or done. A
 # window is AX-less for an instant while it is being created; a file picker
@@ -135,8 +143,9 @@ retile_window() {
 
 announce() {
   log "announce: $1"
+  [ "$ANNOUNCE" != 0 ] || return 0
   osascript -e "display notification \"$1\" with title \"The Gallery\" subtitle \"Ghost window\"" >/dev/null 2>&1 || true
-  if [ "$ANNOUNCE" = 1 ] && [ -x "$HOME/bin/tts-say" ]; then
+  if [ "$ANNOUNCE" = 2 ] && [ -x "$HOME/bin/tts-say" ]; then
     # Detached: the service runner waits for this process, not for the speech.
     nohup "$HOME/bin/tts-say" --source gallery.ghosts "$1" >/dev/null 2>&1 </dev/null &
   fi
@@ -178,7 +187,7 @@ relaunch_pid() {
   while kill -0 "$pid" 2>/dev/null && [ $i -lt 40 ]; do sleep 0.5; i=$((i+1)); done
   if kill -0 "$pid" 2>/dev/null; then
     log "relaunch $owner: did not quit within 20s, leaving it"
-    announce "$owner did not quit, so its ghost window is still beneath the tiles. Quit it yourself and relaunch."
+    announce "$owner has a window the tiler cannot see and did not quit when asked; save your work there and relaunch it when convenient."
     return 1
   fi
   open -a "$path" && log "relaunched $owner from $path"
@@ -220,22 +229,20 @@ cmd_check() {
       state_set "$id" "$owner" retiling
       if retile_window "$id" "$owner"; then
         state_set "$id" "$owner" retiled
-        announce "A $owner window had dropped out of the tiling tree. I have put it back."
       else
         state_set "$id" "$owner" reported
-        announce "A $owner window has dropped out of the tiling tree and would not go back. Run gallery ghosts fix."
+        announce "A $owner window has dropped out of the tiling tree and would not go back."
       fi
       continue
     fi
-    case " $RELAUNCH " in
+    case " $NO_RELAUNCH " in
       *" $owner "*)
-        state_set "$id" "$owner" relaunching
-        if relaunch_pid "$pid" "$owner"; then
-          announce "$owner came up behind the lock screen and could not be tiled. I have relaunched it."
-        fi ;;
-      *)
         state_set "$id" "$owner" reported
-        announce "$owner has a window beneath the tiles that cannot be tiled. Run gallery ghosts fix to relaunch it." ;;
+        announce "$owner has a window the tiler cannot see; it is not restarted unasked, relaunch it when convenient." ;;
+      *)
+        state_set "$id" "$owner" relaunching
+        if relaunch_pid "$pid" "$owner"; then state_set "$id" "$owner" relaunched
+        else state_set "$id" "$owner" reported; fi ;;
     esac
   done
 }

@@ -172,11 +172,15 @@ shows only as ghost text through the terminal glass. Nothing gives such a
 window AX afterwards; the cure is a fresh one, i.e. relaunching the app. The
 `gallery.ghosts` service plugin compares the window server's on-screen list
 (via JXA, no extra grants) with yabai's every 30 s -- never while the screen
-is locked, since acting behind the lock is what makes ghosts -- relaunches
-apps that restore their own state (`RELAUNCH`, default Claude, Slack,
-Discord, Telegram, Signal) and announces the rest once, by notification and
-the estate voice. The opposite failure is caught too: an "orphan" is a
-window yabai sees but that has lost its node in the Space's tree (it reports
+is locked, since acting behind the lock is what makes ghosts -- and fixes
+what it finds without a word: the owning app is quit gracefully (its own
+unsaved-changes sheet still protects you; an app that declines is left
+alone) and reopened. Apps in `NO_RELAUNCH` (terminals, VM hosts, calls) are
+never restarted unasked, because the restart is the damage; those, and an
+app that refused to quit, get one silent notification banner -- the only
+two cases that need a human (`ANNOUNCE` 0 never, 1 banner, 2 banner and the
+estate voice). The opposite failure is caught too: an "orphan" is a window
+yabai sees but that has lost its node in the Space's tree (it reports
 `split-type` none while its neighbours report a split) and sits unmanaged on
 top of another tile; the watcher re-inserts it by toggling float twice.
 `gallery ghosts` lists them, `fix` relaunches or retiles on request.
