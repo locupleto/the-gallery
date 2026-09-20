@@ -34,6 +34,12 @@ yabai -m config mouse_drop_action       swap
 # moves focus without raising, so a floating window is not pulled over the tiles.
 # (Urban's choice 2026-09-18; was off.)
 yabai -m config focus_follows_mouse     autofocus
+
+# Debug output goes to launchd's stdout log (/tmp/yabai_<user>.out.log). Kept on
+# since 2026-09-20: yabai forgot live windows four times in three days (a
+# spurious AX "destroyed" notification is the only code path), and only its
+# own event trace can show which side dropped the ball.
+yabai -m config debug_output           on
 yabai -m config mouse_follows_focus     off
 
 # --- windows that must never be tiled ----------------------------------------
