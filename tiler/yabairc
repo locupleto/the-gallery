@@ -80,6 +80,27 @@ yabai -m signal --add label=tiler-refocus-destroyed event=window_destroyed \
 yabai -m signal --add label=tiler-refocus-terminated event=application_terminated \
     action='yabai -m query --windows --window >/dev/null 2>&1 || yabai -m window --focus mouse >/dev/null 2>&1 || yabai -m window --focus recent >/dev/null 2>&1'
 
+# --- repair a tree that reserves a region no window fills ---------------------
+# yabai's tree can keep a node for a window that is no longer tiled (a destroy
+# notification it never saw, a window whose AX reference never arrived, a window
+# added to the tree twice -- see debug_output above, which is on because this
+# desk hits it). The node holds its share of the display, nothing draws in it,
+# and the surviving tiles will not grow into it: a stripe of empty desktop,
+# often half the screen, that --balance cannot close.
+#
+# tree-guard measures the tiles against the display's usable rect after each of
+# these events and rebuilds ONLY a Space that is genuinely short (see the script
+# for the arithmetic and why the threshold is not 1.0). The rebuild costs that
+# Space's hand-tuned split ratios, which is exactly why it is measured first
+# rather than run on every close. Backgrounded so yabai never waits for it; the
+# script takes a lock, so the several events one close can fire collapse into a
+# single pass. The same repair is on ctrl+super+r in skhdrc, for by hand.
+for e in window_destroyed application_terminated window_minimized space_changed display_changed; do
+    yabai -m signal --remove "tree-guard-${e}" >/dev/null 2>&1
+    yabai -m signal --add label="tree-guard-${e}" event="${e}" \
+        action='"${HOME}/.config/yabai/tree-guard" >/dev/null 2>&1 &'
+done
+
 # --- active-window border (JankyBorders) -------------------------------------
 # A crisp accent outline around the FOCUSED window only (unfocused windows get
 # no border), so the active window is obvious across multiple displays instead

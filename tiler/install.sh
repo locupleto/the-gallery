@@ -43,7 +43,7 @@ SKHD_RC="$HOME/.config/skhd/skhdrc"
 if [ "$UNINSTALL" = 1 ]; then
     command -v yabai >/dev/null && run yabai --stop-service || true
     command -v skhd  >/dev/null && run skhd  --stop-service || true
-    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn" "$(dirname "$SKHD_RC")/focus-dir" "$(dirname "$YABAI_RC")/yabai-layout"
+    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn" "$(dirname "$SKHD_RC")/focus-dir" "$(dirname "$YABAI_RC")/yabai-layout" "$(dirname "$YABAI_RC")/tree-guard"
     run rm -rf "$HOME/Applications/Learn.app"
     echo "[tiler] services stopped, rc files removed (no restart needed). Note for"
     echo "        external consumers: the voice assistant detects yabai's absence"
@@ -123,6 +123,7 @@ if [ "$DRY" = 1 ]; then echo "[dry] learn install skhdrc"; else "$(dirname "$SKH
 # wrapper below — and standalone use outside this repo — always run the installed
 # copy, never the checkout on the external volume.
 run install -m 755 yabai-layout "$(dirname "$YABAI_RC")/yabai-layout"
+run install -m 755 tree-guard "$(dirname "$YABAI_RC")/tree-guard"
 
 # --- services --------------------------------------------------------------------------
 # A running service is restarted so a changed rc file takes effect

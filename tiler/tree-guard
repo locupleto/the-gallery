@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# tree-guard -- repair a Space whose BSP tree reserves a region no window fills.
+#
+#   tree-guard              measure every visible bsp Space, repair the broken ones
+#   tree-guard check        measure and report, change nothing (exit 1 if a hole)
+#   tree-guard repair       repair the CURRENT Space unconditionally
+#
+# Installed to ~/.config/yabai/tree-guard by tiler/install.sh and driven by the
+# tree-guard-* signals in yabairc (window_destroyed, application_terminated,
+# window_minimized, space_changed, display_changed). The same repair is on
+# ctrl+super+r in skhdrc for the times you want it by hand.
+#
+# THE FAULT. yabai's tree can end up holding a node for a window that is no
+# longer tiled -- a window destroyed without yabai seeing the notification, one
+# whose AX reference never arrived (a window born behind the lock: see the
+# gallery.ghosts plugin, which handles the case where the window is still on
+# screen), or one re-added to the tree twice. The node keeps its share of the
+# display, nothing draws in it, and the surviving tiles refuse to grow: a stripe
+# of empty desktop, often half the screen. It is NOT what `"$YABAI" -m space
+# --balance` fixes -- balance only evens the ratios WITHIN the existing
+# structure, so it redistributes the hole rather than closing it. Dropping the
+# Space to float and back rebuilds the tree from the windows that are actually
+# there, which is the only reliable cure.
+#
+# WHY IT IS GUARDED. That rebuild also discards every hand-tuned split ratio on
+# the Space, so it must run when there is a genuine hole and never otherwise --
+# a repair on every window close would quietly flatten the layout all day. Hence
+# the measurement below rather than a blind rebuild.
+#
+# THE MEASUREMENT. A healthy bsp Space is a perfect partition of its usable
+# rectangle: grow every tile by one window_gap and they tile the usable
+# rectangle grown by the same gap, exactly. So
+#
+#     coverage = SUM (w_i + gap)(h_i + gap) / (usable_w + gap)(usable_h + gap)
+#
+# is 1.0 when the Space is whole and drops by the fraction the hole occupies.
+# Comparing against the USABLE RECT, not against the tiles' own bounding box,
+# is the point: the common fault leaves the survivors a perfect partition of a
+# smaller box, so a bounding-box test calls a half-empty display healthy.
+#
+# THE USABLE RECT. Measured from yabai's own tiles, not from AppKit: macOS
+# reports no menu-bar inset in the secondary display's visibleFrame under
+# "Displays have separate Spaces" (verified here: it claims 1440 usable where
+# yabai tiles 1393), which would understate coverage by 2% on every external
+# display and eat most of the margin below. Instead every bsp Space on a display
+# contributes its tiles' extent, and the widest span wins -- one healthy Space
+# calibrates the display for all of them. The result is cached per display in
+# TREE_GUARD_STATE so that a display whose only Space is broken is still
+# measured against how far its tiles once reached; the cache is keyed on the
+# display's frame, so changing resolution discards it rather than measuring
+# against a rectangle that no longer exists.
+set -euo pipefail
+
+THRESHOLD="${TREE_GUARD_THRESHOLD:-0.97}"   # coverage below this = a hole
+SETTLE="${TREE_GUARD_SETTLE:-0.35}"         # let yabai finish re-tiling first
+CONFIRM="${TREE_GUARD_CONFIRM:-0.6}"        # a hole must still be there after this
+LOG="${TREE_GUARD_LOG:-$HOME/Library/Logs/yabai-tree-guard.log}"
+LOCK="${TREE_GUARD_LOCK:-/tmp/yabai-tree-guard.lock}"
+STATE="${TREE_GUARD_STATE:-$HOME/.config/yabai/tree-guard.rects}"
+# Seam for tests/tree_guard_test.sh: a stand-in yabai that serves fixture JSON.
+YABAI="${TREE_GUARD_YABAI:-yabai}"
+
+MODE="${1:-auto}"
+
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG"; }
+
+# Same probe as the gallery.ghosts plugin: acting on windows behind the lock is
+# what creates AX-less ghosts in the first place, and every window is
+# AX-blind then anyway, so the measurement would be meaningless.
+screen_locked() {
+  ioreg -n Root -d1 -a 2>/dev/null | plutil -p - 2>/dev/null | grep -q '"CGSSessionScreenIsLocked" => true'
+}
+
+# Each display's usable rectangle in yabai's coordinates, as:
+#   <display-index> <x> <y> <w> <h>
+# Built from the tiles of every bsp Space on that display (a Space that fills
+# its display defines the rect; a Space with a hole simply spans less and is
+# outvoted), then merged with the remembered maximum for that display frame.
+usable_rects() {
+  local spaces observed
+  spaces="$("$YABAI" -m query --spaces | jq -r '[.[] | select(.type == "bsp") | .index] | join(",")')"
+  [ -n "$spaces" ] || return 0
+
+  # left/top/right/bottom extent of the tiles on each display
+  observed="$("$YABAI" -m query --windows | jq -r --arg s "$spaces" '
+    ($s | split(",") | map(tonumber)) as $bsp
+    | [ .[]
+        | select(.space as $x | $bsp | index($x))
+        | select(.["is-floating"] | not)
+        | select(.["is-minimized"] | not)
+        | select(.["is-native-fullscreen"] | not)
+        | select(.["is-visible"]) ]
+    | group_by(.display)[]
+    | "\(.[0].display) \([.[].frame.x] | min) \([.[].frame.y] | min) \([.[] | .frame.x + .frame.w] | max) \([.[] | .frame.y + .frame.h] | max)"')"
+  [ -n "$observed" ] || return 0
+
+  # Frame signature per display: the cache is void if the display changed size.
+  local frames
+  frames="$("$YABAI" -m query --displays | jq -r '.[] | "\(.index) \(.frame.x),\(.frame.y),\(.frame.w),\(.frame.h)"')"
+
+  mkdir -p "$(dirname "$STATE")"
+  touch "$STATE"
+  awk -v state="$STATE" '
+    FNR == NR { sig[$1] = $2; next }                       # display frames
+    FILENAME == state { if (sig[$1] == $2) { cl[$1]=$3; ct[$1]=$4; cr[$1]=$5; cb[$1]=$6 } next }
+    {
+      d = $1; l = $2; t = $3; r = $4; b = $5
+      if (d in cl) {
+        if (cl[d] < l) l = cl[d]; if (ct[d] < t) t = ct[d]
+        if (cr[d] > r) r = cr[d]; if (cb[d] > b) b = cb[d]
+      }
+      keep[d] = sprintf("%s %d %d %d %d", sig[d], l, t, r, b)
+      printf "%d %d %d %d %d\n", d, l, t, r - l, b - t
+    }
+    END { out = state ".new"; for (d in keep) printf "%d %s\n", d, keep[d] > out; close(out); system("mv -f \"" out "\" \"" state "\"") }
+  ' <(echo "$frames") "$STATE" <(echo "$observed")
+}
+
+# coverage <space-index> <usable-w> <usable-h> -> "<tile-count> <ratio>"
+coverage() {
+  local idx="$1" u_w="$2" u_h="$3" tiles covered
+  read -r tiles covered < <("$YABAI" -m query --windows --space "$idx" | jq -r --argjson g "$GAP" '
+    [.[] | select(.["is-floating"] | not) | select(.["is-minimized"] | not) | select(.["is-visible"])]
+    | "\(length) \([.[] | (.frame.w + $g) * (.frame.h + $g)] | add // 0)"')
+  printf '%s %s\n' "$tiles" \
+    "$(awk -v c="$covered" -v w="$u_w" -v h="$u_h" -v g="$GAP" 'BEGIN { printf "%.4f", c / ((w + g) * (h + g)) }')"
+}
+
+repair_space() {
+  local idx="$1"
+  "$YABAI" -m space "$idx" --layout float
+  "$YABAI" -m space "$idx" --layout bsp
+}
+
+# --- repair the current Space, no questions asked ------------------------------
+if [ "$MODE" = "repair" ]; then
+  "$YABAI" -m query --spaces --space | grep -qE '"type": *"bsp"' || { echo "not a bsp Space"; exit 0; }
+  idx="$("$YABAI" -m query --spaces --space | sed -n 's/.*"index":\([0-9]*\).*/\1/p' | head -1)"
+  repair_space "$idx"
+  log "space $idx repaired on request"
+  echo "space $idx repaired"
+  exit 0
+fi
+
+# --- one at a time -------------------------------------------------------------
+# A close can fire several of the subscribed events at once; the first run does
+# the work and the rest fall away rather than queueing up behind it.
+if ! mkdir "$LOCK" 2>/dev/null; then
+  # A lock older than a minute is a crashed run, not a live one.
+  if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+    rmdir "$LOCK" 2>/dev/null || true
+    mkdir "$LOCK" 2>/dev/null || exit 0
+  else
+    exit 0
+  fi
+fi
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+screen_locked && exit 0
+[ "$MODE" = "check" ] || sleep "$SETTLE"
+
+GAP="$("$YABAI" -m config window_gap)"
+
+RECTS="$(usable_rects)"
+[ -n "$RECTS" ] || { log "no bsp tiles to measure against; skipped"; exit 0; }
+
+holes=0
+# Only the Spaces you can see: a hole on a hidden Space is invisible until it is
+# shown, and space_changed/display_changed bring us back here when that happens.
+for idx in $("$YABAI" -m query --spaces | jq -r '.[] | select(.["is-visible"]) | select(.type == "bsp") | .index'); do
+  disp="$("$YABAI" -m query --spaces --space "$idx" | jq -r '.display')"
+  rect="$(echo "$RECTS" | awk -v d="$disp" '$1 == d {print $4, $5; exit}')"
+  [ -n "$rect" ] || continue
+  set -- $rect; u_w="$1"; u_h="$2"
+
+  # Zoomed windows deliberately cover more than their node, and a native
+  # fullscreen window is not part of the partition at all: either way the
+  # arithmetic below would not describe this Space, so leave it alone.
+  if [ "$("$YABAI" -m query --windows --space "$idx" | jq '[.[] | select(.["has-fullscreen-zoom"] or .["has-parent-zoom"] or .["is-native-fullscreen"])] | length')" -gt 0 ]; then
+    continue
+  fi
+
+  read -r tiles ratio < <(coverage "$idx" "$u_w" "$u_h")
+  [ "$tiles" -gt 0 ] || continue
+  whole="$(awk -v r="$ratio" -v t="$THRESHOLD" 'BEGIN { print (r < t) ? 0 : 1 }')"
+
+  # A Space measured mid-transition (switching Spaces or displays, windows still
+  # being moved) can read short for an instant. Confirm the hole is still there
+  # a moment later before spending the Space's split ratios on a rebuild -- the
+  # same "must persist" discipline the gallery.ghosts watcher applies before it
+  # relaunches anything.
+  if [ "$whole" = "0" ] && [ "$MODE" != "check" ]; then
+    sleep "$CONFIRM"
+    read -r tiles2 ratio2 < <(coverage "$idx" "$u_w" "$u_h")
+    if [ "$tiles2" != "$tiles" ] || [ "$(awk -v r="$ratio2" -v t="$THRESHOLD" 'BEGIN { print (r < t) ? 0 : 1 }')" = "1" ]; then
+      log "space $idx: coverage $ratio recovered to $ratio2 on its own -- left alone"
+      continue
+    fi
+  fi
+
+  if [ "$whole" = "1" ]; then
+    [ "$MODE" = "check" ] && echo "space $idx: whole (coverage $ratio, $tiles tiles)"
+    continue
+  fi
+
+  holes=$((holes + 1))
+  if [ "$MODE" = "check" ]; then
+    echo "space $idx: HOLE (coverage $ratio, $tiles tiles, usable ${u_w}x${u_h})"
+  else
+    log "space $idx: coverage $ratio below $THRESHOLD with $tiles tiles -- rebuilding"
+    repair_space "$idx"
+    after="$("$YABAI" -m query --windows --space "$idx" | jq -r --argjson g "$GAP" '
+      [.[] | select(.["is-floating"] | not) | select(.["is-minimized"] | not) | select(.["is-visible"])
+       | (.frame.w + $g) * (.frame.h + $g)] | add // 0')"
+    log "space $idx: coverage now $(awk -v c="$after" -v w="$u_w" -v h="$u_h" -v g="$GAP" 'BEGIN { printf "%.4f", c / ((w + g) * (h + g)) }')"
+  fi
+done
+
+[ "$MODE" = "check" ] && [ "$holes" -gt 0 ] && exit 1
+exit 0

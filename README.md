@@ -43,11 +43,11 @@ top to bottom: keys go in at the top, pixels come out at the bottom.
  │             neighbour pick │  │ centred iTerm2   │  │             fzf/glow/btop, put     │
  │ rules.local app → Space    │  │ window           │  │             there by a yabai rule  │
  │             ("home")       │  └──────────────────┘  │ panel,      Hammerspoon webview    │
- │ ghosts      relaunch the   │                        │ overlay     (Gallery.spoon)        │
- │             windows yabai  │                        │ qml         PySide6 host running   │
- │             cannot see     │                        │             Omarchy QML unchanged  │
- └────────────────────────────┘                        │ service,    background timers      │
-                                                       │ bar-widget  inside the Spoon       │
+ │ ghosts      relaunch what  │                        │ overlay     (Gallery.spoon)        │
+ │             yabai can't see│                        │ qml         PySide6 host running   │
+ │ tree-guard  close a hole in│                        │             Omarchy QML unchanged  │
+ │             the tree       │                        │ service,    background timers      │
+ └────────────────────────────┘                        │ bar-widget  inside the Spoon       │
                                                        └────────────────────────────────────┘
                                                                           │
                                            ┌──────────────────────────────┘

@@ -153,4 +153,6 @@ say "running tests/import_test.sh"; "${SCRIPT_DIR}/import_test.sh" || fail "impo
 
 say "running tests/home_test.sh"; "${SCRIPT_DIR}/home_test.sh" || fail "home_test.sh failed"
 
+say "running tests/tree_guard_test.sh"; "${SCRIPT_DIR}/tree_guard_test.sh" || fail "tree_guard_test.sh failed"
+
 say "all checks passed"

@@ -58,7 +58,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + r | rotate the tree 90° |
 | super + b | new window in the default browser (first press: allow "skhd wants to control System Events") |
 | super + shift + b | balance all tiles |
-| ctrl + super + r | repair the tree: re-tile the Space from scratch (clears a region still reserved for a window that is gone; resets split ratios) |
+| ctrl + super + r | repair the tree by hand — normally automatic, see *Tree repair* below (resets that Space's split ratios) |
 | super + s | toggle stacked ⇄ tiled for the current Space |
 | super + ← → ↑ ↓ | resize by 60 px |
 | super + m | minimize |
@@ -84,6 +84,58 @@ and `{` `}` (⌥⇧8/9). Only the **left** Option is bound here, so type those
 symbols with the **right** Option — exactly like AltGr on Linux. Because of
 that, the voice assistant's push-to-talk on the Studio is the **right
 Command** key (`PTT_KEY=cmd_r` in its LaunchAgent), no longer right Option.
+
+
+## Tree repair (automatic)
+
+yabai's tree can end up holding a node for a window that is no longer tiled: a
+destroy notification it never received, a window whose accessibility reference
+never arrived, or a window added to the tree twice. The node keeps its share of
+the display, nothing draws in it, and the surviving tiles will not grow into it
+— a stripe of empty desktop, often half the screen.
+
+`yabai -m space --balance` does not fix this. Balance only evens the ratios
+*within* the existing structure, so it redistributes the hole instead of
+closing it. The cure is to drop the Space to `float` and back to `bsp`, which
+rebuilds the tree from the windows that are actually there.
+
+`tree-guard` does that automatically. `yabairc` subscribes it to
+`window_destroyed`, `application_terminated`, `window_minimized`,
+`space_changed` and `display_changed`; after each it measures every visible bsp
+Space and rebuilds only the ones that are genuinely short:
+
+    coverage = SUM (w + gap)(h + gap) / (usable_w + gap)(usable_h + gap)
+
+which is 1.0 for a whole Space and falls by the fraction the hole occupies.
+The comparison is against the display's **usable rect**, not the tiles' own
+bounding box: the survivors of this fault are a perfect partition of a smaller
+box, so a bounding-box test would call a half-empty display healthy.
+`tests/tree_guard_test.sh` asserts that on the geometry recorded when it
+happened.
+
+A rebuild costs that Space's hand-tuned split ratios, so it is deliberately
+hard to trigger by accident — coverage must fall below `0.97` **and** still be
+low when re-measured 0.6 s later, which keeps a Space caught mid-transition
+from being flattened. Nothing is touched while the screen is locked.
+
+The usable rect is calibrated from yabai's own tiles rather than from AppKit,
+whose `visibleFrame` omits the menu-bar inset on a secondary display under
+"Displays have separate Spaces" (it claims 1440 px usable where yabai tiles
+1393). Every bsp Space on a display contributes its extent, the widest span
+wins, and the result is cached per display frame in
+`~/.config/yabai/tree-guard.rects`; changing resolution discards the entry
+rather than measuring against a rectangle that no longer exists.
+
+Only repairs are logged, to `~/Library/Logs/yabai-tree-guard.log`, so an empty
+log means it has never had to act. By hand:
+
+```bash
+tree-guard check     # measure every visible Space, report, change nothing
+tree-guard repair    # rebuild the current Space unconditionally (= ctrl+super+r)
+```
+
+If it ever proves too eager or too shy: `TREE_GUARD_THRESHOLD`,
+`TREE_GUARD_CONFIRM`, `TREE_GUARD_SETTLE`.
 
 ## Learn (cheat sheets on a key)
 
