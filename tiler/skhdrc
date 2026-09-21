@@ -91,6 +91,16 @@ lalt - w : yabai -m window --close
 lalt - r : yabai -m space --rotate 90
 ## balance all tiles
 shift + lalt - b : yabai -m space --balance
+## repair the tree: re-tile this Space from scratch
+# Cure for a region the tree still reserves for a window that is no longer
+# tiled (a minimized or vanished window whose node was never collapsed), which
+# shows up as a stripe of empty desktop the tiles refuse to grow into.
+# --balance only evens the ratios WITHIN the existing structure, so it cannot
+# clear a hole; dropping to float and back rebuilds the tree from whatever is
+# actually on the Space. Hand-tuned split ratios are lost, hence a separate key
+# rather than folding it into balance. Guarded so it never converts a
+# deliberately float (or stack) Space into bsp -- it only repairs a bsp one.
+ctrl + lalt - r : yabai -m query --spaces --space | grep -qE '"type": *"bsp"' && yabai -m space --layout float && yabai -m space --layout bsp
 ## toggle stacked / tiled for the current Space
 lalt - s : yabai -m query --spaces --space | grep -qE '"type": *"stack"' && yabai -m space --layout bsp || yabai -m space --layout stack
 

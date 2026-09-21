@@ -58,6 +58,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + r | rotate the tree 90° |
 | super + b | new window in the default browser (first press: allow "skhd wants to control System Events") |
 | super + shift + b | balance all tiles |
+| ctrl + super + r | repair the tree: re-tile the Space from scratch (clears a region still reserved for a window that is gone; resets split ratios) |
 | super + s | toggle stacked ⇄ tiled for the current Space |
 | super + ← → ↑ ↓ | resize by 60 px |
 | super + m | minimize |
