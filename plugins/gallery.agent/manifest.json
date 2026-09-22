@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.agent",
+  "name": "Agent",
+  "version": "0.1.0",
+  "description": "Launch the default coding agent in a floating terminal, in the estate's git root.",
+  "kinds": ["tui"],
+  "entryPoints": {},
+  "gallery": {
+    "tui": {
+      "command": "~/.config/gallery/plugins/gallery.agent/agent",
+      "args": [],
+      "grid": "10:10:1:1:8:8"
+    }
+  }
+}

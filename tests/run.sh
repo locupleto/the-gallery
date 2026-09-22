@@ -155,4 +155,6 @@ say "running tests/home_test.sh"; "${SCRIPT_DIR}/home_test.sh" || fail "home_tes
 
 say "running tests/tree_guard_test.sh"; "${SCRIPT_DIR}/tree_guard_test.sh" || fail "tree_guard_test.sh failed"
 
+say "running tests/agent_test.sh"; "${SCRIPT_DIR}/agent_test.sh" || fail "agent_test.sh failed"
+
 say "all checks passed"

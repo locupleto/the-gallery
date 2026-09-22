@@ -52,6 +52,7 @@
 #   gallery home save [--roam A,B] [--dry-run]
 #   gallery home apply
 #   gallery ghosts [list|fix [OWNER|ID]|forget]
+#   gallery agent [open|inline|status|list|set <name>]
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -2786,6 +2787,24 @@ cmd_ghosts() {
   esac
 }
 
+cmd_agent() {
+  local script="${HOME}/.config/gallery/plugins/gallery.agent/agent"
+  if [ ! -x "${script}" ]; then
+    echo "gallery: gallery.agent plugin is not installed (run gallery install)" >&2
+    exit 1
+  fi
+  case "${1:-open}" in
+    # No argument opens the agent in its floating window (and focuses the
+    # existing one rather than starting a second session -- see gallery-tui
+    # cmd_open); the rest are handled by the plugin script itself.
+    open)          cmd_open "gallery.agent" ;;
+    status|list)   "${script}" "$@" ;;
+    set)           "${script}" "$@" ;;
+    inline)        shift; exec "${script}" launch ;;
+    *) echo "usage: gallery agent [open|inline|status|list|set <name>]" >&2; exit 1 ;;
+  esac
+}
+
 cmd_home() {
   local sub="${1:-}"
   [ $# -gt 0 ] && shift
@@ -3390,6 +3409,9 @@ case "${command}" in
     ;;
   ghosts)
     cmd_ghosts "$@"
+    ;;
+  agent)
+    cmd_agent "$@"
     ;;
   reload)
     cmd_reload

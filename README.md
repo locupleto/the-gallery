@@ -197,6 +197,7 @@ gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery ghosts [list] | fix [OWNER|ID] | forget |
+gallery agent [open] | inline | status | list | set <name> |
 gallery reload | log | doctor | install
 ```
 
@@ -284,6 +285,27 @@ theme's `hyprland_active_border` in `colors.toml` if it defines one, else
 `~/.config/gallery/state/borders.json` and are re-applied on every theme
 render. Inside the theme picker, `ctrl-w` cycles width through the presets
 3/5/8/12 and `ctrl-b` toggles bright.
+
+`agent ...` launches a coding agent in a floating terminal, modelled on
+Omarchy 4's `omarchy-agent`. `shift+ctrl+super+a` — Omarchy's own keys — opens
+the default agent in the estate's git root
+(`/Volumes/Work/development/projects/git`, override with
+`GALLERY_AGENT_DIR`; if it is unreachable the agent starts in `$HOME` rather
+than not at all). Omarchy starts in `$HOME/Work` for the same reason the
+Gallery starts in the git root: an agent will not remember a trust decision
+for `$HOME`, so one directory holding every repo means one approval instead of
+one per session. Like Omarchy, each agent is started with its own spelling of
+"do not stop to ask" — `claude --permission-mode bypassPermissions`, `gemini
+--yolo`, `opencode --auto`, and so on — because a keypress-launched agent that
+waits for an approval it cannot show is useless. That is a deliberate posture:
+the agent has full file and shell access, unattended, in that directory.
+`gallery agent set <name>` records the default in
+`state/agent.json` (`gallery agent list` shows which are installed), and
+`inline` runs it in the current terminal instead of a new window. The binding
+uses `open`, not `toggle`, because toggling a tui window closes it — free for
+btop, fatal for a live agent session; a second press focuses the running one.
+Agents that rename the terminal hide their own window from the Gallery, so
+Claude Code is started with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`.
 
 `ghosts ...` deals with windows the tiler cannot see. A window created while
 the screen is locked -- usually an app's own updater quitting and relaunching

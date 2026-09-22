@@ -18,5 +18,11 @@ lalt + cmd - 0 : "$HOME/bin/gallery" toggle akshar.radio-atlas
 shift + ctrl + lalt - space : "$HOME/bin/gallery" toggle gallery.themes
 ## Gallery: background picker (direct; image preview, current theme's wallpapers)
 shift + ctrl + lalt - b : "$HOME/bin/gallery" toggle gallery.backgrounds
+
+## launch the default coding agent in a floating terminal
+# Omarchy's own SUPER+SHIFT+CTRL+A, same keys. `open` rather than `toggle` on
+# purpose: toggling a tui window CLOSES it, which for btop is free but would
+# kill a live agent session -- open focuses the running one instead.
+shift + ctrl + lalt - a : "$HOME/bin/gallery" agent
 ## Gallery: next background for the current theme (Omarchy-style cycle)
 ctrl + lalt - space : "$HOME/bin/gallery" bg next
