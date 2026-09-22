@@ -38,6 +38,17 @@
 # is the point: the common fault leaves the survivors a perfect partition of a
 # smaller box, so a bounding-box test calls a half-empty display healthy.
 #
+# NOT EVERY GAP IS A TREE HOLE. A window that refuses to fill the tile yabai
+# gives it leaves the same shortfall as a dead node, and no rebuild will ever
+# close it -- QEMU with zoom-to-fit is the case that found this: it is managed
+# and tiled, but keeps the guest's aspect ratio and so letterboxes inside its
+# tile, reading as a 5% hole for as long as the VM is running. Left alone that
+# is a repair on every signal, flattening the split ratios all day for nothing.
+# So a repair that does not improve coverage is recorded against the Space's
+# window set in TREE_GUARD_SKIP and not attempted again until that set changes
+# (a window opened or closed re-arms it, which is also when a real hole can
+# next appear).
+#
 # THE USABLE RECT. Measured from yabai's own tiles, not from AppKit: macOS
 # reports no menu-bar inset in the secondary display's visibleFrame under
 # "Displays have separate Spaces" (verified here: it claims 1440 usable where
@@ -57,6 +68,7 @@ CONFIRM="${TREE_GUARD_CONFIRM:-0.6}"        # a hole must still be there after t
 LOG="${TREE_GUARD_LOG:-$HOME/Library/Logs/yabai-tree-guard.log}"
 LOCK="${TREE_GUARD_LOCK:-/tmp/yabai-tree-guard.lock}"
 STATE="${TREE_GUARD_STATE:-$HOME/.config/yabai/tree-guard.rects}"
+SKIP="${TREE_GUARD_SKIP:-$HOME/.config/yabai/tree-guard.skip}"
 # Seam for tests/tree_guard_test.sh: a stand-in yabai that serves fixture JSON.
 YABAI="${TREE_GUARD_YABAI:-yabai}"
 
@@ -124,6 +136,27 @@ coverage() {
     | "\(length) \([.[] | (.frame.w + $g) * (.frame.h + $g)] | add // 0)"')
   printf '%s %s\n' "$tiles" \
     "$(awk -v c="$covered" -v w="$u_w" -v h="$u_h" -v g="$GAP" 'BEGIN { printf "%.4f", c / ((w + g) * (h + g)) }')"
+}
+
+# The tiled windows on a Space, as a stable signature: the same selection the
+# coverage sum uses, so the entry is void the moment that set changes.
+fingerprint() {
+  "$YABAI" -m query --windows --space "$1" | jq -r '
+    [.[] | select(.["is-floating"] | not) | select(.["is-minimized"] | not)
+         | select(.["is-visible"]) | .id] | sort | join(",")'
+}
+
+skip_has()   { [ -f "$SKIP" ] && grep -qxF "$1 $2" "$SKIP"; }
+skip_clear() {
+  [ -f "$SKIP" ] || return 0
+  grep -q "^$1 " "$SKIP" || return 0     # nothing to drop: no rewrite per signal
+  grep -v "^$1 " "$SKIP" > "$SKIP.new" 2>/dev/null || true
+  mv -f "$SKIP.new" "$SKIP"
+}
+skip_add() {
+  skip_clear "$1"
+  mkdir -p "$(dirname "$SKIP")"
+  printf '%s %s\n' "$1" "$2" >> "$SKIP"
 }
 
 repair_space() {
@@ -199,20 +232,44 @@ for idx in $("$YABAI" -m query --spaces | jq -r '.[] | select(.["is-visible"]) |
   fi
 
   if [ "$whole" = "1" ]; then
-    [ "$MODE" = "check" ] && echo "space $idx: whole (coverage $ratio, $tiles tiles)"
+    if [ "$MODE" = "check" ]; then
+      echo "space $idx: whole (coverage $ratio, $tiles tiles)"
+    else
+      # Whole again, so whatever would not fill its tile has gone: drop the
+      # entry rather than leaving a line per window set that ever failed.
+      skip_clear "$idx"
+    fi
     continue
   fi
 
   holes=$((holes + 1))
+  fp="$(fingerprint "$idx")"
+
   if [ "$MODE" = "check" ]; then
-    echo "space $idx: HOLE (coverage $ratio, $tiles tiles, usable ${u_w}x${u_h})"
+    if skip_has "$idx" "$fp"; then
+      echo "space $idx: HOLE (coverage $ratio, $tiles tiles, usable ${u_w}x${u_h}) -- a rebuild did not close this one; a window is not filling its tile"
+    else
+      echo "space $idx: HOLE (coverage $ratio, $tiles tiles, usable ${u_w}x${u_h})"
+    fi
+    continue
+  fi
+
+  # Already rebuilt for exactly these windows and it did not help -- see
+  # "NOT EVERY GAP IS A TREE HOLE" above. Silent: this runs on every signal.
+  skip_has "$idx" "$fp" && continue
+
+  log "space $idx: coverage $ratio below $THRESHOLD with $tiles tiles -- rebuilding"
+  repair_space "$idx"
+  after="$("$YABAI" -m query --windows --space "$idx" | jq -r --argjson g "$GAP" '
+    [.[] | select(.["is-floating"] | not) | select(.["is-minimized"] | not) | select(.["is-visible"])
+     | (.frame.w + $g) * (.frame.h + $g)] | add // 0')"
+  ratio_after="$(awk -v c="$after" -v w="$u_w" -v h="$u_h" -v g="$GAP" 'BEGIN { printf "%.4f", c / ((w + g) * (h + g)) }')"
+  log "space $idx: coverage now $ratio_after"
+  if [ "$(awk -v r="$ratio_after" -v t="$THRESHOLD" 'BEGIN { print (r < t) ? 0 : 1 }')" = "1" ]; then
+    skip_clear "$idx"
   else
-    log "space $idx: coverage $ratio below $THRESHOLD with $tiles tiles -- rebuilding"
-    repair_space "$idx"
-    after="$("$YABAI" -m query --windows --space "$idx" | jq -r --argjson g "$GAP" '
-      [.[] | select(.["is-floating"] | not) | select(.["is-minimized"] | not) | select(.["is-visible"])
-       | (.frame.w + $g) * (.frame.h + $g)] | add // 0')"
-    log "space $idx: coverage now $(awk -v c="$after" -v w="$u_w" -v h="$u_h" -v g="$GAP" 'BEGIN { printf "%.4f", c / ((w + g) * (h + g)) }')"
+    skip_add "$idx" "$(fingerprint "$idx")"
+    log "space $idx: still short after the rebuild -- not the tree; leaving this window set alone"
   fi
 done
 

@@ -65,17 +65,18 @@ fixture() {   # fixture <output-path> <tile-json>...
       windows:  $w}' > "$out"
 }
 
-run_guard() {  # run_guard <fixture> <state> ; echoes output, returns the guard's exit code
+run_guard() {  # run_guard <fixture> <state> [skip-file] ; echoes output, returns the guard's exit code
   FIXTURE="$1" TREE_GUARD_YABAI="${WORK_DIR}/yabai" REPAIRS="${WORK_DIR}/repairs" \
-  TREE_GUARD_STATE="$2" PATH="${WORK_DIR}:${PATH}" \
+  TREE_GUARD_STATE="$2" TREE_GUARD_SKIP="${3:-${WORK_DIR}/skip.check}" PATH="${WORK_DIR}:${PATH}" \
     "${GUARD}" check 2>&1
 }
 
 # The real thing: default mode, which measures, confirms and then repairs.
-run_guard_auto() {  # run_guard_auto <fixture> <state> <repairs-file>
+run_guard_auto() {  # run_guard_auto <fixture> <state> <repairs-file> [skip-file]
   : > "$3"
   FIXTURE="$1" TREE_GUARD_YABAI="${WORK_DIR}/yabai" REPAIRS="$3" \
-  TREE_GUARD_STATE="$2" TREE_GUARD_LOG="${WORK_DIR}/guard.log" \
+  TREE_GUARD_STATE="$2" TREE_GUARD_SKIP="${4:-${WORK_DIR}/skip.auto}" \
+  TREE_GUARD_LOG="${WORK_DIR}/guard.log" \
   TREE_GUARD_LOCK="${WORK_DIR}/lock.$$.$RANDOM" \
   TREE_GUARD_SETTLE=0 TREE_GUARD_CONFIRM=0 PATH="${WORK_DIR}:${PATH}" \
     "${GUARD}" 2>&1
@@ -133,7 +134,7 @@ say "minimized windows do not count as coverage -- ${out}"
 
 # --- 5. the repair itself: float then bsp, on the broken Space only -------------
 cp "${WORK_DIR}/state-healthy" "${WORK_DIR}/state-auto"
-run_guard_auto "${BROKEN}" "${WORK_DIR}/state-auto" "${WORK_DIR}/repairs" >/dev/null
+run_guard_auto "${BROKEN}" "${WORK_DIR}/state-auto" "${WORK_DIR}/repairs" "${WORK_DIR}/skip-broken" >/dev/null
 [ -s "${WORK_DIR}/repairs" ] || fail "a persistent hole was measured but never repaired"
 grep -qx -- "-m space 1 --layout float" "${WORK_DIR}/repairs" || fail "no float step: $(cat "${WORK_DIR}/repairs")"
 grep -qx -- "-m space 1 --layout bsp"   "${WORK_DIR}/repairs" || fail "no bsp step: $(cat "${WORK_DIR}/repairs")"
@@ -145,5 +146,29 @@ cp "${WORK_DIR}/state-healthy" "${WORK_DIR}/state-noop"
 run_guard_auto "${HEALTHY}" "${WORK_DIR}/state-noop" "${WORK_DIR}/repairs-noop" >/dev/null
 [ -s "${WORK_DIR}/repairs-noop" ] && fail "a whole Space was rebuilt: $(cat "${WORK_DIR}/repairs-noop")"
 say "whole Space left untouched -- split ratios safe"
+
+# --- 7. a rebuild that did not help is not repeated -----------------------------
+# The fixture cannot change, so the rebuild in test 5 left the Space exactly as
+# short as it found it -- which is what a window that will not fill its tile
+# looks like (QEMU letterboxing inside its tile is the case that found this).
+# Repairing again on the next signal would flatten the split ratios all day for
+# a gap no rebuild can close, so the window set is remembered and skipped.
+[ -s "${WORK_DIR}/skip-broken" ] || fail "a fruitless rebuild was not recorded in the skip file"
+grep -qx "1 1,2,3" "${WORK_DIR}/skip-broken" \
+  || fail "skip entry should name space 1 and its window ids, got: $(cat "${WORK_DIR}/skip-broken")"
+run_guard_auto "${BROKEN}" "${WORK_DIR}/state-auto" "${WORK_DIR}/repairs-again" "${WORK_DIR}/skip-broken" >/dev/null
+[ -s "${WORK_DIR}/repairs-again" ] && fail "the same fruitless rebuild ran a second time: $(cat "${WORK_DIR}/repairs-again")"
+say "a rebuild that did not help is not repeated for the same window set"
+
+# --- 8. ... and the skip is void as soon as the windows change ------------------
+# One window closed: a different set, so a real hole that appears now is still
+# repaired rather than being masked by test 7's entry.
+BROKEN2="${WORK_DIR}/broken2.json"
+fixture "${BROKEN2}" \
+  "$(tile 1 1 1 1344 39  1208 692)" \
+  "$(tile 2 1 1 1344 740 600  692)"
+run_guard_auto "${BROKEN2}" "${WORK_DIR}/state-auto" "${WORK_DIR}/repairs-changed" "${WORK_DIR}/skip-broken" >/dev/null
+[ -s "${WORK_DIR}/repairs-changed" ] || fail "a hole with a changed window set was skipped"
+say "the skip is void once the window set changes -- a real hole is still repaired"
 
 say "PASS"

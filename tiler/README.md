@@ -126,6 +126,16 @@ wins, and the result is cached per display frame in
 `~/.config/yabai/tree-guard.rects`; changing resolution discards the entry
 rather than measuring against a rectangle that no longer exists.
 
+Not every gap is a tree hole, though. A window that refuses to fill the tile
+yabai gives it leaves exactly the same shortfall, and no rebuild will ever
+close it — QEMU with `zoom-to-fit=on` is the case that found this: it tiles,
+but keeps the guest's aspect ratio and letterboxes inside its tile, reading as
+a 5% hole for as long as the VM runs. So a rebuild that does not improve
+coverage is recorded against that Space's window set in
+`~/.config/yabai/tree-guard.skip` and not attempted again until the set
+changes — opening or closing a window re-arms it, which is also when a real
+hole can next appear. `tree-guard check` says so when it meets one.
+
 Only repairs are logged, to `~/Library/Logs/yabai-tree-guard.log`, so an empty
 log means it has never had to act. By hand:
 
