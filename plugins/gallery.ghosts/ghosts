@@ -201,12 +201,42 @@ state_set() {
   tmp=$(mktemp); jq --arg id "$1" --arg owner "$2" --arg action "$3" --argjson at "$(date +%s)" \
     '.[$id] = {owner: $owner, action: $action, at: $at}' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
+# --- relaunch circuit breaker ---------------------------------------------
+# State above is keyed by WINDOW id, and a relaunch hands the app a brand new
+# window with a brand new id -- so a re-ghosting app looked like a first
+# offence on every pass. On 2026-09-22 that quit and relaunched Claude and
+# ChatGPT roughly every 90 s for hours: the window ghosts sees is the one its
+# own `open -a` just produced. The rule that ends it: if an app ghosts again
+# after being relaunched, relaunching is not the cure. Say so once, then leave
+# it alone. Keyed by OWNER, not window id, because the id is exactly what
+# changes. `ghosts forget` (or the cooldown) gives an owner another chance.
+OWNER_PREFIX="owner:"
+RELAUNCH_COOLDOWN=21600   # 6 h before an owner is trusted with another attempt
+
+owner_state() { state_get "${OWNER_PREFIX}$1"; }
+owner_at()    { state_at  "${OWNER_PREFIX}$1"; }
+owner_mark()  { state_set "${OWNER_PREFIX}$1" "$1" "$2"; }
+
+# breaker_allows <owner> -- 0 when this owner may be relaunched now.
+breaker_allows() {
+  _o=$1
+  _st=$(owner_state "$_o")
+  [ -n "$_st" ] || return 0                 # never relaunched: go ahead
+  _at=$(owner_at "$_o"); [ -n "$_at" ] || _at=0
+  if [ $(( $(date +%s) - _at )) -ge "$RELAUNCH_COOLDOWN" ]; then
+    return 0                                # cooldown served, one more chance
+  fi
+  return 1
+}
+
 state_prune() {  # keep only ids still known to the window server OR yabai
   [ -f "$STATE_FILE" ] || return 0
   # Tile-class ghosts are not on screen, so the window-server list alone forgot
   # them every run and they were announced again each time (2026-09-18).
   live=$( { window_server_list | cut -d "$US" -f1; ${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r '.[].id'; } | jq -R . | jq -s .)
-  tmp=$(mktemp); jq --argjson live "$live" 'with_entries(select(.key as $k | $live | index($k)))' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+  # Owner records (the relaunch breaker) are deliberately NOT pruned: they are
+  # not window ids, and forgetting them is what re-arms the loop.
+  tmp=$(mktemp); jq --argjson live "$live" 'with_entries(select((.key | startswith("owner:")) or (.key as $k | $live | index($k))))' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
 
 cmd_check() {
@@ -240,8 +270,21 @@ cmd_check() {
         state_set "$id" "$owner" reported
         announce "$owner has a window the tiler cannot see; it is not restarted unasked, relaunch it when convenient." ;;
       *)
+        if ! breaker_allows "$owner"; then
+          state_set "$id" "$owner" reported
+          if [ "$(owner_state "$owner")" = exhausted ]; then
+            log "breaker: $owner still ghosting after a relaunch; staying quiet"
+          else
+            owner_mark "$owner" exhausted
+            log "breaker: $owner ghosted again after a relaunch; not retrying for ${RELAUNCH_COOLDOWN}s"
+            announce "$owner has a window the tiler cannot see. Relaunching it did not help, so it is being left alone; quit and reopen it yourself when convenient."
+          fi
+          continue
+        fi
         state_set "$id" "$owner" relaunching
-        if relaunch_pid "$pid" "$owner"; then state_set "$id" "$owner" relaunched
+        if relaunch_pid "$pid" "$owner"; then
+          owner_mark "$owner" relaunched
+          state_set "$id" "$owner" relaunched
         else state_set "$id" "$owner" reported; fi ;;
     esac
   done
@@ -271,7 +314,9 @@ cmd_fix() {
     case "$done_pids" in *" $pid "*) continue ;; esac
     done_pids="$done_pids$pid "
     echo "relaunching $owner (pid $pid, window $id)"
-    relaunch_pid "$pid" "$owner" && state_set "$id" "$owner" relaunched
+    # An explicit fix is never refused by the breaker -- it was asked for --
+    # but it is recorded, so an app that ghosts again afterwards trips it.
+    relaunch_pid "$pid" "$owner" && { owner_mark "$owner" relaunched; state_set "$id" "$owner" relaunched; }
   done
 }
 

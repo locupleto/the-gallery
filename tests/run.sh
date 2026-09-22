@@ -159,4 +159,6 @@ say "running tests/agent_test.sh"; "${SCRIPT_DIR}/agent_test.sh" || fail "agent_
 
 say "running tests/weather_test.sh"; "${SCRIPT_DIR}/weather_test.sh" || fail "weather_test.sh failed"
 
+say "running tests/ghosts_test.sh"; "${SCRIPT_DIR}/ghosts_test.sh" || fail "ghosts_test.sh failed"
+
 say "all checks passed"
