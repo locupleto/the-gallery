@@ -38,6 +38,8 @@ BORDERS_BIN_SRC="${SCRIPT_DIR}/bin/gallery-borders"
 BORDERS_BIN_DEST="${HOME_DIR}/bin/gallery-borders"
 QML_BIN_SRC="${SCRIPT_DIR}/bin/gallery-qml"
 QML_BIN_DEST="${HOME_DIR}/bin/gallery-qml"
+AGENT_BIN_SRC="${SCRIPT_DIR}/bin/gallery-agent"
+AGENT_BIN_DEST="${HOME_DIR}/bin/gallery-agent"
 QML_SRC="${SCRIPT_DIR}/qml"
 QML_DEST="${CONFIG_DIR}/qml"
 PATCHES_SRC="${SCRIPT_DIR}/patches"
@@ -146,7 +148,7 @@ do_uninstall() {
   else
     echo "[gallery] no CLI installed at ${HS_BIN_DEST}"
   fi
-  run rm -f "${TUI_BIN_DEST}" "${MENU_BIN_DEST}" "${QML_BIN_DEST}" "${BORDERS_BIN_DEST}"
+  run rm -f "${TUI_BIN_DEST}" "${MENU_BIN_DEST}" "${QML_BIN_DEST}" "${BORDERS_BIN_DEST}" "${AGENT_BIN_DEST}"
 
   echo "[gallery] leaving ${CONFIG_DIR} in place"
   echo "[gallery] leaving ${HS_INIT} in place -- Gallery load block was not removed automatically."
@@ -240,6 +242,18 @@ run chmod +x "${TUI_BIN_DEST}" "${MENU_BIN_DEST}"
 echo "[gallery] installing theme-aware borders helper to ${BORDERS_BIN_DEST}"
 run cp "${BORDERS_BIN_SRC}" "${BORDERS_BIN_DEST}"
 run chmod +x "${BORDERS_BIN_DEST}"
+
+echo "[gallery] installing coding-agent launcher to ${AGENT_BIN_DEST}"
+run cp "${AGENT_BIN_SRC}" "${AGENT_BIN_DEST}"
+run chmod +x "${AGENT_BIN_DEST}"
+# The agent shipped briefly (2026-09-22) as a tui-kind plugin, which opened it
+# in a floating window; it is a plain bin script now, so an installation that
+# saw that version still has the plugin -- and `gallery open gallery.agent`
+# would still float one. Removed here rather than left to rot.
+if [ -d "${PLUGINS_DEST}/gallery.agent" ]; then
+  echo "[gallery] removing the superseded gallery.agent plugin (the agent is ${AGENT_BIN_DEST} now)"
+  run rm -rf "${PLUGINS_DEST}/gallery.agent"
+fi
 
 if [ -f "${QML_BIN_SRC}" ]; then
   echo "[gallery] installing qml host launcher to ${QML_BIN_DEST}"

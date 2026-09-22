@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 #
-# agent_test.sh -- offline test of plugins/gallery.agent/agent.
+# agent_test.sh -- offline test of bin/gallery-agent.
 #
 # Entirely offline: GALLERY_CONFIG_DIR points at a temp tree so the real
 # ~/.config/gallery/state/agent.json is never touched, GALLERY_AGENT_DIR at a
-# temp directory, and a stub PATH provides fake agent binaries. `launch` is
-# never run -- only the pure verbs (status/list/set) and the start-directory
-# fallback, both asserted by inspecting what `status` reports.
+# temp directory, and a stub PATH provides fake agent binaries. No agent is
+# ever launched and no window is ever opened -- the pure verbs
+# (status/list/set) are asserted through what `status` reports, and `open`
+# through GALLERY_AGENT_PRINT_COMMAND, which prints the window command
+# instead of handing it to iTerm.
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-AGENT="${REPO_ROOT}/plugins/gallery.agent/agent"
+AGENT="${REPO_ROOT}/bin/gallery-agent"
 
 say()  { echo "[agent_test] $*"; }
 fail() { echo "[agent_test] FAIL: $*" >&2; exit 1; }
@@ -36,7 +38,7 @@ say "default is claude, launched unattended"
 
 # --- 2. every supported agent has an unattended flag ---------------------------
 # A new agent added without one would silently sit waiting for an approval it
-# cannot show, which is the whole failure this plugin exists to avoid.
+# cannot show, which is the whole failure this launcher exists to avoid.
 for a in claude gemini opencode codex copilot crush; do
   run set "$a" >/dev/null 2>&1 || fail "set $a was rejected"
   line="$(run status | sed -n 's/^command: //p')"
@@ -66,5 +68,22 @@ grep -q '^agent:   gemini' <<<"$(run status)" || fail "the default did not persi
 grep -q '^gemini .*(default)' <<<"$(run list)" || fail "list does not mark the default"
 grep -q '^claude .*installed' <<<"$(run list)" || fail "list does not report installed agents"
 say "default persists in state and list marks it"
+
+# --- 6. the window command: a login shell, and nothing tui about it ------------
+# The agent window is an ORDINARY tiled terminal, like Omarchy's (whose
+# omarchy-launch-tui is only `xdg-terminal-exec -e <command>`), never a
+# gallery-tui floating surface. Two ways that could regress, both pinned here:
+# dropping the login shell, which loses the PATH that has `claude` on it
+# because iTerm inherits launchd's; and reviving the "Gallery: " window title,
+# which a yabai rule floats and un-manages.
+run set claude >/dev/null
+cmd="$(GALLERY_CONFIG_DIR="${WORK_DIR}/config" GALLERY_AGENT_DIR="${WORK_DIR}/start" \
+       PATH="${WORK_DIR}/bin:/usr/bin:/bin" GALLERY_AGENT_PRINT_COMMAND=1 "${AGENT}" open)"
+grep -q -- '/bin/zsh -l -c' <<<"${cmd}" || fail "window command is not a login shell: ${cmd}"
+grep -qF -- "${AGENT}" <<<"${cmd}" || fail "window command does not re-run this script: ${cmd}"
+if grep -q 'Gallery: ' <<<"${cmd}"; then
+  fail "window carries a Gallery: title, which yabai floats: ${cmd}"
+fi
+say "window command is a login shell re-running launch, with no tui title"
 
 say "PASS"

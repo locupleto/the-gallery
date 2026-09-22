@@ -19,10 +19,11 @@ shift + ctrl + lalt - space : "$HOME/bin/gallery" toggle gallery.themes
 ## Gallery: background picker (direct; image preview, current theme's wallpapers)
 shift + ctrl + lalt - b : "$HOME/bin/gallery" toggle gallery.backgrounds
 
-## launch the default coding agent in a floating terminal
-# Omarchy's own SUPER+SHIFT+CTRL+A, same keys. `open` rather than `toggle` on
-# purpose: toggling a tui window CLOSES it, which for btop is free but would
-# kill a live agent session -- open focuses the running one instead.
+## launch the default coding agent in a new terminal window
+# Omarchy's own SUPER+SHIFT+CTRL+A, same keys, and the same shape: an ordinary
+# terminal window, tiled with everything else, not a floating Gallery surface
+# -- an agent is worked in for an hour, not glanced at. Every press opens
+# another one, as Omarchy's does; close it by quitting the agent.
 shift + ctrl + lalt - a : "$HOME/bin/gallery" agent
 ## Gallery: next background for the current theme (Omarchy-style cycle)
 ctrl + lalt - space : "$HOME/bin/gallery" bg next

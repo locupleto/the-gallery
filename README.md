@@ -123,7 +123,7 @@ running system is always a copy:
 | `tools/hooks/*.sh` | `~/.config/gallery/hooks/theme-set.d/` | theme-set hooks; add your own beside them |
 | `qml/` (`host.py`, `shim/`, `vendor/`) | `~/.config/gallery/qml/` | PySide6 host + a Quickshell shim so Omarchy QML plugins run unmodified |
 | `patches/<plugin-id>/` | `~/.config/gallery/patches/` | macOS overrides laid over imported Linux plugins on every install/update |
-| `bin/gallery`, `gallery-tui`, `gallery-menu`, `gallery-qml`, `gallery-borders`, `gallery-hs` | `~/bin/` | the CLI and the helpers it shells out to |
+| `bin/gallery`, `gallery-tui`, `gallery-menu`, `gallery-qml`, `gallery-borders`, `gallery-agent`, `gallery-hs` | `~/bin/` | the CLI and the helpers it shells out to |
 | — | `~/.config/gallery/state/` | generated: rendered theme files + your `*.json` preferences |
 | — | `~/.config/gallery/gallery.json` | which plugins are enabled |
 | — | `~/.config/gallery/feed/<id>.json` | `bar-widget` output, for Übersicht or anything else to read |
@@ -286,7 +286,7 @@ theme's `hyprland_active_border` in `colors.toml` if it defines one, else
 render. Inside the theme picker, `ctrl-w` cycles width through the presets
 3/5/8/12 and `ctrl-b` toggles bright.
 
-`agent ...` launches a coding agent in a floating terminal, modelled on
+`agent ...` launches a coding agent in a terminal window, modelled on
 Omarchy 4's `omarchy-agent`. `shift+ctrl+super+a` — Omarchy's own keys — opens
 the default agent in the estate's git root
 (`/Volumes/Work/development/projects/git`, override with
@@ -301,11 +301,20 @@ waits for an approval it cannot show is useless. That is a deliberate posture:
 the agent has full file and shell access, unattended, in that directory.
 `gallery agent set <name>` records the default in
 `state/agent.json` (`gallery agent list` shows which are installed), and
-`inline` runs it in the current terminal instead of a new window. The binding
-uses `open`, not `toggle`, because toggling a tui window closes it — free for
-btop, fatal for a live agent session; a second press focuses the running one.
-Agents that rename the terminal hide their own window from the Gallery, so
-Claude Code is started with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`.
+`inline` runs it in the current terminal instead of a new window.
+
+The window is an **ordinary iTerm2 window, tiled like any other** — not a
+floating Gallery surface. Omarchy's launcher ends in `omarchy-launch-tui
+--app-id=org.omarchy.agent`, and that script is only `xdg-terminal-exec -e
+<command>`: the app-id exists so rules and themes *can* single the agent out,
+but nothing floats it, so Hyprland tiles it. Floating and centred is right for
+btop and the Learn sheets, which are glanced at and dismissed, and wrong for a
+window that is worked in for an hour beside an editor. As in Omarchy, every
+press opens another agent rather than focusing the first: one per repo, one
+per task. (It shipped for one day as a floating `tui` plugin; that was the
+house convention applied past the point where it fitted.) The window runs a
+login shell, because iTerm inherits launchd's `PATH`, which has neither
+Homebrew nor the node prefixes — and therefore no `claude` — on it.
 
 `ghosts ...` deals with windows the tiler cannot see. A window created while
 the screen is locked -- usually an app's own updater quitting and relaunching

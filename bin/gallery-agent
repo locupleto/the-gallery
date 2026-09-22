@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+#
+# gallery-agent -- launch the default coding agent, modelled on Omarchy 4's
+# omarchy-agent (/usr/share/omarchy/bin/omarchy-agent).
+#
+#   gallery-agent            open the agent in a new terminal window
+#   gallery-agent inline     run the agent in the current terminal
+#   gallery-agent status     which agent is default, where it starts, is it installed
+#   gallery-agent list       the supported agents and whether each is on PATH
+#   gallery-agent set <name> record the default agent
+#
+# Two doors, both ending here: the `gallery agent` CLI verb and
+# shift+ctrl+super+a in skhd/gallery.skhd.
+#
+# AN ORDINARY WINDOW, TILED. Omarchy's launcher ends in `omarchy-launch-tui
+# --app-id=org.omarchy.agent`, and that script is nothing but
+# `xdg-terminal-exec --app-id=... -e <command>` -- a plain terminal window.
+# The app-id exists so rules and themes CAN single the agent out; no Omarchy
+# rule floats it (only org.omarchy.about and the screensaver float), so
+# Hyprland tiles it with everything else. This does the same: a new iTerm2
+# window, tiled by yabai. It is deliberately NOT a gallery-tui surface --
+# floating and centred is right for btop and Learn, which are glanced at and
+# dismissed, and wrong for a window that is worked in for an hour beside an
+# editor. As in Omarchy, a second keypress opens a SECOND agent rather than
+# focusing the first: one per repo, one per task (Urban's ruling 2026-09-22,
+# after the first cut shipped it as a floating tui plugin).
+#
+# THE START DIRECTORY. Omarchy cds to $HOME/Work before launching, because an
+# agent will not remember a trust decision for $HOME and would re-ask on every
+# session. The estate has no ~/Work; its equivalent is the git root, where
+# every repo already lives, so one trust approval covers all of them. That is
+# the default below and it applies however the agent is launched (Urban's
+# ruling 2026-09-22, chosen over Omarchy's "only when PWD is $HOME" rule);
+# GALLERY_AGENT_DIR overrides it, and a directory that has gone missing -- the
+# git root lives on an external volume -- falls back to $HOME with a warning
+# rather than failing to launch.
+#
+# PERMISSIONS. Each agent is started with its own spelling of "do not stop to
+# ask", exactly as omarchy-agent does: a keypress-launched agent that sits
+# waiting for an approval it cannot show is useless. This is a deliberate
+# posture, not an oversight -- the agent has full file and shell access,
+# unattended, in the start directory above.
+set -euo pipefail
+
+CONFIG_DIR="${GALLERY_CONFIG_DIR:-${HOME}/.config/gallery}"
+STATE_FILE="${CONFIG_DIR}/state/agent.json"
+DEFAULT_DIR="${GALLERY_AGENT_DIR:-/Volumes/Work/development/projects/git}"
+DEFAULT_AGENT="claude"
+
+# This script's own absolute path: the window opened below runs it again with
+# `launch`, and the copy that opened the window is the copy that should run --
+# a repo checkout under test must not hand off to the installed one.
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+# The supported agents and the flag each one needs to run unattended. Kept in
+# the same order as Omarchy's own case statement so the two can be compared.
+agent_command() {
+  case "$1" in
+    claude)   printf '%s\n' claude --permission-mode bypassPermissions ;;
+    gemini)   printf '%s\n' gemini --yolo ;;
+    opencode) printf '%s\n' opencode --auto ;;
+    codex)    printf '%s\n' codex --dangerously-bypass-approvals-and-sandbox ;;
+    copilot)  printf '%s\n' copilot --allow-all ;;
+    crush)    printf '%s\n' crush --yolo ;;
+    *) return 1 ;;
+  esac
+}
+
+SUPPORTED="claude gemini opencode codex copilot crush"
+
+die() { echo "gallery agent: $*" >&2; exit 1; }
+
+current_agent() {
+  local a=""
+  [ -f "${STATE_FILE}" ] && a="$(sed -n 's/.*"agent"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${STATE_FILE}" | head -1)"
+  printf '%s\n' "${a:-${DEFAULT_AGENT}}"
+}
+
+start_dir() {
+  if [ -d "${DEFAULT_DIR}" ]; then
+    printf '%s\n' "${DEFAULT_DIR}"
+  else
+    echo "gallery agent: ${DEFAULT_DIR} is not reachable, starting in ${HOME}" >&2
+    printf '%s\n' "${HOME}"
+  fi
+}
+
+# A new iTerm2 window running this script's `launch` verb.
+#
+# The window's command is a LOGIN shell (`zsh -l`), not the agent binary
+# directly: iTerm inherits launchd's PATH, which has neither Homebrew nor the
+# node prefixes on it, so `claude` would not be found. `-l` is enough -- it
+# sources .zprofile, where brew shellenv sets PATH -- and it is deliberately
+# not `-i`: an interactive shell would also source .zshrc for nothing.
+#
+# The script path is passed as $0 rather than interpolated into the quoted
+# command, so a path containing spaces or quotes cannot break out of it.
+open_window() {
+  local script="$1"
+  local command="/bin/zsh -l -c 'exec \"\$0\" launch' \"${script}\""
+  # Test seam: tests/agent_test.sh asserts on the command without ever
+  # opening a window (see the login-shell note above -- it is the one part
+  # of this that is easy to get subtly wrong).
+  if [ -n "${GALLERY_AGENT_PRINT_COMMAND:-}" ]; then
+    printf '%s\n' "${command}"
+    return 0
+  fi
+  # AppleScript string literal: backslashes first, then double quotes.
+  local as_command
+  as_command="$(printf '%s' "${command}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+  # A cold iTerm opens its own startup window and is not ready for
+  # AppleScript immediately, so it is launched first and waited for -- the
+  # same lesson as `super + return` in tiler/skhdrc.
+  if ! pgrep -xq iTerm2; then
+    open -a iTerm
+    local waited=0
+    while ! pgrep -xq iTerm2 && [ "${waited}" -lt 20 ]; do
+      sleep 0.5
+      waited=$((waited + 1))
+    done
+    sleep 1
+  fi
+  osascript \
+    -e 'tell application id "com.googlecode.iterm2"' \
+    -e "set w to (create window with default profile command \"${as_command}\")" \
+    -e 'activate' \
+    -e 'select w' \
+    -e 'end tell' >/dev/null
+}
+
+case "${1:-open}" in
+  list)
+    for a in ${SUPPORTED}; do
+      if command -v "$a" >/dev/null 2>&1; then mark="installed"; else mark="-"; fi
+      [ "$a" = "$(current_agent)" ] && mark="${mark} (default)"
+      printf '%-10s %s\n' "$a" "${mark}"
+    done
+    ;;
+  status)
+    a="$(current_agent)"
+    printf 'agent:   %s%s\n' "$a" "$(command -v "$a" >/dev/null 2>&1 || echo ' (NOT INSTALLED)')"
+    printf 'starts:  %s\n' "$(start_dir 2>/dev/null)"
+    printf 'command: %s\n' "$(agent_command "$a" 2>/dev/null | tr '\n' ' ')"
+    printf 'state:   %s\n' "${STATE_FILE}"
+    ;;
+  set)
+    name="${2:?usage: gallery agent set <name>}"
+    agent_command "${name}" >/dev/null 2>&1 || die "unsupported agent: ${name} (one of: ${SUPPORTED})"
+    command -v "${name}" >/dev/null 2>&1 || echo "gallery agent: warning -- ${name} is not on PATH" >&2
+    mkdir -p "$(dirname "${STATE_FILE}")"
+    printf '{\n  "agent": "%s"\n}\n' "${name}" > "${STATE_FILE}.new"
+    mv -f "${STATE_FILE}.new" "${STATE_FILE}"
+    echo "default agent: ${name}"
+    ;;
+  open)
+    # Checked here as well as in `launch`, so a missing agent is reported in
+    # the terminal the key was pressed from instead of in a window that
+    # opens and closes again before it can be read.
+    a="$(current_agent)"
+    command -v "$a" >/dev/null 2>&1 || die "${a} is not installed (gallery agent list)"
+    open_window "${SELF}"
+    ;;
+  inline|launch)
+    a="$(current_agent)"
+    command -v "$a" >/dev/null 2>&1 || die "${a} is not installed (gallery agent list)"
+    # Read the command into an array before the cd, so a failure here is
+    # reported from a known directory.
+    cmd=()
+    while IFS= read -r part; do cmd+=("$part"); done < <(agent_command "$a")
+    cd "$(start_dir)"
+    exec "${cmd[@]}"
+    ;;
+  *)
+    die "usage: gallery agent [open|inline|status|list|set <name>]"
+    ;;
+esac

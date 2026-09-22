@@ -2787,22 +2787,20 @@ cmd_ghosts() {
   esac
 }
 
+# `gallery agent ...` -- a thin pass-through to gallery-agent, which owns
+# every verb (see the header of that script for the start directory, the
+# unattended permission flags, and why the window is tiled rather than
+# floated). Not a plugin: the agent opens an ordinary terminal window, so it
+# needs none of the plugin host, exactly as Omarchy's own omarchy-agent is a
+# bin script and not a shell plugin.
 cmd_agent() {
-  local script="${HOME}/.config/gallery/plugins/gallery.agent/agent"
+  local script
+  script="$(resolve_helper_bin gallery-agent)"
   if [ ! -x "${script}" ]; then
-    echo "gallery: gallery.agent plugin is not installed (run gallery install)" >&2
+    echo "gallery: gallery-agent not found (${script}); run install.sh" >&2
     exit 1
   fi
-  case "${1:-open}" in
-    # No argument opens the agent in its floating window (and focuses the
-    # existing one rather than starting a second session -- see gallery-tui
-    # cmd_open); the rest are handled by the plugin script itself.
-    open)          cmd_open "gallery.agent" ;;
-    status|list)   "${script}" "$@" ;;
-    set)           "${script}" "$@" ;;
-    inline)        shift; exec "${script}" launch ;;
-    *) echo "usage: gallery agent [open|inline|status|list|set <name>]" >&2; exit 1 ;;
-  esac
+  exec "${script}" "$@"
 }
 
 cmd_home() {
