@@ -157,4 +157,6 @@ say "running tests/tree_guard_test.sh"; "${SCRIPT_DIR}/tree_guard_test.sh" || fa
 
 say "running tests/agent_test.sh"; "${SCRIPT_DIR}/agent_test.sh" || fail "agent_test.sh failed"
 
+say "running tests/weather_test.sh"; "${SCRIPT_DIR}/weather_test.sh" || fail "weather_test.sh failed"
+
 say "all checks passed"

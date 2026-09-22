@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "gallery.weather",
+  "name": "Weather",
+  "version": "0.1.0",
+  "kinds": ["tui"],
+  "entryPoints": {},
+  "gallery": {
+    "tui": {
+      "command": "~/.config/gallery/plugins/gallery.weather/weather.sh",
+      "args": [],
+      "grid": "6:6:2:2:2:2"
+    }
+  }
+}

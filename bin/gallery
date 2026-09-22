@@ -48,6 +48,11 @@
 #   gallery borders status
 #   gallery borders width <1-12>
 #   gallery borders bright on|off|toggle
+#   gallery weather
+#   gallery weather location --set <location> | --clear
+#   gallery weather units --set metric|imperial
+#   gallery weather icons --set meteocons-line|meteocons-fill
+#   gallery weather key --set <key> | --clear
 #   gallery home show
 #   gallery home save [--roam A,B] [--dry-run]
 #   gallery home apply
@@ -77,6 +82,11 @@ CONSOLE_STATE_FILE="${CONFIG_DIR}/state/console.json"
 FONT_STATE_FILE="${CONFIG_DIR}/state/font.json"
 WIDGETS_STATE_FILE="${CONFIG_DIR}/state/widgets.json"
 BORDERS_STATE_FILE="${CONFIG_DIR}/state/borders.json"
+WEATHER_STATE_FILE="${CONFIG_DIR}/state/weather.json"
+# The OpenWeatherMap API key is kept out of WEATHER_STATE_FILE (and so out
+# of anything that dumps that file wholesale) in its own mode-600 file,
+# never printed back by any `gallery weather` subcommand.
+WEATHER_KEY_FILE="${CONFIG_DIR}/weather.key"
 # ~/.config/yabai/rules.local lives OUTSIDE ~/.config/gallery: it is yabai's
 # own machine-local file, sourced by tiler/yabairc (see that file's
 # "machine-local rules" block and tiler/rules.local.example), not something
@@ -162,6 +172,13 @@ commands:
   borders status                  show the focused-window border width/bright prefs
   borders width <1-12>            set the focused-window border width (default 5)
   borders bright on|off|toggle    mix the active border colour toward bright_foreground
+  weather                         show the weather plugin's location/units/icons and key status
+  weather location --set <loc>    set the OpenWeatherMap location (City,ISO-country-code)
+  weather location --clear        revert the location to the default (Stockholm,SE)
+  weather units --set <u>         set the units (metric|imperial)
+  weather icons --set <s>         set the icon set (meteocons-line|meteocons-fill)
+  weather key --set <key>         store the OpenWeatherMap API key (mode 600, never echoed)
+  weather key --clear             remove the stored API key
   home show                       print the window -> Space map and live home-* rules
   home save [--roam A,B] [--dry-run]
                                    snapshot the current layout into ~/.config/yabai/rules.local
@@ -2415,6 +2432,260 @@ cmd_borders() {
   esac
 }
 
+# --- Gallery weather (gallery.weather; a floating glance panel over -----------
+# OpenWeatherMap's current-conditions endpoint) -------------------------------
+#
+# Settings other than the API key are recorded in WEATHER_STATE_FILE as
+# {"location": <str>, "units": "metric"|"imperial", "iconSet":
+# "meteocons-line"|"meteocons-fill"}; missing/invalid fields fall back to
+# the defaults below (location "Stockholm,SE", units "metric", iconSet
+# "meteocons-line"). Unlike CONSOLE_STATE_FILE/FONT_STATE_FILE/
+# BORDERS_STATE_FILE, a single setter only ever touches its own field --
+# weather_write_field reads the file first and merges, so setting units
+# never clobbers a previously-set location or iconSet.
+#
+# The API key never goes in that JSON file: it lives in its own mode-600
+# file, WEATHER_KEY_FILE, and no `gallery weather` subcommand -- including
+# bare `gallery weather` -- ever prints it back, only whether one is
+# present ("configured"/"not configured").
+
+# weather_read_prefs -- prints three lines (location, units, iconSet),
+# falling back per-field to the defaults above for a missing file, an
+# unreadable/non-object file, or an invalid value for that one field. Same
+# missing-file-means-defaults tolerance as borders_read_prefs.
+weather_read_prefs() {
+  if [ ! -f "${WEATHER_STATE_FILE}" ]; then
+    printf 'Stockholm,SE\nmetric\nmeteocons-line\n'
+    return 0
+  fi
+  python3 -c '
+import json, sys
+
+path = sys.argv[1]
+location = "Stockholm,SE"
+units = "metric"
+icon_set = "meteocons-line"
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        loc = data.get("location")
+        if isinstance(loc, str) and loc.strip():
+            location = loc
+        u = data.get("units")
+        if u in ("metric", "imperial"):
+            units = u
+        icons = data.get("iconSet")
+        if icons in ("meteocons-line", "meteocons-fill"):
+            icon_set = icons
+except Exception:
+    pass
+print(location)
+print(units)
+print(icon_set)
+' "${WEATHER_STATE_FILE}" 2>/dev/null || printf 'Stockholm,SE\nmetric\nmeteocons-line\n'
+}
+
+# weather_write_field <key> <value> -- read-modify-write: loads
+# WEATHER_STATE_FILE (treating a missing/unreadable/non-object file as
+# {}), sets one field, and atomically rewrites it (temp file + os.replace,
+# same pattern as console_write_mode) with every other field -- including
+# ones this script does not itself know about -- left untouched.
+weather_write_field() {
+  local key="$1" value="$2"
+  mkdir -p "$(dirname "${WEATHER_STATE_FILE}")"
+  python3 -c '
+import json, os, sys, tempfile
+
+path, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+
+data = {}
+try:
+    with open(path, encoding="utf-8") as fh:
+        loaded = json.load(fh)
+    if isinstance(loaded, dict):
+        data = loaded
+except Exception:
+    data = {}
+
+data[key] = value
+
+d = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".weather.", suffix=".json", dir=d)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+except Exception:
+    os.unlink(tmp)
+    raise
+' "${WEATHER_STATE_FILE}" "${key}" "${value}"
+}
+
+# weather_key_write <key> -- atomically writes the API key to
+# WEATHER_KEY_FILE, mode 600 (temp file created alongside it, chmod'd
+# before AND after the rename so the key is never briefly world-readable).
+weather_key_write() {
+  local key="$1"
+  mkdir -p "$(dirname "${WEATHER_KEY_FILE}")"
+  python3 -c '
+import os, sys, tempfile
+
+path = sys.argv[1]
+key = sys.argv[2]
+
+d = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".weather-key.", dir=d)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(key)
+        if not key.endswith("\n"):
+            fh.write("\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
+except Exception:
+    os.unlink(tmp)
+    raise
+' "${WEATHER_KEY_FILE}" "${key}"
+}
+
+# weather_key_clear -- removes WEATHER_KEY_FILE if present.
+weather_key_clear() {
+  rm -f "${WEATHER_KEY_FILE}"
+}
+
+# weather_key_configured -- exit 0 if a non-empty key file is present.
+weather_key_configured() {
+  [ -s "${WEATHER_KEY_FILE}" ]
+}
+
+# cmd_weather_status -- prints the current location/units/iconSet and
+# whether an API key is present. NEVER prints the key itself.
+cmd_weather_status() {
+  local prefs location units icon_set key_status
+  prefs="$(weather_read_prefs)"
+  location="$(printf '%s\n' "${prefs}" | sed -n 1p)"
+  units="$(printf '%s\n' "${prefs}" | sed -n 2p)"
+  icon_set="$(printf '%s\n' "${prefs}" | sed -n 3p)"
+  if weather_key_configured; then
+    key_status="configured"
+  else
+    key_status="not configured"
+  fi
+  echo "weather: location ${location}"
+  echo "weather: units ${units}"
+  echo "weather: icons ${icon_set}"
+  echo "weather: key ${key_status}"
+}
+
+cmd_weather_location() {
+  local flag="${1:-}" value="${2:-}"
+  case "${flag}" in
+    --set)
+      if [ -z "${value}" ]; then
+        echo "usage: gallery weather location --set <location>" >&2
+        exit 1
+      fi
+      weather_write_field location "${value}"
+      echo "weather: location ${value}"
+      ;;
+    --clear)
+      weather_write_field location "Stockholm,SE"
+      echo "weather: location Stockholm,SE (default)"
+      ;;
+    *)
+      echo "usage: gallery weather location --set <location> | --clear" >&2
+      exit 1
+      ;;
+  esac
+}
+
+cmd_weather_units() {
+  local flag="${1:-}" value="${2:-}"
+  if [ "${flag}" != "--set" ]; then
+    echo "usage: gallery weather units --set metric|imperial" >&2
+    exit 1
+  fi
+  case "${value}" in
+    metric|imperial)
+      weather_write_field units "${value}"
+      echo "weather: units ${value}"
+      ;;
+    *)
+      echo "gallery: weather units must be metric or imperial" >&2
+      exit 1
+      ;;
+  esac
+}
+
+cmd_weather_icons() {
+  local flag="${1:-}" value="${2:-}"
+  if [ "${flag}" != "--set" ]; then
+    echo "usage: gallery weather icons --set meteocons-line|meteocons-fill" >&2
+    exit 1
+  fi
+  case "${value}" in
+    meteocons-line|meteocons-fill)
+      weather_write_field iconSet "${value}"
+      echo "weather: icons ${value}"
+      ;;
+    *)
+      echo "gallery: weather icon set must be meteocons-line or meteocons-fill" >&2
+      exit 1
+      ;;
+  esac
+}
+
+cmd_weather_key() {
+  local flag="${1:-}" value="${2:-}"
+  case "${flag}" in
+    --set)
+      if [ -z "${value}" ]; then
+        echo "usage: gallery weather key --set <key>" >&2
+        exit 1
+      fi
+      weather_key_write "${value}"
+      echo "weather: key configured"
+      ;;
+    --clear)
+      weather_key_clear
+      echo "weather: key not configured"
+      ;;
+    *)
+      echo "usage: gallery weather key --set <key> | --clear" >&2
+      exit 1
+      ;;
+  esac
+}
+
+cmd_weather() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    ""|status)
+      cmd_weather_status
+      ;;
+    location)
+      cmd_weather_location "$@"
+      ;;
+    units)
+      cmd_weather_units "$@"
+      ;;
+    icons)
+      cmd_weather_icons "$@"
+      ;;
+    key)
+      cmd_weather_key "$@"
+      ;;
+    *)
+      echo "gallery: unknown weather subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 # --- home (yabai window -> Space snapshot) -----------------------------------
 #
 # yabai has no scripting addition and does not remember which Space a window
@@ -3401,6 +3672,9 @@ case "${command}" in
     ;;
   borders)
     cmd_borders "$@"
+    ;;
+  weather)
+    cmd_weather "$@"
     ;;
   home)
     cmd_home "$@"

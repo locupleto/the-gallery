@@ -18,6 +18,11 @@ lalt + cmd - 0 : "$HOME/bin/gallery" toggle akshar.radio-atlas
 shift + ctrl + lalt - space : "$HOME/bin/gallery" toggle gallery.themes
 ## Gallery: background picker (direct; image preview, current theme's wallpapers)
 shift + ctrl + lalt - b : "$HOME/bin/gallery" toggle gallery.backgrounds
+## Gallery: weather glance panel
+# Omarchy's own SUPER + CTRL + ALT + W ("Toggle weather"), minus the ALT --
+# in the Gallery lalt already IS Omarchy's SUPER, so that literal
+# combination cannot be expressed on macOS.
+ctrl + lalt - w : "$HOME/bin/gallery" toggle gallery.weather
 
 ## launch the default coding agent in a new terminal window
 # Omarchy's own SUPER+SHIFT+CTRL+A, same keys, and the same shape: an ordinary
