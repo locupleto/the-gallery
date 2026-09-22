@@ -214,16 +214,30 @@ the voice assistant is the right Command key.
 > description lines there, not this note.
 
 EOF
-    { cat "$rc"; load_includes "$rc"; } | awk '
+    # Sheet order: the sections that launch something -- the service keys, the
+    # app keys and the Gallery plugins -- are hoisted to the front so they land
+    # on the first screenful; the window-management sections follow in skhdrc
+    # order. Sections not named here keep that order, after the hoisted ones,
+    # and a section with no bindings at all (the blacklist-only VM pass-through)
+    # is dropped rather than printed as an empty table.
+    { cat "$rc"; load_includes "$rc"; } | awk -v first='Launch / service,Apps,Gallery' '
         function flush() {
-            if (desc != "" && keys != "") printf("| %s | %s |\n", keys, desc)
+            if (desc != "" && keys != "" && sec != "")
+                body[sec] = body[sec] sprintf("| %s | %s |\n", keys, desc)
             desc = ""; keys = ""
         }
+        function emit(s) {
+            if (!(s in body) || body[s] == "" || (s in shown)) return
+            shown[s] = 1
+            printf("\n## %s\n\n| keys | action |\n|---|---|\n%s", s, body[s])
+        }
+        BEGIN { nfirst = split(first, want, ",") }
         /^# --- / {
             flush()
             sec = $0; sub(/^# --- /, "", sec); sub(/ -+$/, "", sec)
             sub(/[:(].*$/, "", sec); sub(/ +$/, "", sec)
-            printf("\n## %s\n\n| keys | action |\n|---|---|\n", toupper(substr(sec,1,1)) substr(sec,2))
+            sec = toupper(substr(sec,1,1)) substr(sec,2)
+            if (!(sec in body)) { body[sec] = ""; order[++nsec] = sec }
             next
         }
         /^## / { flush(); desc = substr($0, 4); next }
@@ -241,7 +255,11 @@ EOF
             next
         }
         /^$/ { flush() }
-        END { flush() }
+        END {
+            flush()
+            for (i = 1; i <= nfirst; i++) emit(want[i])
+            for (i = 1; i <= nsec; i++) emit(order[i])
+        }
     '
 }
 
