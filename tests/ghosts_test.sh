@@ -88,4 +88,77 @@ say "an explicit \`ghosts fix\` still records the attempt"
 grep -q 'owner_mark "$owner" relaunched; state_set "$id" "$owner" relaunched' "${GHOSTS}" \
   || fail "cmd_fix no longer records the relaunch"
 
+# --- the harm discriminator, driven through the real scan() ------------------
+# The script exposes GHOSTS_YABAI so a fake yabai can stand in. Class B must
+# act only on an AX-less window that actually costs something: visible (ghost
+# text under the tiles) or holding a BSP slot (an empty gap). A stub that is
+# neither -- which is what Claude and ChatGPT leave behind, and what drove the
+# 2026-09-22 relaunch loop -- must be ignored.
+say "exercising scan()'s class-B discriminator against a fake yabai"
+
+cat > "${TMP}/windows.json" <<'JSON'
+[
+ {"id":900001,"pid":9001,"app":"StubApp","title":"","role":"","subrole":"",
+  "frame":{"x":10,"y":20,"w":630,"h":1393},"space":1,
+  "has-ax-reference":false,"is-visible":false,"is-minimized":false,"is-hidden":false,
+  "is-floating":false,"split-type":"none","can-move":false,"can-resize":false},
+ {"id":900002,"pid":9002,"app":"SlotApp","title":"","role":"","subrole":"",
+  "frame":{"x":10,"y":20,"w":600,"h":600},"space":1,
+  "has-ax-reference":false,"is-visible":false,"is-minimized":false,"is-hidden":false,
+  "is-floating":false,"split-type":"vertical","can-move":false,"can-resize":false},
+ {"id":900003,"pid":9003,"app":"VisibleApp","title":"","role":"","subrole":"",
+  "frame":{"x":10,"y":20,"w":600,"h":600},"space":1,
+  "has-ax-reference":false,"is-visible":true,"is-minimized":false,"is-hidden":false,
+  "is-floating":false,"split-type":"none","can-move":false,"can-resize":false},
+ {"id":900004,"pid":9004,"app":"FloatApp","title":"","role":"","subrole":"",
+  "frame":{"x":0,"y":0,"w":600,"h":600},"space":1,
+  "has-ax-reference":false,"is-visible":true,"is-minimized":false,"is-hidden":false,
+  "is-floating":true,"split-type":"none","can-move":false,"can-resize":false}
+]
+JSON
+
+cat > "${TMP}/fake-yabai" <<FAKE
+#!/bin/sh
+case "\$*" in
+  *--windows*) cat "${TMP}/windows.json" ;;
+  *--spaces*)  echo '[]' ;;
+  *)           echo '[]' ;;
+esac
+FAKE
+chmod +x "${TMP}/fake-yabai"
+
+# scan() also walks the REAL window-server list (its first source), so the
+# output legitimately contains this machine's own windows. Only the fixture
+# ids are asserted on.
+scan_out="$(GHOSTS_YABAI="${TMP}/fake-yabai" sh "${GHOSTS}" scan 2>/dev/null || true)"
+fixture_hits="$(printf '%s\n' "${scan_out}" | grep -E '^90000[0-9]' || true)"
+say "fixture windows reported by scan:"
+if [ -n "${fixture_hits}" ]; then printf '%s\n' "${fixture_hits}" | sed 's/^/[ghosts_test]   /'; else say "  (none)"; fi
+
+printf '%s\n' "${fixture_hits}" | grep -q '^900001' \
+  && fail "harmless stub (invisible, split-type none) was flagged -- this is the relaunch loop"
+say "900001 invisible + no tile slot -> ignored (correct)"
+
+printf '%s\n' "${fixture_hits}" | grep -q '^900002' \
+  || fail "a window holding a BSP slot was NOT flagged -- the Calendar case regressed"
+say "900002 invisible but holds a tile slot -> flagged (correct)"
+
+printf '%s\n' "${fixture_hits}" | grep -q '^900003' \
+  || fail "a visible AX-less window was NOT flagged"
+say "900003 visible -> flagged (correct)"
+
+printf '%s\n' "${fixture_hits}" | grep -q '^900004' \
+  && fail "a floating window was flagged; floating windows are not tiled"
+say "900004 floating -> ignored (correct)"
+
+# --- diagnostic logging ------------------------------------------------------
+say "flag-time logging must record the fields that decide harm"
+grep -q '^window_diag() {' "${GHOSTS}" || fail "window_diag helper is gone"
+for field in 'is-visible' 'split-type' 'can-move'; do
+  grep -q "${field}" "${GHOSTS}" || fail "window_diag no longer reports ${field}"
+done
+grep -q 'log "candidate: .*\$(window_diag "\$id")' "${GHOSTS}" || fail "candidate log line lost window_diag"
+grep -q 'log "ghost: .*\$(window_diag "\$id")'     "${GHOSTS}" || fail "ghost log line lost window_diag"
+say "candidate and ghost log lines both carry window_diag"
+
 say "PASS ghosts_test.sh"

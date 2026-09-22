@@ -106,8 +106,21 @@ scan() {
   # Second source: AX-less windows yabai DID record and still tiles. A hidden
   # app's window born behind the lock (Calendar, 2026-09-18) is not on screen
   # at all, yet its node keeps an empty slot in the BSP tree. Layer "tile".
+  #
+  # The last clause is the harm test, added 2026-09-22. Losing the AX reference
+  # is not by itself a reason to quit someone's application: an AX-less window
+  # that is neither visible nor holding a slot in the tree costs nothing, and
+  # Claude and ChatGPT both leave exactly such a stub behind (is-visible false,
+  # split-type "none", can-move/can-resize false, role and subrole empty).
+  # Relaunching over it is what produced the 2026-09-22 loop. Act only when the
+  # ghost actually costs something:
+  #   is-visible          -- it is on screen as ghost text under the tiles, or
+  #   split-type != none  -- it holds a BSP slot, i.e. an empty gap (Calendar).
+  # Both halves are needed: requiring is-visible alone would delete the very
+  # case this second source exists for, since that window is not on screen.
   ${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r --arg us "$US" '
-    .[] | select((.["has-ax-reference"] | not) and (.["is-floating"] | not) and (.["is-minimized"] | not))
+    .[] | select((.["has-ax-reference"] | not) and (.["is-floating"] | not) and (.["is-minimized"] | not)
+                 and (.["is-visible"] or (.["split-type"] != "none")))
     | [.id, "tile", .pid, .app, (.title // ""), (.frame.x|floor), (.frame.y|floor), (.frame.w|floor), (.frame.h|floor)]
     | map(tostring) | join($us)' | while IFS="$US" read -r id layer pid owner name x y w h; do
     case " $IGNORE " in *" $owner "*) continue ;; esac
@@ -201,6 +214,19 @@ state_set() {
   tmp=$(mktemp); jq --arg id "$1" --arg owner "$2" --arg action "$3" --argjson at "$(date +%s)" \
     '.[$id] = {owner: $owner, action: $action, at: $at}' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
+# window_diag <id> -- the yabai fields that decide whether a ghost is costing
+# anything, rendered for the log. The 2026-09-22 investigation was slowed badly
+# by their absence: the log recorded only id/layer/pid/owner/title/frame, so
+# there was no way to tell after the fact whether a past ghost had been visible
+# or holding a tile slot, and the specimens were gone by the time anyone
+# looked. Prints nothing when yabai has no record of the id (a first-source
+# ghost, which by definition it does not).
+window_diag() {
+  ${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r --argjson want "$1" '
+    .[] | select(.id == $want)
+    | "visible=\(.["is-visible"]) split=\(.["split-type"]) can-move=\(.["can-move"]) role=\"\(.role)\" subrole=\"\(.subrole)\""' 2>/dev/null | head -1
+}
+
 # --- relaunch circuit breaker ---------------------------------------------
 # State above is keyed by WINDOW id, and a relaunch hands the app a brand new
 # window with a brand new id -- so a re-ghosting app looked like a first
@@ -249,12 +275,12 @@ cmd_check() {
     action=$(state_get "$id")
     case "$action" in
       "")   state_set "$id" "$owner" seen
-            log "candidate: id=$id layer=$layer pid=$pid owner=$owner name='$name' ${w}x${h} at $x,$y (waiting ${GRACE}s)"
+            log "candidate: id=$id layer=$layer pid=$pid owner=$owner name='$name' ${w}x${h} at $x,$y $(window_diag "$id") (waiting ${GRACE}s)"
             continue ;;
       seen) [ $((now - $(state_at "$id"))) -ge "$GRACE" ] || continue ;;
       *)    continue ;;   # already reported / relaunched
     esac
-    log "ghost: id=$id layer=$layer pid=$pid owner=$owner name='$name' ${w}x${h} at $x,$y"
+    log "ghost: id=$id layer=$layer pid=$pid owner=$owner name='$name' ${w}x${h} at $x,$y $(window_diag "$id")"
     if [ "$layer" = orphan ]; then
       state_set "$id" "$owner" retiling
       if retile_window "$id" "$owner"; then
