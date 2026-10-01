@@ -86,4 +86,38 @@ if grep -q 'Gallery: ' <<<"${cmd}"; then
 fi
 say "window command is a login shell re-running launch, with no tui title"
 
+# --- 7. a window macOS misplaced is moved to the Space in view ----------------
+# Pressing the key inside the Space-switch animation can leave the new window
+# on the Space being left. keep_on_current_space is driven here against a stub
+# yabai -- the real function, lifted out of the script, so production code
+# carries no extra test seam. The stub answers window and space queries from
+# fixed values and records every move.
+mkdir -p "${WORK_DIR}/yabai"
+cat > "${WORK_DIR}/yabai/yabai" <<'STUB'
+#!/bin/sh
+# $STUB_WIN_SPACE empty = yabai never sees the window (AX-less).
+case "$*" in
+  "-m query --windows --window "*)
+    [ -n "${STUB_WIN_SPACE}" ] || exit 1
+    printf '{\n\t"id":%s,\n\t"space":%s,\n}\n' "$5" "${STUB_WIN_SPACE}" ;;
+  "-m query --spaces --space") printf '{\n\t"id":9,\n\t"index":%s,\n}\n' "${STUB_VIEW_SPACE}" ;;
+  *) echo "$*" >> "${STUB_LOG}" ;;
+esac
+STUB
+chmod +x "${WORK_DIR}/yabai/yabai"
+fn="$(sed -n '/^keep_on_current_space() {$/,/^}$/p' "${AGENT}")"
+[ -n "${fn}" ] || fail "keep_on_current_space not found in ${AGENT}"
+keep() {  # keep <window space or ""> <space in view>; prints the recorded moves
+  : > "${WORK_DIR}/moves"
+  STUB_WIN_SPACE="$1" STUB_VIEW_SPACE="$2" STUB_LOG="${WORK_DIR}/moves" \
+    PATH="${WORK_DIR}/yabai:/usr/bin:/bin" bash -c "${fn}"'; keep_on_current_space 4242'
+  cat "${WORK_DIR}/moves"
+}
+moves="$(keep 6 2)"
+grep -qx -- '-m window 4242 --space 2' <<<"${moves}" || fail "misplaced window not moved to Space 2: ${moves}"
+grep -qx -- '-m window 4242 --focus' <<<"${moves}" || fail "moved window not focused: ${moves}"
+[ -z "$(keep 2 2)" ] || fail "a window already on the Space in view was moved"
+[ -z "$(keep '' 2)" ] || fail "a window yabai never saw was acted on"
+say "misplaced window moved to the Space in view; correct or unseen ones left alone"
+
 say "PASS"

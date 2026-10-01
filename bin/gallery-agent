@@ -111,21 +111,65 @@ open_window() {
   # A cold iTerm opens its own startup window and is not ready for
   # AppleScript immediately, so it is launched first and waited for -- the
   # same lesson as `super + return` in tiler/skhdrc.
-  if ! pgrep -xq iTerm2; then
+  #
+  # pgrep needs -a: macOS pgrep leaves out its own ancestors by default, so
+  # `gallery agent` typed into an iTerm window could not see the iTerm it was
+  # running in, took this cold-start branch and stalled for ~11 s before
+  # opening the window. The key binding never hit it -- skhd is not a child
+  # of iTerm -- which is why it went unnoticed.
+  if ! pgrep -axq iTerm2; then
     open -a iTerm
     local waited=0
-    while ! pgrep -xq iTerm2 && [ "${waited}" -lt 20 ]; do
+    while ! pgrep -axq iTerm2 && [ "${waited}" -lt 20 ]; do
       sleep 0.5
       waited=$((waited + 1))
     done
     sleep 1
   fi
-  osascript \
+  local wid
+  wid="$(osascript \
     -e 'tell application id "com.googlecode.iterm2"' \
     -e "set w to (create window with default profile command \"${as_command}\")" \
     -e 'activate' \
     -e 'select w' \
-    -e 'end tell' >/dev/null
+    -e 'return id of w' \
+    -e 'end tell')" || return 0
+  keep_on_current_space "${wid}"
+}
+
+# keep_on_current_space <window id> -- moves the new window to the Space the
+# user is looking at, if macOS put it somewhere else.
+#
+# Pressing the key straight after switching Spaces (super+2, or ctrl+2 itself)
+# lands inside the ~0.5 s switch animation, and a window created then can be
+# placed on the Space being LEFT: the key looks dead on the new Space while
+# the agent quietly opens on the old one (2026-10-01, seen once, not
+# reproducible on demand -- which is what a race looks like). The reference
+# is therefore the Space in view once the window exists and the switch has
+# settled, not the one captured at key press: mid-animation, yabai can still
+# report the old Space as focused.
+#
+# iTerm's AppleScript window id is the CGWindowID yabai uses, so the two can
+# be compared directly. Skipped silently whenever yabai is absent or never
+# sees the window (the AX-less windows plugins/gallery.ghosts exists for);
+# this only ever corrects a misplaced window, it never blocks one opening.
+keep_on_current_space() {
+  local wid="$1" win_space="" view_space="" waited=0
+  [ -n "${wid}" ] && command -v yabai >/dev/null 2>&1 || return 0
+  # yabai learns of the window a moment after iTerm creates it.
+  while [ -z "${win_space}" ] && [ "${waited}" -lt 20 ]; do
+    win_space="$(yabai -m query --windows --window "${wid}" 2>/dev/null \
+      | sed -n 's/^[[:space:]]*"space":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
+    [ -n "${win_space}" ] && break
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  [ -n "${win_space}" ] || return 0
+  view_space="$(yabai -m query --spaces --space 2>/dev/null \
+    | sed -n 's/^[[:space:]]*"index":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
+  [ -n "${view_space}" ] && [ "${win_space}" != "${view_space}" ] || return 0
+  yabai -m window "${wid}" --space "${view_space}" >/dev/null 2>&1 || return 0
+  yabai -m window "${wid}" --focus >/dev/null 2>&1 || true
 }
 
 case "${1:-open}" in
