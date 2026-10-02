@@ -279,6 +279,12 @@ assert_file "${H}/.config/yabai/yabairc" "B yabairc"
 assert_file "${H}/.hammerspoon/init.lua" "B init.lua"
 assert_file "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json" "B iTerm profile"
 [ ! -e "${H}/.config/yabai/yabairc.gallery-bak" ] || fail "B: backed up a file that did not exist"
+# A stale block in an init.lua the Gallery created is refreshed without a
+# backup: there is nothing of the user's in it to keep.
+sed -i '' 's/^require("hs.ipc")$/require("hs.ipc") -- stale/' "${H}/.hammerspoon/init.lua"
+"${INSTALL}" --minimal >/dev/null 2>&1 || fail "B: reinstall failed"
+[ ! -e "${H}/.hammerspoon/init.lua.gallery-bak" ] || fail "B: backed up an init.lua the Gallery created"
+grep -q -- '-- stale' "${H}/.hammerspoon/init.lua" && fail "B: the stale block was not refreshed"
 assert_same "${H}/.config/skhd/local.skhd" "${REPO_ROOT}/tiler/local.skhd.example" "B seeds local.skhd"
 assert_file "${H}/.config/skhd/tiler.skhd" "B tiler.skhd"
 # brew services shows borders registered: it must be left running.

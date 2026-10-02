@@ -602,7 +602,8 @@ elif gl_block_has "${HS_INIT}"; then
     echo "[gallery] (dry-run) would back up ${HS_INIT} and refresh its Gallery block"
   else
     echo "[gallery] refreshing the Gallery block in ${HS_INIT}"
-    gl_backup_once "${HS_INIT}"
+    # A file the Gallery created holds nothing of the user's to back up.
+    [ -e "${CONFIG_DIR}/state/init-lua-created" ] || gl_backup_once "${HS_INIT}"
     gl_block_replace "${HS_INIT}" "${GALLERY_BLOCK}"
   fi
 elif grep -q -- '-- gallery:begin' "${HS_INIT}"; then
