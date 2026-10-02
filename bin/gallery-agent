@@ -24,7 +24,7 @@
 # floating and centred is right for btop and Learn, which are glanced at and
 # dismissed, and wrong for a window that is worked in for an hour beside an
 # editor. As in Omarchy, a second keypress opens a SECOND agent rather than
-# focusing the first: one per repo, one per task (Urban's ruling 2026-09-22,
+# focusing the first: one per repo, one per task (decided
 # after the first cut shipped it as a floating tui plugin).
 #
 # THE START DIRECTORY. Omarchy cds to $HOME/Work before launching, because an

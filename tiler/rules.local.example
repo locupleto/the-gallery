@@ -28,7 +28,7 @@
 # Leave roaming apps (terminals, the browser) OUT of this file: a pinned
 # `iTerm2` rule would drag every super+return terminal to one Space.
 #
-# Example map (Mac Studio, 2026-09-15):
+# Example map:
 yabai -m rule --add label=home-gmail    app="^Gmail$"             space=2
 yabai -m rule --add label=home-outlook  app="^Microsoft Outlook$" space=3
 yabai -m rule --add label=home-github   app="^GitHub$"            space=4

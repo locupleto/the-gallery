@@ -2114,7 +2114,7 @@ except Exception:
 
 # widgets_dir -- prints the widget directory the running Übersicht serves:
 # the `-d <dir>` argument of its server.js process when set (a custom
-# folder, as on the Studio), else the app's default folder. Prints nothing
+# folder), else the app's default folder. Prints nothing
 # when Übersicht is not running.
 widgets_dir() {
   local args dir

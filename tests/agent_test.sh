@@ -55,7 +55,7 @@ say "unsupported agent refused"
 # --- 4. the start directory, and its fallback ----------------------------------
 run set claude >/dev/null
 grep -q "^starts:  ${WORK_DIR}/start$" <<<"$(run status)" || fail "start dir not honoured"
-# The estate's git root lives on an external volume: if it is not mounted the
+# The start directory may live on an external volume: if it is not mounted the
 # agent must still launch, from $HOME, rather than failing outright.
 missing="$(GALLERY_CONFIG_DIR="${WORK_DIR}/config" GALLERY_AGENT_DIR="${WORK_DIR}/gone" \
            PATH="${WORK_DIR}/bin:/usr/bin:/bin" "${AGENT}" status 2>/dev/null)"

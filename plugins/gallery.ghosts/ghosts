@@ -52,7 +52,8 @@ NO_RELAUNCH="iTerm2 Terminal kitty Alacritty WezTerm Ghostty UTM Parallels Deskt
 # Window owners that legitimately live outside yabai's tree.
 IGNORE="Window Server borders Dock Hammerspoon Übersicht Notification Center Control Center Spotlight loginwindow Wallpaper WallpaperAgent screencapture Screenshot ScreenSaverEngine Siri Shortcuts CoreServicesUIAgent"
 # How to reach the user in the two cases that need one (NO_RELAUNCH app, app that
-# refused to quit): 0 = never, 1 = notification banner, 2 = banner + estate voice.
+# refused to quit): 0 = never, 1 = notification banner, 2 = banner + a spoken line via ~/bin/tts-say,
+# if installed.
 # Successful fixes are never announced, only logged.
 ANNOUNCE=1
 # Seconds a ghost must persist across checks before anything is said or done. A

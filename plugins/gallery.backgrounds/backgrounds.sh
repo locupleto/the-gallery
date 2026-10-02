@@ -280,7 +280,7 @@ self_q="$(printf '%q' "$SELF")"
 themes_q="$(printf '%q' "$THEMES_SH")"
 
 # The list pane is 40% of the window (preview-window=right:60%); on a 16"
-# MacBook that is ~38 columns, so keep the header short there (same idea as
+# laptop screen that is ~38 columns, so keep the header short there (same idea as
 # themes.sh's compact mode).
 total_cols="${FZF_COLUMNS:-${COLUMNS:-$(tput cols 2>/dev/null || echo 160)}}"
 [[ "$total_cols" =~ ^[0-9]+$ ]] || total_cols=160

@@ -75,7 +75,7 @@ get_val() {
 
 # --- width awareness ---------------------------------------------------------
 # The header (instructions + swatch grid) lives in fzf's LIST pane, which is
-# half the window (preview-window=right:50%). On a 16" MacBook the Gallery
+# half the window (preview-window=right:50%). On a 16" laptop screen the Gallery
 # window's 6:6 grid gives ~105 columns in total, so the list pane has ~48 --
 # the full header lines (up to 85 columns) and the two-column swatch grid
 # (60) are cut off there, key hints included. Below COMPACT_BELOW list
