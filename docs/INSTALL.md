@@ -410,8 +410,10 @@ block is missing), or the request landed during a reload. Start Hammerspoon,
 check the block, run `gallery reload`, and retry. Never wrap `hs` in
 `timeout`: killing the client mid-request can wedge Hammerspoon's IPC port.
 
-**`hs CLI not installed`.** The installer does not install the `hs` tool. In
-the Hammerspoon console run `hs.ipc.cliInstall("/opt/homebrew")`.
+**`hs CLI not installed`.** The Gallery's block in `~/.hammerspoon/init.lua`
+links the `hs` tool into Homebrew's `bin` each time Hammerspoon loads it. If
+it is still missing, run `hs.ipc.cliInstall("/opt/homebrew")` in the
+Hammerspoon console (`"/usr/local"` on an Intel Mac).
 
 **Key bindings do nothing.** Check that skhd is running with the Accessibility
 grant (`gallery doctor`), that your terminal's Secure Keyboard Entry is off, and

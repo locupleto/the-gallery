@@ -548,6 +548,12 @@ fi
 GALLERY_BLOCK='-- gallery:begin
 -- hs.ipc must be loaded or the hs command-line tool blocks forever.
 require("hs.ipc")
+-- The hs command-line tool the gallery CLI talks through, linked into
+-- the Homebrew bin directory (/opt/homebrew on Apple silicon, /usr/local on Intel).
+do
+  local prefix = hs.fs.attributes("/opt/homebrew/bin") and "/opt/homebrew" or "/usr/local"
+  if not hs.ipc.cliStatus(prefix, true) then hs.ipc.cliInstall(prefix, true) end
+end
 hs.loadSpoon("Gallery")
 spoon.Gallery:start()
 -- Close every Gallery window, chooser and timer before a reload or quit;
