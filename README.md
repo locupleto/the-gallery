@@ -54,7 +54,7 @@ top to bottom: keys go in at the top, pixels come out at the bottom.
                                            ▼
  ┌───────────────────────────────────────────────────────────────────────────────────────────┐
  │ ② THEMES   one theme, rendered onto everything at once  (the flow below)                  │
- │   iTerm2 windows · focus outline · wallpaper · panel CSS · btop · Übersicht widgets       │
+ │   iTerm2 windows · focus outline · wallpaper · panel CSS · btop · superfile · widgets     │
  └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -90,7 +90,8 @@ plugin) is the one command that touches everything. It fans out like this:
           ├─▶ state/crystal.css ───────────────▶ Übersicht crystal widgets      (opt-in: gallery widgets)
           ├─▶ iTerm2 …/gallery-theme.json ─────▶ every floating Gallery window
           ├─▶ iTerm2 …/gallery-console.json ───▶ your everyday terminal         (opt-in: gallery console)
-          └─▶ btop theme ──────────────────────▶ System Monitor plugin
+          ├─▶ btop theme ──────────────────────▶ System Monitor plugin
+          └─▶ superfile theme (transparent) ───▶ the `spf` file manager
           │
           ▼
  hooks/theme-set.d/*      every executable, in name order, theme name as $1
@@ -160,7 +161,8 @@ On a new Mac, before running it: Homebrew, a GitHub SSH key, iTerm2 and
 Hammerspoon (`brew install --cask iterm2 hammerspoon`; the installer refuses
 to run without Hammerspoon.app), and the Obsidian vault synced (the Learn
 menu reads its sheets from it). Optional but wanted for the full experience:
-`brew install chafa btop uv` (picker previews, sysmon, the `qml` kind). The
+`brew install chafa btop uv superfile` (picker previews, sysmon, the `qml`
+kind, a themed `spf` file manager). The
 script itself installs yabai, skhd, JankyBorders, fzf and glow, copies
 everything it needs onto the boot volume, renders the current theme, and
 starts Hammerspoon; the stock `/bin/bash` 3.2 is enough. macOS then asks for

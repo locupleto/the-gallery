@@ -18,6 +18,9 @@ read_borders_prefs), and writes:
   ~/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json
   ~/.config/btop/themes/gallery.theme
   ~/.config/btop/btop.conf (color_theme key only, rewritten in place)
+  ~/Library/Application Support/superfile/theme/gallery.toml
+  ~/Library/Application Support/superfile/config.toml (theme and
+    transparent_background keys only, rewritten in place)
 
 theme.json and theme.sh (NOT theme.css) also carry the derived JankyBorders
 tokens border_active/border_active_hex/border_inactive/border_width/
@@ -86,6 +89,9 @@ ITERM_CONSOLE_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-console.json"
 BTOP_CONFIG_DIR = Path.home() / ".config" / "btop"
 BTOP_THEME_PATH = BTOP_CONFIG_DIR / "themes" / "gallery.theme"
 BTOP_CONF_PATH = BTOP_CONFIG_DIR / "btop.conf"
+SUPERFILE_CONFIG_DIR = Path.home() / "Library" / "Application Support" / "superfile"
+SUPERFILE_THEME_PATH = SUPERFILE_CONFIG_DIR / "theme" / "gallery.toml"
+SUPERFILE_CONF_PATH = SUPERFILE_CONFIG_DIR / "config.toml"
 
 ANSI_NAMES = [
     "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
@@ -825,28 +831,120 @@ def render_btop_theme(tokens: dict, name: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def update_btop_conf(theme_name: str) -> None:
-    """Idempotently set `color_theme = "<theme_name>"` in btop.conf, leaving
-    every other key untouched. btop rewrites this file on exit, so only the
-    one key this function owns is ever touched -- never a full overwrite."""
-    new_line = f'color_theme = "{theme_name}"\n'
+def set_conf_keys(path: Path, values: dict[str, str]) -> None:
+    """Idempotently set each `key = value` line in a flat config file,
+    leaving every other line untouched (the owning app may rewrite the file
+    itself, so only the keys passed here are ever touched -- never a full
+    overwrite). Only top-level keys count: superfile's config.toml ends in
+    an `[open_with]` table, so matching stops at the first table header and
+    missing keys are inserted just above it (or appended when there is
+    none). A missing file is created with just these keys, which both btop
+    and superfile fill out with their own defaults on the next start."""
+    pending = dict(values)
+    lines = path.read_text().splitlines(keepends=True) if path.is_file() else []
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    end = next((i for i, l in enumerate(lines) if l.lstrip().startswith("[")), len(lines))
+    for i in range(end):
+        key = lines[i].split("=", 1)[0].strip()
+        if "=" in lines[i] and key in pending:
+            lines[i] = f"{key} = {pending.pop(key)}\n"
+    lines[end:end] = [f"{key} = {value}\n" for key, value in pending.items()]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(lines))
 
-    if BTOP_CONF_PATH.is_file():
-        lines = BTOP_CONF_PATH.read_text().splitlines(keepends=True)
-        replaced = False
-        for i, line in enumerate(lines):
-            if line.strip().startswith("color_theme"):
-                lines[i] = new_line
-                replaced = True
-                break
-        if not replaced:
-            if lines and not lines[-1].endswith("\n"):
-                lines[-1] += "\n"
-            lines.append(new_line)
-        BTOP_CONF_PATH.write_text("".join(lines))
-    else:
-        BTOP_CONF_PATH.parent.mkdir(parents=True, exist_ok=True)
-        BTOP_CONF_PATH.write_text(new_line)
+
+def update_btop_conf(theme_name: str) -> None:
+    """Point btop.conf's `color_theme` at the rendered theme."""
+    set_conf_keys(BTOP_CONF_PATH, {"color_theme": f'"{theme_name}"'})
+
+
+# --- superfile ----------------------------------------------------------------
+
+# Gallery themes whose upstream palette has a same-named chroma style, so
+# superfile's code preview matches too; everything else falls back by mode.
+SUPERFILE_SYNTAX_STYLES = {
+    "catppuccin": "catppuccin-mocha",
+    "catppuccin-latte": "catppuccin-latte",
+    "gruvbox": "gruvbox",
+    "nord": "nord",
+    "rose-pine": "rose-pine",
+    "tokyo-night": "tokyonight-night",
+}
+
+
+def render_superfile_theme(tokens: dict, name: str, light: bool) -> str:
+    """Render a complete superfile theme (every key its bundled themes
+    define -- checked against catppuccin-mocha.toml from superfile 1.6.0)
+    mapped from Gallery tokens.
+
+    Backgrounds use the same deepest surface tone as btop and the floating
+    iTerm canvas; with transparent_background on (update_superfile_conf)
+    superfile leaves most of them unpainted anyway, so the terminal's own
+    Gallery background shows through. Accent drives everything "active";
+    muted drives the neutral chrome, mirroring render_btop_theme.
+    """
+    surface = tokens["surface_background"]
+    neutral = tokens.get("muted") or tokens["color8"]
+    syntax = SUPERFILE_SYNTAX_STYLES.get(name, "github" if light else "github-dark")
+
+    pairs = [
+        ("code_syntax_highlight", syntax),
+        ("full_screen_fg", tokens["foreground"]),
+        ("full_screen_bg", surface),
+        ("file_panel_fg", tokens["foreground"]),
+        ("file_panel_bg", surface),
+        ("file_panel_border", neutral),
+        ("file_panel_border_active", tokens["accent"]),
+        ("file_panel_top_directory_icon", tokens["color2"]),
+        ("file_panel_top_path", tokens["color4"]),
+        ("file_panel_item_selected_fg", tokens["accent"]),
+        ("file_panel_item_selected_bg", surface),
+        ("footer_fg", tokens["foreground"]),
+        ("footer_bg", surface),
+        ("footer_border", neutral),
+        ("footer_border_active", tokens["accent"]),
+        ("sidebar_fg", tokens["foreground"]),
+        ("sidebar_bg", surface),
+        ("sidebar_title", tokens["color6"]),
+        ("sidebar_border", surface),
+        ("sidebar_border_active", tokens["accent"]),
+        ("sidebar_item_selected_fg", tokens["accent"]),
+        ("sidebar_item_selected_bg", surface),
+        ("sidebar_divider", neutral),
+        ("modal_fg", tokens["foreground"]),
+        ("modal_bg", surface),
+        ("modal_border_active", neutral),
+        ("modal_cancel_fg", surface),
+        ("modal_cancel_bg", tokens["color1"]),
+        ("modal_confirm_fg", surface),
+        ("modal_confirm_bg", tokens["color2"]),
+        ("help_menu_hotkey", tokens["color6"]),
+        ("help_menu_title", tokens["accent"]),
+        ("cursor", tokens["cursor"]),
+        ("correct", tokens["color2"]),
+        ("error", tokens["color1"]),
+        ("hint", tokens["color6"]),
+        ("cancel", tokens["color1"]),
+    ]
+
+    lines = [
+        f"# Gallery theme: {name}",
+        "# Generated by tools/render-theme.py -- do not edit by hand.",
+        "",
+    ]
+    lines.extend(f'{key} = "{value}"' for key, value in pairs)
+    lines.append(f'gradient_color = ["{tokens["accent"]}", "{tokens["color5"]}"]')
+    return "\n".join(lines) + "\n"
+
+
+def update_superfile_conf(theme_name: str) -> None:
+    """Point superfile at the rendered theme, with a transparent background
+    so the Gallery-themed terminal shows through."""
+    set_conf_keys(
+        SUPERFILE_CONF_PATH,
+        {"theme": f'"{theme_name}"', "transparent_background": "true"},
+    )
 
 
 def write_file(path: Path, content: str) -> None:
@@ -903,6 +1001,8 @@ def main(argv: list[str]) -> int:
     )
     write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
     update_btop_conf("gallery")
+    write_file(SUPERFILE_THEME_PATH, render_superfile_theme(tokens, name, light))
+    update_superfile_conf("gallery")
 
     border_summary = (
         f"borders: width {border_tokens['border_width']}, "
@@ -917,6 +1017,8 @@ def main(argv: list[str]) -> int:
     print(f"  {ITERM_CONSOLE_PROFILE_PATH} (console: {console_mode})")
     print(f"  {BTOP_THEME_PATH}")
     print(f"  {BTOP_CONF_PATH} (color_theme = gallery)")
+    print(f"  {SUPERFILE_THEME_PATH}")
+    print(f"  {SUPERFILE_CONF_PATH} (theme = gallery, transparent_background = true)")
     if font_normal:
         font_summary = f"font: {font_prefs['family']} {font_prefs['size']} {font_prefs['weight']}"
     elif font_prefs:
