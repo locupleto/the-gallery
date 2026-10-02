@@ -1,0 +1,500 @@
+#!/usr/bin/env bash
+#
+# gallery-term -- the one place that knows how to put a window of the
+# configured terminal on screen: iTerm2, Ghostty, kitty or WezTerm. Every
+# Gallery surface that needs a terminal window (gallery-tui's floating TUIs,
+# tiler/learn, gallery-agent, the super+return key) calls this instead of
+# talking to a terminal itself.
+#
+#   gallery-term open --title TITLE [--role float|tile] [--cwd DIR]
+#                     [--profile gallery|default] [--dry-run] -- CMD [ARGS...]
+#   gallery-term app          the app name yabai reports for the terminal
+#   gallery-term name         the configured terminal id
+#   gallery-term list         supported terminals: installed? current?
+#   gallery-term set <id>     record the terminal (the caller re-renders)
+#   gallery-term installed <id>
+#
+# WHICH TERMINAL. ~/.config/gallery/state/terminal.json, {"terminal": "<id>"},
+# id one of iterm2, ghostty, kitty, wezterm. Missing or unusable means iterm2
+# if it is installed, else the first installed of ghostty, kitty, wezterm.
+# GALLERY_TERMINAL overrides the file for one invocation.
+#
+# ROLES. float = a Gallery surface (btop, a picker, Learn): it gets the
+# Gallery theme whatever the user's own terminal looks like. tile = an
+# everyday window (super+return, the agent): the user's normal config. Where
+# a terminal has per-window configuration, float uses it -- iTerm's Gallery
+# dynamic profile, kitty's --config with the rendered kitty.conf, wezterm's
+# --config glass. Where it has not (Ghostty), and for the palette on wezterm,
+# the window's wrapper loads state/terminals/gallery-osc.sh, which sets the
+# palette with OSC 4/10/11/12 escapes. --profile only matters to iTerm (float
+# defaults to its Gallery profile, tile to its default profile).
+#
+# TITLE. yabai rules and gallery-tui find windows by title, so the window
+# must end up with it. kitty has --title (permanent). Ghostty and wezterm
+# have no title option on the command line / in AppleScript, so the command
+# is wrapped in `gallery-term wrap`, which prints the OSC 0 title first. iTerm's titles
+# come from the command itself (gallery-tui and learn emit OSC 0 as they
+# start), exactly as before this script existed. A title needs a command on
+# Ghostty and wezterm; without one it is ignored.
+#
+# COLD vs RUNNING. iTerm and Ghostty are driven over AppleScript, which
+# cannot reliably start them, so a cold app is launched with `open -a` first
+# (iTerm's float path instead folds `activate` into the one script, as
+# gallery-tui always did). kitty and wezterm are plain processes: one command
+# line works cold or running (kitty --single-instance, wezterm start).
+#
+# TESTS. --dry-run prints the exact commands, one per line, and runs nothing.
+# GALLERY_TERM_RUNNING=0|1 overrides the is-the-app-running probe;
+# GALLERY_TERM_APP_DIRS (colon list, default /Applications:~/Applications)
+# overrides where apps are looked for. Both exist for tests/terminal_test.sh.
+#
+# Alacritty has no adapter yet (its cask no longer passes Gatekeeper); a new
+# terminal is one entry in each of the term_* functions and one open_* below.
+set -euo pipefail
+
+CONFIG_DIR="${GALLERY_CONFIG_DIR:-${HOME}/.config/gallery}"
+STATE_FILE="${CONFIG_DIR}/state/terminal.json"
+TERMINALS_DIR="${CONFIG_DIR}/state/terminals"
+SUPPORTED="iterm2 ghostty kitty wezterm"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+die() { echo "gallery-term: $*" >&2; exit 1; }
+
+# --- the supported terminals --------------------------------------------------
+
+# The macOS app name yabai reports (CFBundleName of each bundle).
+term_app() {
+  case "$1" in
+    iterm2)  echo iTerm2 ;;
+    ghostty) echo Ghostty ;;
+    kitty)   echo kitty ;;
+    wezterm) echo WezTerm ;;
+    *) return 1 ;;
+  esac
+}
+
+term_bundle() {
+  case "$1" in
+    iterm2)  echo iTerm.app ;;
+    ghostty) echo Ghostty.app ;;
+    kitty)   echo kitty.app ;;
+    wezterm) echo WezTerm.app ;;
+    *) return 1 ;;
+  esac
+}
+
+# Process name pgrep -x sees while the app runs (wezterm's GUI is wezterm-gui).
+term_process() {
+  case "$1" in
+    iterm2)  echo iTerm2 ;;
+    ghostty) echo ghostty ;;
+    kitty)   echo kitty ;;
+    wezterm) echo wezterm-gui ;;
+  esac
+}
+
+# Where the app bundle is, if installed. Empty output = not installed.
+term_bundle_path() {
+  local bundle dir old_ifs="${IFS}"
+  bundle="$(term_bundle "$1")" || return 0
+  IFS=:
+  for dir in ${GALLERY_TERM_APP_DIRS:-/Applications:${HOME}/Applications}; do
+    if [ -d "${dir}/${bundle}" ]; then
+      IFS="${old_ifs}"
+      printf '%s' "${dir}/${bundle}"
+      return 0
+    fi
+  done
+  IFS="${old_ifs}"
+}
+
+term_installed() { [ -n "$(term_bundle_path "$1")" ]; }
+
+term_running() {
+  case "${GALLERY_TERM_RUNNING:-}" in
+    0) return 1 ;;
+    1) return 0 ;;
+  esac
+  # -a: macOS pgrep leaves out its own ancestors by default, so a command
+  # typed inside the terminal could not see the terminal it runs in.
+  pgrep -axq "$(term_process "$1")"
+}
+
+state_terminal() {
+  [ -f "${STATE_FILE}" ] || return 0
+  sed -n 's/.*"terminal"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${STATE_FILE}" | head -1
+}
+
+valid_terminal() {
+  case " ${SUPPORTED} " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+current_terminal() {
+  local t="${GALLERY_TERMINAL:-$(state_terminal)}"
+  if [ -n "${t}" ] && valid_terminal "${t}"; then
+    printf '%s\n' "${t}"
+    return 0
+  fi
+  for t in ${SUPPORTED}; do
+    if term_installed "${t}"; then
+      printf '%s\n' "${t}"
+      return 0
+    fi
+  done
+  printf '%s\n' iterm2
+}
+
+# --- running or printing commands ----------------------------------------------
+
+DRY_RUN=0
+
+# show ARGS... -- one line of shell-quoted words for --dry-run, quoting only
+# the words that need it (printf %q would escape every space and read badly).
+show() {
+  local a out=""
+  for a in "$@"; do
+    case "${a}" in
+      ""|*[!A-Za-z0-9_@%+=:,./-]*) a="'$(printf '%s' "${a}" | sed "s/'/'\\\\''/g")'" ;;
+    esac
+    out="${out}${out:+ }${a}"
+  done
+  printf '%s' "${out}"
+}
+
+# act CMD [ARGS...] -- run it, or under --dry-run print it.
+act() {
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    show "$@"
+    printf '\n'
+    return 0
+  fi
+  "$@"
+}
+
+# act_bg CMD [ARGS...] -- the same, but detached: kitty and wezterm run their
+# GUI in the process this starts, which must outlive a caller such as skhd.
+act_bg() {
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    show "$@"
+    printf ' &\n'
+    return 0
+  fi
+  ( "$@" >/dev/null 2>&1 </dev/null & )
+}
+
+# quote_cmd ARGS... -- one shell-quoted command line (what iTerm and Ghostty
+# take as a single string).
+quote_cmd() {
+  printf '%q ' "$@"
+}
+
+# as_escape STRING -- for an AppleScript string literal: backslashes first,
+# then double quotes.
+as_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# A cold app is launched with `open -a` and waited for (up to 10 s) before it
+# is driven over AppleScript: it is not ready for Apple Events immediately.
+cold_start() {
+  local id="$1" waited=0
+  act open -a "$(term_bundle "${id}" | sed 's/\.app$//')"
+  [ "${DRY_RUN}" -eq 1 ] && return 0
+  while ! term_running "${id}" && [ "${waited}" -lt 20 ]; do
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+  sleep 1
+}
+
+# glass_value KEY DEFAULT -- from state/terminals/glass.env (render-theme.py).
+glass_value() {
+  local v=""
+  [ -f "${TERMINALS_DIR}/glass.env" ] \
+    && v="$(sed -n "s/^$1=//p" "${TERMINALS_DIR}/glass.env" | head -1)"
+  printf '%s' "${v:-$2}"
+}
+
+# --- open -----------------------------------------------------------------------
+
+TITLE="" ROLE="tile" CWD="" PROFILE="" CMD=()
+
+# The command as argv, in the form each terminal wants, left in RUN[]:
+# wrapped (wrap=1) in `gallery-term wrap` so it first prints the title and,
+# for a float window, loads the palette escapes; with a cd (cd_prefix=1) for
+# a terminal that has no working-directory option of its own.
+RUN=()
+build_run() {
+  local wrap="$1" cd_prefix="$2" osc=""
+  RUN=()
+  [ "${#CMD[@]}" -gt 0 ] || return 0
+  if [ "${wrap}" = 1 ] && { [ -n "${TITLE}" ] || [ "${ROLE}" = float ]; }; then
+    [ "${ROLE}" = float ] && osc="${TERMINALS_DIR}/gallery-osc.sh"
+    RUN=("${SELF}" wrap "${TITLE}" "${osc}" "${CMD[@]}")
+  else
+    RUN=("${CMD[@]}")
+  fi
+  if [ "${cd_prefix}" = 1 ] && [ -n "${CWD}" ]; then
+    RUN=(/bin/sh -c 'cd "$0" && exec "$@"' "${CWD}" "${RUN[@]}")
+  fi
+}
+
+# `gallery-term wrap TITLE OSCFILE CMD...` -- the window's own process on
+# Ghostty and wezterm: set the title, load the palette escapes if there is
+# a file, become the command.
+cmd_wrap() {
+  [ $# -ge 3 ] || die "usage: gallery-term wrap TITLE OSCFILE CMD..."
+  local title="$1" osc="$2"
+  shift 2
+  printf '\033]0;%s\007' "${title}"
+  if [ -n "${osc}" ] && [ -r "${osc}" ]; then
+    . "${osc}"
+  fi
+  exec "$@"
+}
+
+# --- iTerm2 ---------------------------------------------------------------------
+
+ITERM_GALLERY_PROFILE_JSON="${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json"
+
+# The Gallery dynamic profile's name, read fresh from the JSON render-theme.py
+# writes. Empty means "use the default profile" (file missing, unreadable or
+# mid-write).
+iterm_gallery_profile_name() {
+  [ -f "${ITERM_GALLERY_PROFILE_JSON}" ] || return 0
+  python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        doc = json.load(f)
+    name = doc["Profiles"][0]["Name"]
+    if name:
+        print(name)
+except Exception:
+    pass
+' "${ITERM_GALLERY_PROFILE_JSON}" 2>/dev/null || true
+}
+
+# iTerm is addressed by bundle id, never by name: while it is NOT running,
+# `tell application "iTerm2"` fails to resolve (LaunchServices knows the
+# bundle as "iTerm"), and AppleScript then rejects `create window` with
+# "Expected end of line, etc. but found class name".
+open_iterm() {
+  local profile="${PROFILE}" pname="" create_clause
+  if [ -z "${profile}" ]; then
+    if [ "${ROLE}" = float ]; then profile=gallery; else profile=default; fi
+  fi
+  [ "${profile}" = gallery ] && pname="$(iterm_gallery_profile_name)"
+  if [ -n "${pname}" ]; then
+    create_clause="create window with profile \"${pname}\""
+  else
+    create_clause="create window with default profile"
+  fi
+  build_run 0 1
+  if [ "${#RUN[@]}" -gt 0 ]; then
+    # %q escapes for the shell iTerm runs the command through; embedding that
+    # in an AppleScript double-quoted literal additionally needs every
+    # backslash and double quote escaped for AppleScript itself.
+    create_clause="${create_clause} command \"$(as_escape "$(quote_cmd "${RUN[@]}")")\""
+  fi
+
+  if [ "${ROLE}" = float ]; then
+    if term_running iterm2 || { [ -z "${GALLERY_TERM_RUNNING:-}" ] && pgrep -afq "/iTerm.app/Contents/MacOS/iTerm2"; }; then
+      act osascript -e "tell application id \"com.googlecode.iterm2\" to ${create_clause}"
+    else
+      act osascript -e "tell application id \"com.googlecode.iterm2\"
+        activate
+        ${create_clause}
+    end tell"
+    fi
+    return 0
+  fi
+
+  # tile. A cold iTerm opens its own startup window anyway, so with no
+  # command it is only launched (an Apple Event would start it hidden and
+  # unactivated, adding an invisible window per press); with a command it is
+  # launched, waited for, then driven. The select matters: activate alone
+  # re-raises iTerm's previous key window. The new window's id is printed --
+  # it is the CGWindowID yabai uses (gallery-agent reads it).
+  if ! term_running iterm2; then
+    cold_start iterm2
+    [ "${#RUN[@]}" -gt 0 ] || return 0
+  fi
+  act osascript \
+    -e 'tell application id "com.googlecode.iterm2"' \
+    -e "set w to (${create_clause})" \
+    -e 'activate' \
+    -e 'select w' \
+    -e 'return id of w' \
+    -e 'end tell'
+}
+
+# --- Ghostty --------------------------------------------------------------------
+
+# AppleScript only: the macOS CLI cannot open windows. `new window with
+# configuration` takes a surface configuration (command, working directory).
+# There is no per-window config, so a float window gets the palette from the
+# wrapper's escapes (its opacity and blur stay the user's own), and there is
+# no title option, so the wrapper sets that too.
+open_ghostty() {
+  local record="" cmdline
+  build_run 1 0
+  if [ "${#RUN[@]}" -gt 0 ]; then
+    cmdline="$(quote_cmd "${RUN[@]}")"
+    record="command:\"$(as_escape "${cmdline% }")\""
+  fi
+  if [ -n "${CWD}" ]; then
+    record="${record}${record:+, }initial working directory:\"$(as_escape "${CWD}")\""
+  fi
+  local cold=0
+  if ! term_running ghostty; then
+    cold_start ghostty
+    cold=1
+    # A plain tile window: the startup window Ghostty opens is the window.
+    [ -n "${record}" ] || return 0
+  fi
+  if [ -n "${record}" ]; then
+    # A cold Ghostty has opened its own startup window by now; close it once
+    # ours exists, so one keypress leaves one window.
+    act osascript \
+      -e 'tell application id "com.mitchellh.ghostty"' \
+      -e "set coldWindows to {}" \
+      -e "if ${cold} is 1 then" \
+      -e 'repeat 50 times' \
+      -e 'if (count of windows) > 0 then exit repeat' \
+      -e 'delay 0.1' \
+      -e 'end repeat' \
+      -e 'set coldWindows to id of every window' \
+      -e 'end if' \
+      -e 'activate' \
+      -e "new window with configuration {${record}}" \
+      -e 'repeat with i in coldWindows' \
+      -e 'close window (first window whose id is (contents of i))' \
+      -e 'end repeat' \
+      -e 'end tell'
+  else
+    act osascript \
+      -e 'tell application id "com.mitchellh.ghostty"' \
+      -e 'activate' \
+      -e 'new window' \
+      -e 'end tell'
+  fi
+}
+
+# --- kitty and WezTerm: plain processes ------------------------------------------
+
+# The binary inside the bundle (kitty, wezterm); the standard path when the
+# app is not found, so a dry run still prints something sensible.
+term_binary() {
+  local b
+  b="$(term_bundle_path "$1")"
+  [ -n "${b}" ] || b="/Applications/$(term_bundle "$1")"
+  printf '%s/Contents/MacOS/%s' "${b}" "$1"
+}
+
+# --single-instance makes a second invocation open a window in the running
+# kitty and exit, and starts kitty when it is cold: one command line either
+# way. --title fixes the title permanently. A float window passes --config,
+# which REPLACES kitty's own config lookup, so the user's kitty.conf is named
+# first and the rendered Gallery theme after it (later wins).
+open_kitty() {
+  local args=(--single-instance) user_conf="" c
+  # A single instance applies --config only when it starts, so floating windows
+  # get an instance group of their own that always starts with the Gallery theme.
+  [ "${ROLE}" = float ] && args+=(--instance-group gallery-float)
+  [ -n "${TITLE}" ] && args+=(--title "${TITLE}")
+  [ -n "${CWD}" ] && args+=(--directory "${CWD}")
+  if [ "${ROLE}" = float ]; then
+    for c in "${HOME}/.config/kitty/kitty.conf" "${HOME}/Library/Preferences/kitty/kitty.conf"; do
+      if [ -f "${c}" ]; then user_conf="${c}"; break; fi
+    done
+    [ -n "${user_conf}" ] && args+=(--config "${user_conf}")
+    args+=(--config "${TERMINALS_DIR}/kitty.conf")
+  fi
+  act_bg "$(term_binary kitty)" "${args[@]}" ${CMD[@]+"${CMD[@]}"}
+}
+
+# `wezterm start` asks a running GUI to open the window (and starts one when
+# cold), so tile windows share the user's instance. A float window gets
+# --always-new-process, because only a process of its own takes --config
+# overrides: the Gallery glass here, the palette from the wrapper's escapes.
+# The window title follows the pane title the wrapper sets.
+open_wezterm() {
+  local args=()
+  if [ "${ROLE}" = float ]; then
+    args+=(--config "window_background_opacity=$(glass_value opacity 0.88)"
+           --config "macos_window_background_blur=$(glass_value blur 9)"
+           --config "hide_tab_bar_if_only_one_tab=true")
+  fi
+  args+=(start)
+  [ "${ROLE}" = float ] && args+=(--always-new-process)
+  [ -n "${CWD}" ] && args+=(--cwd "${CWD}")
+  build_run 1 0
+  if [ "${#RUN[@]}" -gt 0 ]; then
+    args+=(-- "${RUN[@]}")
+  fi
+  act_bg "$(term_binary wezterm)" "${args[@]}"
+}
+
+cmd_open() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --title)   TITLE="${2:?--title requires a value}"; shift 2 ;;
+      --role)    ROLE="${2:?--role requires float or tile}"; shift 2 ;;
+      --cwd)     CWD="${2:?--cwd requires a directory}"; shift 2 ;;
+      --profile) PROFILE="${2:?--profile requires gallery or default}"; shift 2 ;;
+      --dry-run) DRY_RUN=1; shift ;;
+      --)        shift; break ;;
+      *)         die "unexpected argument before --: $1" ;;
+    esac
+  done
+  case "${ROLE}" in float|tile) ;; *) die "--role must be float or tile" ;; esac
+  case "${PROFILE}" in ""|gallery|default) ;; *) die "--profile must be gallery or default" ;; esac
+  [ $# -eq 0 ] || CMD=("$@")
+  if [ "${ROLE}" = float ] && [ "${#CMD[@]}" -eq 0 ]; then
+    die "a float window needs a command: gallery-term open --role float -- CMD"
+  fi
+
+  case "$(current_terminal)" in
+    iterm2)  open_iterm ;;
+    ghostty) open_ghostty ;;
+    kitty)   open_kitty ;;
+    wezterm) open_wezterm ;;
+  esac
+}
+
+# --- the small verbs ----------------------------------------------------------------
+
+cmd_list() {
+  local t cur mark
+  cur="$(current_terminal)"
+  for t in ${SUPPORTED}; do
+    if term_installed "${t}"; then mark="installed"; else mark="-"; fi
+    [ "${t}" = "${cur}" ] && mark="${mark} (current)"
+    printf '%-9s %s\n' "${t}" "${mark}"
+  done
+}
+
+cmd_set() {
+  local t="${1:?usage: gallery-term set <iterm2|ghostty|kitty|wezterm>}"
+  valid_terminal "${t}" || die "unsupported terminal: ${t} (one of: ${SUPPORTED})"
+  term_installed "${t}" || die "${t} is not installed (looked for $(term_bundle "${t}") in ${GALLERY_TERM_APP_DIRS:-/Applications:${HOME}/Applications})"
+  mkdir -p "$(dirname "${STATE_FILE}")"
+  printf '{\n  "terminal": "%s"\n}\n' "${t}" > "${STATE_FILE}.new"
+  mv -f "${STATE_FILE}.new" "${STATE_FILE}"
+}
+
+[ $# -ge 1 ] || die "usage: gallery-term <open|app|name|list|set|installed> ..."
+sub="$1"
+shift
+case "${sub}" in
+  open)      cmd_open "$@" ;;
+  wrap)      cmd_wrap "$@" ;;
+  app)       term_app "$(current_terminal)" ;;
+  name)      current_terminal ;;
+  list)      cmd_list ;;
+  set)       cmd_set "$@" ;;
+  installed) valid_terminal "${1:-}" && term_installed "$1" ;;
+  *)         die "unknown subcommand: ${sub}" ;;
+esac

@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 #
 # gallery-tui -- put any shell command on screen in a floating, centred
-# iTerm2 window, managed by yabai float/grid rules, with no Hammerspoon
-# involved at all.
+# terminal window (iTerm2, Ghostty, kitty or WezTerm -- whichever `gallery
+# terminal` has configured), managed by yabai float/grid rules, with no
+# Hammerspoon involved at all.
 #
 # Mechanism generalised from ~/.config/skhd/learn (see its open_window,
 # own_window, float_me, linger and set_title functions -- that script is
 # not modified, only its pattern is copied here): `open` spawns a fresh
-# iTerm2 window via osascript running `gallery-tui run ...` inside itself;
+# terminal window, through gallery-term, running `gallery-tui run ...` inside itself;
 # that in-window process sets its own terminal title to "Gallery: <title>"
 # (via the OSC 0 escape sequence), which both a yabai rule (float,
 # centred, unmanaged) and this script's own `yabai -m query --windows`
 # lookups key off to find/focus/close the window later. Hammerspoon is
-# never in the loop -- a `tui` kind plugin is pure shell + iTerm2 + yabai,
+# never in the loop -- a `tui` kind plugin is pure shell + a terminal + yabai,
 # which is exactly why it can be used even when the Gallery Spoon is not
 # running (see Gallery.spoon/init.lua's tui shim, which just shells out to
 # `gallery`/`gallery-tui` for the same reason).
@@ -26,7 +27,7 @@
 #
 set -euo pipefail
 
-# iTerm starts our window's command with a bare PATH: make Homebrew (and
+# The terminal starts our window's command with a bare PATH: make Homebrew (and
 # fzf/glow/btop/etc under it) visible before anything else on PATH.
 export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
 
@@ -35,12 +36,15 @@ DEFAULT_GRID="6:6:1:1:4:4"
 YABAI_RULE_LABEL="gallery-tui"
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
-# Dynamic profile tools/render-theme.py writes on every theme change. Its
-# "Name" field is read fresh each spawn (rather than hardcoded) so a future
-# renderer change to the profile name is picked up automatically; the
-# constant below is only the fallback when the file is absent or unparsable.
-ITERM_GALLERY_PROFILE_JSON="${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json"
-ITERM_GALLERY_PROFILE_FALLBACK="Gallery"
+# The window launcher (next to this script in a checkout, else the installed
+# one). GALLERY_TERM_BIN overrides it, for tests.
+GALLERY_TERM="${GALLERY_TERM_BIN:-$(dirname "${SELF}")/gallery-term}"
+[ -x "${GALLERY_TERM}" ] || GALLERY_TERM="${HOME}/bin/gallery-term"
+
+# The app name yabai reports for the configured terminal (iTerm2, Ghostty,
+# kitty, WezTerm), looked up once per invocation.
+TERM_APP="$("${GALLERY_TERM}" app 2>/dev/null || true)"
+TERM_APP="${TERM_APP:-iTerm2}"
 
 die() {
   echo "gallery-tui: $*" >&2
@@ -71,26 +75,27 @@ focused_display() {
 }
 
 # Our own window's yabai record, found by the title set_title gave it --
-# never by focus (a cold or slow iTerm may not have focused the new window
+# never by focus (a cold or slow terminal may not have focused the new window
 # yet). One JSON object per line, empty until the title has propagated.
 own_window() {
   local name="$1"
   yabai -m query --windows 2>/dev/null | tr -d '\n' | sed 's/},[[:space:]]*{/}\
-{/g' | grep -E "\"app\":[[:space:]]*\"iTerm2\"" | grep -F "\"title\":" | grep -F "${TITLE_PREFIX}: ${name}\"" | head -1
+{/g' | grep -E "\"app\":[[:space:]]*\"${TERM_APP}\"" | grep -F "\"title\":" | grep -F "${TITLE_PREFIX}: ${name}\"" | head -1
 }
 
 window_id() {
   printf '%s' "$1" | sed -n 's/.*"id":[[:space:]]*\([0-9][0-9]*\).*/\1/p'
 }
 
-# Idempotently install the float/grid rule for every Gallery-titled iTerm
-# window. Removed and re-added each time so a changed --grid takes effect
-# on the next open. Silently skipped if yabai is not installed.
+# Idempotently install the float/grid rule for every Gallery-titled window
+# of the configured terminal. Removed and re-added each time so a changed
+# --grid takes effect on the next open. Silently skipped if yabai is not
+# installed.
 ensure_yabai_rule() {
   command -v yabai >/dev/null 2>&1 || return 0
   local grid="${1:-${DEFAULT_GRID}}"
   yabai -m rule --remove "${YABAI_RULE_LABEL}" >/dev/null 2>&1 || true
-  yabai -m rule --add label="${YABAI_RULE_LABEL}" app="^iTerm2$" title="^${TITLE_PREFIX}: " manage=off "grid=${grid}" >/dev/null 2>&1 || true
+  yabai -m rule --add label="${YABAI_RULE_LABEL}" app="^${TERM_APP}$" title="^${TITLE_PREFIX}: " manage=off "grid=${grid}" >/dev/null 2>&1 || true
 }
 
 # The belt to the yabairc-style rule's brace: floats/centres/focuses our
@@ -101,7 +106,7 @@ float_me() {
   local name="$1" grid="${2:-${DEFAULT_GRID}}" disp="${3:-}"
   local w="" id i
   i=0
-  while [ "${i}" -lt 40 ]; do          # a cold iTerm restores its windows first
+  while [ "${i}" -lt 40 ]; do          # a cold terminal restores its windows first
     w="$(own_window "${name}" || true)"
     [ -n "${w}" ] && break
     sleep 0.1
@@ -120,7 +125,7 @@ float_me() {
   yabai -m window "${id}" --focus >/dev/null 2>&1 || true
 }
 
-# iTerm complains "a session ended very soon after starting" when a window
+# iTerm2 complains "a session ended very soon after starting" when a window
 # closes within a few seconds -- so an early-failing command still lingers
 # to the three-second mark before this process exits.
 _t0=$(date +%s)
@@ -132,61 +137,15 @@ linger() {
 
 # --- the floating window ----------------------------------------------------
 
-# Name of the Gallery iTerm dynamic profile, read fresh from the JSON
-# render-theme.py writes. Empty output means "use the default profile"
-# (file missing, unreadable, or unparsable -- e.g. mid-write).
-gallery_iterm_profile_name() {
-  [ -f "${ITERM_GALLERY_PROFILE_JSON}" ] || return 0
-  python3 -c '
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        doc = json.load(f)
-    name = doc["Profiles"][0]["Name"]
-    if name:
-        print(name)
-except Exception:
-    pass
-' "${ITERM_GALLERY_PROFILE_JSON}" 2>/dev/null || true
-}
-
-# A fresh iTerm window running `gallery-tui run ...`. Needs Automation ->
-# iTerm2 for the caller (one prompt, once), exactly like learn's
-# open_window (cold-iTerm branch included: a cold iTerm restores its own
-# windows first, so ours is made to activate and follow).
-#
-# iTerm is addressed by bundle id, never by name: while iTerm is NOT
-# running, `tell application "iTerm2"` fails to resolve (LaunchServices
-# knows the bundle as "iTerm"; "iTerm2" only matches the running process),
-# and AppleScript then rejects `create window` with "Expected end of line,
-# etc. but found class name". A Mac whose iTerm is always open never shows
-# this; a fresh machine does, on the very first key press.
+# A fresh window running `gallery-tui run ...`, opened by gallery-term in the
+# configured terminal (float role: the Gallery theme; see that script for
+# the per-terminal mechanics, cold start included). Needs Automation ->
+# the terminal for the caller on iTerm2 and Ghostty (one prompt, once).
+# $1 is the window title (as `run` will set it), the rest `run`'s arguments.
 spawn_window() {
-  local cmdline
-  cmdline="$(printf '%q ' "${SELF}" "$@")"
-  # %q escapes for bash (e.g. a title with a space becomes "Foo\ Bar");
-  # embedding that inside an AppleScript double-quoted string literal
-  # additionally needs every backslash and double quote escaped for
-  # AppleScript itself, or its compiler chokes on the bare backslash.
-  local as_cmdline
-  as_cmdline="$(printf '%s' "${cmdline}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
-
-  local profile_name create_clause
-  profile_name="$(gallery_iterm_profile_name)"
-  if [ -n "${profile_name}" ]; then
-    create_clause="create window with profile \"${profile_name}\" command \"${as_cmdline}\""
-  else
-    create_clause="create window with default profile command \"${as_cmdline}\""
-  fi
-
-  if pgrep -xq iTerm2 || pgrep -fq "/iTerm.app/Contents/MacOS/iTerm2"; then
-    osascript -e "tell application id \"com.googlecode.iterm2\" to ${create_clause}" >/dev/null
-  else
-    osascript -e "tell application id \"com.googlecode.iterm2\"
-        activate
-        ${create_clause}
-    end tell" >/dev/null
-  fi
+  local title="$1"
+  shift
+  "${GALLERY_TERM}" open --role float --title "${title}" -- "${SELF}" "$@" >/dev/null
 }
 
 focus_if_open() {
@@ -230,7 +189,7 @@ cmd_open() {
   disp="$(focused_display)"
 
   # shellcheck disable=SC2086 # intentional: an empty $disp contributes no args at all
-  spawn_window run "${title}" ${disp:+--display "${disp}"} --grid "${grid}" -- "$@"
+  spawn_window "${TITLE_PREFIX}: ${title}" run "${title}" ${disp:+--display "${disp}"} --grid "${grid}" -- "$@"
 }
 
 cmd_run() {

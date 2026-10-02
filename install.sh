@@ -32,6 +32,8 @@ HS_BIN_SRC="${SCRIPT_DIR}/bin/gallery-hs"
 HS_BIN_DEST="${HOME_DIR}/bin/gallery-hs"
 TUI_BIN_SRC="${SCRIPT_DIR}/bin/gallery-tui"
 TUI_BIN_DEST="${HOME_DIR}/bin/gallery-tui"
+TERM_BIN_SRC="${SCRIPT_DIR}/bin/gallery-term"
+TERM_BIN_DEST="${HOME_DIR}/bin/gallery-term"
 MENU_BIN_SRC="${SCRIPT_DIR}/bin/gallery-menu"
 MENU_BIN_DEST="${HOME_DIR}/bin/gallery-menu"
 BORDERS_BIN_SRC="${SCRIPT_DIR}/bin/gallery-borders"
@@ -191,7 +193,7 @@ do_uninstall() {
   else
     echo "[gallery] no CLI installed at ${HS_BIN_DEST}"
   fi
-  run rm -f "${TUI_BIN_DEST}" "${MENU_BIN_DEST}" "${QML_BIN_DEST}" "${BORDERS_BIN_DEST}" "${AGENT_BIN_DEST}"
+  run rm -f "${TUI_BIN_DEST}" "${TERM_BIN_DEST}" "${MENU_BIN_DEST}" "${QML_BIN_DEST}" "${BORDERS_BIN_DEST}" "${AGENT_BIN_DEST}"
 
   echo "[gallery] leaving ${CONFIG_DIR} in place"
   echo "[gallery] leaving ${HS_INIT} in place -- Gallery load block was not removed automatically."
@@ -279,10 +281,11 @@ echo "[gallery] installing hs watchdog CLI to ${HS_BIN_DEST}"
 run cp "${HS_BIN_SRC}" "${HS_BIN_DEST}"
 run chmod +x "${HS_BIN_DEST}"
 
-echo "[gallery] installing terminal-window helpers to ${TUI_BIN_DEST}, ${MENU_BIN_DEST}"
+echo "[gallery] installing terminal-window helpers to ${TUI_BIN_DEST}, ${TERM_BIN_DEST}, ${MENU_BIN_DEST}"
 run cp "${TUI_BIN_SRC}" "${TUI_BIN_DEST}"
+run cp "${TERM_BIN_SRC}" "${TERM_BIN_DEST}"
 run cp "${MENU_BIN_SRC}" "${MENU_BIN_DEST}"
-run chmod +x "${TUI_BIN_DEST}" "${MENU_BIN_DEST}"
+run chmod +x "${TUI_BIN_DEST}" "${TERM_BIN_DEST}" "${MENU_BIN_DEST}"
 
 echo "[gallery] installing theme-aware borders helper to ${BORDERS_BIN_DEST}"
 run cp "${BORDERS_BIN_SRC}" "${BORDERS_BIN_DEST}"
@@ -468,7 +471,7 @@ link_omarchy_theme "${OMARCHY_STATE_THEME_LINK}"
 # --- theme render ---------------------------------------------------------------------
 # A fresh machine has no ~/.config/gallery/state/theme.{css,json,sh} until a theme
 # is set or rendered, yet the Spoon, the theme picker, gallery-borders and the
-# iTerm2 dynamic profiles all read those files. Render the current theme now
+# terminal themes (iTerm2 profiles, Ghostty/kitty/WezTerm files) all read those files. Render the current theme now
 # (renderers only -- hooks and the Spoon are not touched; cheap and idempotent),
 # then re-sync the borders daemon, which yabairc may have launched before the
 # render existed and which reconfigures in place.

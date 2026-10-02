@@ -50,8 +50,10 @@ yabai -m rule --add app="^Finder$" title="(Copy|Info|Connect|Move|Delete|Get Inf
 # Safari tile that way. Rules are evaluated once, at creation, so an unknown
 # subrole must be left to yabai's default handling, not floated.
 yabai -m rule --add label=tiler-float-nonstandard subrole="^AX(Dialog|SystemDialog|Sheet|Popover|FloatingWindow|Unknown)$" manage=off
-# The Learn cheat-sheet window (tiler/learn): a floating, centred iTerm window.
-yabai -m rule --add app="^iTerm2$" title="^Learn: " manage=off grid=6:6:1:1:4:4
+# The Learn cheat-sheet window (tiler/learn): a floating, centred terminal window,
+# whichever of the supported terminals (bin/gallery-term) is configured. The app
+# names are the CFBundleName of each: iTerm2, Ghostty, kitty, WezTerm.
+yabai -m rule --add app="^(iTerm2|Ghostty|kitty|WezTerm)$" title="^Learn: " manage=off grid=6:6:1:1:4:4
 
 # --- machine-local rules (app -> home Space) ---------------------------------
 # Which Space an app belongs on depends on the Mac (display count, Space

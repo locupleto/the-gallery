@@ -5,12 +5,12 @@
 # default, or $LEARN_SHEETS / $OBSIDIAN_VAULT/Cheat-Sheets; one source, read in
 # place, never copied). The only generated one is Tiler-Keys.md, built from the
 # "## description" lines in tiler/skhdrc so the sheet can never drift from the
-# bindings. Sheets render in a floating, centred iTerm window (glow rendering,
+# bindings. Sheets render in a floating, centred terminal window (glow rendering,
 # paged by fzf; q or Esc closes it). Doors: super+space (menu),
 # super+shift+space (tiler keys), and "Learn" in Spotlight
 # (~/Applications/Learn.app).
 #
-#   learn open menu|show <Sheet>   open a floating iTerm window running the command
+#   learn open menu|show <Sheet>   open a floating terminal window running the command
 #                                  (centred on the display that has focus)
 #   learn menu                     pick a sheet with fzf, then show it (in-window)
 #   learn show <Sheet>             render one sheet with glow (in-window)
@@ -21,7 +21,7 @@
 # Installed to ~/.config/skhd/learn by tiler/install.sh (skhd and Learn.app run
 # under launchd, which cannot read the external volume the repo lives on).
 set -euo pipefail
-# iTerm starts our window's command with a bare PATH: make Homebrew tools visible.
+# The terminal starts our window's command with a bare PATH: make Homebrew tools visible.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # The Gallery's own folder unless told otherwise; a vault's folder can be
@@ -30,7 +30,14 @@ SHEETS="${LEARN_SHEETS:-${OBSIDIAN_VAULT:+$OBSIDIAN_VAULT/Cheat-Sheets}}"
 SHEETS="${SHEETS:-$HOME/.config/gallery/sheets}"
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 APP="$HOME/Applications/Learn.app"
-TITLE_PREFIX="Learn"       # yabairc floats iTerm windows whose title starts with this
+TITLE_PREFIX="Learn"       # yabairc floats terminal windows whose title starts with this
+
+# The window launcher: the installed one, else the checkout's next to tiler/.
+# GALLERY_TERM_BIN overrides it. TERM_APP is the app name yabai reports for
+# the configured terminal, looked up once.
+GALLERY_TERM="${GALLERY_TERM_BIN:-$HOME/bin/gallery-term}"
+[ -x "$GALLERY_TERM" ] || GALLERY_TERM="$(dirname "$SELF")/../bin/gallery-term"
+TERM_APP=""   # set by float_me, the only caller of own_window
 
 die() { echo "learn: $*" >&2; exit 1; }
 
@@ -86,7 +93,7 @@ focused_display() {
 # propagated.
 own_window() {
     yabai -m query --windows 2>/dev/null | tr -d '\n' | sed 's/},[[:space:]]*{/}\
-{/g' | grep -E "\"app\":[[:space:]]*\"iTerm2\"" | grep -F "\"title\":" | grep -F "$TITLE_PREFIX: $1\"" | head -1
+{/g' | grep -E "\"app\":[[:space:]]*\"$TERM_APP\"" | grep -F "\"title\":" | grep -F "$TITLE_PREFIX: $1\"" | head -1
 }
 
 float_me() {
@@ -95,7 +102,8 @@ float_me() {
     # title is set from inside the window). Also parks us on the right display.
     command -v yabai >/dev/null || return 0
     local name="$1" w="" id
-    for _ in $(seq 1 40); do          # a cold iTerm restores its windows first
+    [ -n "$TERM_APP" ] || TERM_APP="$("$GALLERY_TERM" app)"
+    for _ in $(seq 1 40); do          # a cold terminal restores its windows first
         w="$(own_window "$name" || true)"
         [ -n "$w" ] && break
         sleep 0.1
@@ -175,20 +183,15 @@ menu() {
 
 # --- the floating window ----------------------------------------------------------------------
 open_window() {
-    # A fresh iTerm window running this script. Needs Automation → iTerm2 for the
-    # caller (skhd, or Learn.app in Spotlight) — one prompt, once.
-    local cmd disp
+    # A fresh terminal window running this script, opened by gallery-term (the
+    # cold-start and per-terminal details live there). On iTerm2 it keeps its
+    # default profile, as ever; on the others it is a themed float window. Needs
+    # Automation → the terminal for the caller (skhd, or Learn.app in Spotlight)
+    # on iTerm2 and Ghostty — one prompt, once.
+    local disp
     disp="$(focused_display)"
-    cmd="$(printf '%q ' "$SELF" ${disp:+--display "$disp"} "$@")"
-    if pgrep -xq iTerm2; then
-        osascript -e "tell application id \"com.googlecode.iterm2\" to create window with default profile command \"$cmd\"" >/dev/null
-    else
-        # A cold iTerm opens its own restored windows first; ours follows.
-        osascript -e "tell application id \"com.googlecode.iterm2\"
-            activate
-            create window with default profile command \"$cmd\"
-        end tell" >/dev/null
-    fi
+    "$GALLERY_TERM" open --role float --profile default --title "$TITLE_PREFIX: ${2:-${1:-menu}}" \
+        -- "$SELF" ${disp:+--display "$disp"} "$@" >/dev/null
 }
 
 # --- generation ---------------------------------------------------------------------------------

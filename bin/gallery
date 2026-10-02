@@ -36,6 +36,9 @@
 #   gallery console theme
 #   gallery console native
 #   gallery console toggle
+#   gallery terminal [status]
+#   gallery terminal list
+#   gallery terminal set <iterm2|ghostty|kitty|wezterm>
 #   gallery font status
 #   gallery font set <family> [size] [weight]
 #   gallery font native
@@ -95,7 +98,7 @@ RULES_LOCAL_FILE="${HOME}/.config/yabai/rules.local"
 RULES_LOCAL_PREV_FILE="${RULES_LOCAL_FILE}.prev"
 # Apps that legitimately move around (terminals spawned wherever super+return
 # is pressed) never get a home-* rule. `home save --roam` adds to this list.
-HOME_DEFAULT_ROAM="iTerm2"
+HOME_DEFAULT_ROAM="iTerm2,Ghostty,kitty,WezTerm"
 # Installed by install.sh from this repo's patches/ directory -- see that
 # directory's own README.md for the mechanism (macOS replacements for a
 # plugin's own files, applied on top of the installed plugin dir).
@@ -155,10 +158,13 @@ commands:
   bg next [theme]                 cycle to the next background, and apply it
   bg prev [theme]                 cycle to the previous background, and apply it
   bg apply [theme]                re-apply the active background
-  console status                  show whether the iTerm console follows the theme
-  console theme                   make the iTerm console follow the active theme
-  console native                  restore the iTerm console to its own Default colours
+  console status                  show whether the terminal console follows the theme
+  console theme                   make the terminal console follow the active theme
+  console native                  restore the terminal console to its own colours
   console toggle                  flip between theme and native
+  terminal [status]               show which terminal the Gallery opens windows in
+  terminal list                   the supported terminals (iterm2, ghostty, kitty, wezterm)
+  terminal set <name>             choose the terminal and re-render the theme for it
   font status                     show the Gallery-wide monospace font preference
   font set <family> [size] [weight]
                                    set the font preference (size default 13, weight default Regular)
@@ -586,7 +592,7 @@ qml_pid_alive() {
 # ensure_gallery_qml_yabai_rule -- idempotent float/centre rule for every
 # Gallery-titled Qt window (the qml-kind twin of gallery-tui's own
 # ensure_yabai_rule, which this deliberately does not touch -- no app
-# filter here, since these are not iTerm2 windows). Removed and re-added
+# filter here, since these are not terminal windows). Removed and re-added
 # each call so it is always present and current. Silently skipped if
 # yabai is not installed.
 ensure_gallery_qml_yabai_rule() {
@@ -1706,16 +1712,26 @@ cmd_bg() {
   esac
 }
 
-# --- iTerm console mode ------------------------------------------------------
+# --- Console mode (the everyday terminal follows the theme) --------------------
 #
-# The user's everyday iTerm2 terminal (their "Console" profile, a Dynamic
-# Profile child of their own "Default" -- see tools/render-theme.py's
-# render_iterm_console_profile for the parent/child mechanism) can either
-# follow the active Gallery theme's colours or stay on its own untouched
-# Default colours. Recorded in CONSOLE_STATE_FILE as {"mode": "theme"} or
-# {"mode": "native"}; missing/invalid means native. Switching modes re-runs
-# the renderer, which rewrites gallery-console.json and iTerm picks the
-# change up live in already-open Console-profile sessions.
+# The user's everyday terminal can either follow the active Gallery theme's
+# colours or stay on its own untouched ones. Recorded in CONSOLE_STATE_FILE as
+# {"mode": "theme"} or {"mode": "native"}; missing/invalid means native.
+# Switching modes re-runs the renderer, and what that changes depends on the
+# configured terminal (`gallery terminal`):
+#
+#   iterm2   the "Console" Dynamic Profile (a child of the user's own
+#            "Default" -- see tools/render-theme.py's
+#            render_iterm_console_profile) is rewritten and iTerm picks the
+#            change up live in already-open Console-profile sessions.
+#   ghostty  one marked `config-file = ?<rendered ghostty.conf>` line is added
+#            to / removed from ~/.config/ghostty/config.
+#   kitty    one marked `include <rendered kitty.conf>` line is added to /
+#            removed from ~/.config/kitty/kitty.conf.
+#   wezterm  the user's Lua is never edited: `theme` prints the two lines to
+#            add (and writes ~/.wezterm.lua with them only if no wezterm
+#            config exists); the rendered wezterm.lua module itself returns
+#            nothing in native mode, so `native` needs no edit.
 
 # console_read_mode -- prints "theme" or "native" (default "native" if
 # CONSOLE_STATE_FILE is missing, unreadable, or carries anything else).
@@ -1766,13 +1782,249 @@ except Exception:
 ' "${CONSOLE_STATE_FILE}" "${mode}"
 }
 
+# --- terminal-specific console wiring ------------------------------------------
+
+# terminal_id -- the configured terminal (iterm2|ghostty|kitty|wezterm), from
+# bin/gallery-term, which owns that decision.
+terminal_id() {
+  "$(resolve_helper_bin gallery-term)" name 2>/dev/null || echo iterm2
+}
+
+# console_config_file <terminal> -- the user's own config file this terminal
+# reads (the one an include line goes into). Where it does not exist yet, the
+# path it would be created at.
+console_config_file() {
+  case "$1" in
+    ghostty)
+      if [ ! -f "${HOME}/.config/ghostty/config" ] && [ -f "${HOME}/.config/ghostty/config.ghostty" ]; then
+        echo "${HOME}/.config/ghostty/config.ghostty"
+      else
+        echo "${HOME}/.config/ghostty/config"
+      fi
+      ;;
+    kitty) echo "${HOME}/.config/kitty/kitty.conf" ;;
+    wezterm)
+      if [ -f "${HOME}/.config/wezterm/wezterm.lua" ]; then
+        echo "${HOME}/.config/wezterm/wezterm.lua"
+      else
+        echo "${HOME}/.wezterm.lua"
+      fi
+      ;;
+  esac
+}
+
+# console_include_line <terminal> -- the one line `console theme` owns in the
+# user's config; its rendered-file path is what marks it as ours.
+console_include_line() {
+  case "$1" in
+    ghostty) echo "config-file = ?${CONFIG_DIR}/state/terminals/ghostty.conf" ;;
+    kitty)   echo "include ${CONFIG_DIR}/state/terminals/kitty.conf" ;;
+  esac
+}
+
+# console_include_present <file> <line> -- the exact line is in the file.
+console_include_present() {
+  [ -f "$1" ] && grep -Fxq -- "$2" "$1"
+}
+
+# console_backup_once <file> -- before the first edit of an existing config,
+# keep a copy next to it as <file>.gallery-bak (never overwritten after).
+console_backup_once() {
+  [ -f "$1" ] && [ ! -e "$1.gallery-bak" ] && cp -p "$1" "$1.gallery-bak"
+  return 0
+}
+
+# console_include_add <file> <line> -- append the line unless it is already
+# there; creates the file (and its directory) if missing. Nothing else in the
+# file is touched.
+console_include_add() {
+  local file="$1" line="$2"
+  if console_include_present "${file}" "${line}"; then
+    return 0
+  fi
+  if [ -f "${file}" ]; then
+    console_backup_once "${file}"
+    # A file without a final newline would glue the line to its last one.
+    if [ -s "${file}" ] && [ -n "$(tail -c 1 "${file}")" ]; then
+      printf '\n' >> "${file}"
+    fi
+  else
+    mkdir -p "$(dirname "${file}")"
+  fi
+  printf '%s\n' "${line}" >> "${file}"
+}
+
+# console_include_remove <file> <line> -- drop every line equal to <line>,
+# rewriting the file in place (permissions kept) only when there is one. No
+# backup here: the first edit was the add, which made it.
+console_include_remove() {
+  local file="$1" line="$2" tmp
+  console_include_present "${file}" "${line}" || return 0
+  tmp="$(mktemp "${file}.XXXXXX")"
+  LINE="${line}" awk '$0 != ENVIRON["LINE"]' "${file}" > "${tmp}"
+  cat "${tmp}" > "${file}"
+  rm -f "${tmp}"
+}
+
+# The two lines a wezterm.lua needs (`config` being its config builder). The
+# rendered module is read with pcall, so a theme that was never rendered
+# cannot break wezterm's own config.
+wezterm_snippet() {
+  local rel="${CONFIG_DIR}/state/terminals/wezterm.lua" expr
+  case "${rel}" in
+    "${HOME}"/*) expr="wezterm.home_dir .. '/${rel#"${HOME}"/}'" ;;
+    *)           expr="'${rel}'" ;;
+  esac
+  printf '%s\n' \
+    "local ok, gallery = pcall(dofile, ${expr})" \
+    "if ok then for k, v in pairs(gallery) do config[k] = v end end"
+}
+
+wezterm_wired() {
+  [ -f "$1" ] && grep -Fq -- "state/terminals/wezterm.lua" "$1"
+}
+
+# console_config_apply <terminal> <theme|native> -- wire the user's terminal
+# config to the rendered theme (or unwire it). iTerm2 needs nothing: its
+# profile was rewritten by the render.
+console_config_apply() {
+  local term="$1" mode="$2" file line
+  case "${term}" in
+    ghostty|kitty)
+      file="$(console_config_file "${term}")"
+      line="$(console_include_line "${term}")"
+      if [ "${mode}" = "theme" ]; then
+        console_include_add "${file}" "${line}"
+        echo "${term}: ${file} includes the Gallery theme"
+      else
+        console_include_remove "${file}" "${line}"
+        echo "${term}: ${file} no longer includes the Gallery theme"
+      fi
+      ;;
+    wezterm)
+      file="$(console_config_file wezterm)"
+      if [ "${mode}" != "theme" ]; then
+        echo "wezterm: the rendered module now returns no settings; the two lines in ${file} (if any) stay and do nothing"
+        return 0
+      fi
+      if wezterm_wired "${file}"; then
+        echo "wezterm: ${file} already loads the Gallery theme"
+      elif [ -e "${HOME}/.wezterm.lua" ] || [ -e "${HOME}/.config/wezterm/wezterm.lua" ]; then
+        echo "wezterm: add these two lines to ${file} (before it returns its config):"
+        wezterm_snippet | sed 's/^/  /'
+      else
+        {
+          echo "local wezterm = require 'wezterm'"
+          echo "local config = wezterm.config_builder()"
+          wezterm_snippet
+          echo "return config"
+        } > "${file}"
+        echo "wezterm: created ${file} with the Gallery theme wired in"
+      fi
+      ;;
+  esac
+}
+
+# console_config_status <terminal> -- the config-file half of `console status`
+# for the terminals that have one.
+console_config_status() {
+  local term="$1" file line
+  file="$(console_config_file "${term}")"
+  case "${term}" in
+    ghostty|kitty)
+      line="$(console_include_line "${term}")"
+      if console_include_present "${file}" "${line}"; then
+        echo "config: ${file} includes the Gallery theme"
+      else
+        echo "config: ${file} does not include the Gallery theme (gallery console theme adds it)"
+      fi
+      ;;
+    wezterm)
+      if wezterm_wired "${file}"; then
+        echo "config: ${file} loads the Gallery theme"
+      else
+        echo "config: ${file} does not load the Gallery theme (gallery console theme shows the lines to add)"
+      fi
+      ;;
+  esac
+  if [ -f "${CONFIG_DIR}/state/terminals/$(terminal_theme_file "${term}")" ]; then
+    echo "$(terminal_theme_file "${term}"): exists"
+  else
+    echo "$(terminal_theme_file "${term}"): missing (run: gallery theme render)"
+  fi
+}
+
+terminal_theme_file() {
+  case "$1" in
+    ghostty) echo ghostty.conf ;;
+    kitty)   echo kitty.conf ;;
+    wezterm) echo wezterm.lua ;;
+  esac
+}
+
+# --- terminal verbs ---------------------------------------------------------------
+
+# `gallery terminal ...` -- which terminal the Gallery opens windows in
+# (iTerm2, Ghostty, kitty, WezTerm). The choice and the launcher live in
+# bin/gallery-term; setting one re-renders the theme so its files are current.
+cmd_terminal() {
+  local sub="${1:-status}" helper
+  [ $# -gt 0 ] && shift
+  helper="$(resolve_helper_bin gallery-term)"
+  if [ ! -x "${helper}" ]; then
+    echo "gallery: gallery-term not found (${helper}); run install.sh" >&2
+    exit 1
+  fi
+  case "${sub}" in
+    status)
+      local t
+      t="$("${helper}" name)"
+      if "${helper}" installed "${t}"; then
+        echo "terminal: ${t} ($("${helper}" app))"
+      else
+        echo "terminal: ${t} ($("${helper}" app)) -- NOT INSTALLED (gallery terminal list)"
+      fi
+      ;;
+    list)
+      "${helper}" list
+      ;;
+    set)
+      local name="${1:-}"
+      if [ -z "${name}" ]; then
+        echo "usage: gallery terminal set <iterm2|ghostty|kitty|wezterm>" >&2
+        exit 1
+      fi
+      "${helper}" set "${name}" || exit 1
+      echo "terminal: ${name}"
+      if [ -n "$(theme_current_name)" ]; then
+        run_theme_render >/dev/null || echo "gallery: terminal recorded but render failed" >&2
+      fi
+      if [ "$(console_read_mode)" = "theme" ] && [ "${name}" != "iterm2" ]; then
+        console_config_apply "${name}" theme
+      fi
+      ;;
+    *)
+      echo "usage: gallery terminal [status|list|set <name>]" >&2
+      exit 1
+      ;;
+  esac
+}
+
 cmd_console_status() {
-  local mode
+  local mode term
   mode="$(console_read_mode)"
+  term="$(terminal_id)"
   if [ "${mode}" = "theme" ]; then
     echo "console: theme (following $(theme_current_name || true))"
-  else
+  elif [ "${term}" = "iterm2" ]; then
     echo "console: native (iTerm Default profile colours)"
+  else
+    echo "console: native (${term} own config)"
+  fi
+
+  if [ "${term}" != "iterm2" ]; then
+    console_config_status "${term}"
+    return 0
   fi
 
   local default_guid
@@ -1800,11 +2052,14 @@ console_set_mode() {
 
   local current
   current="$(theme_current_name)"
-  local label
+  local label term
+  term="$(terminal_id)"
   if [ "${mode}" = "theme" ]; then
     label="theme (following ${current:-no current theme})"
-  else
+  elif [ "${term}" = "iterm2" ]; then
     label="native (iTerm Default profile colours)"
+  else
+    label="native (${term} own config)"
   fi
 
   if [ -z "${current}" ]; then
@@ -1817,6 +2072,7 @@ console_set_mode() {
     return 1
   fi
   echo "console: ${label}"
+  console_config_apply "${term}" "${mode}"
 }
 
 cmd_console_theme() {
@@ -1951,7 +2207,11 @@ font_status_line() {
   local prefs family size weight
   prefs="$(font_read_prefs)"
   if [ -z "${prefs}" ]; then
-    printf 'native (inheriting iTerm Default font)'
+    if [ "$(terminal_id)" = "iterm2" ]; then
+      printf 'native (inheriting iTerm Default font)'
+    else
+      printf "native (inheriting the terminal's own font)"
+    fi
     return 0
   fi
   family="$(printf '%s\n' "${prefs}" | sed -n 1p)"
@@ -3365,13 +3625,34 @@ cmd_doctor() {
     echo "MISSING ${GALLERY_JSON} exists (informational; written once the Spoon persists state)"
   fi
 
-  # tui/menu kind plugins run in iTerm2 via gallery-tui, no Hammerspoon
-  # involved -- checked here regardless of whether any installed plugin
-  # currently uses those kinds.
-  if [ -d "/Applications/iTerm.app" ]; then
-    echo "OK      iTerm2.app present"
+  # tui/menu kind plugins run in the configured terminal via gallery-tui, no
+  # Hammerspoon involved -- checked here regardless of whether any installed
+  # plugin currently uses those kinds.
+  local term_id
+  term_id="$(terminal_id)"
+  if [ "${term_id}" = "iterm2" ]; then
+    if [ -d "/Applications/iTerm.app" ]; then
+      echo "OK      iTerm2.app present"
+    else
+      echo "MISSING iTerm2.app present"
+      ok=0
+    fi
   else
-    echo "MISSING iTerm2.app present"
+    echo "OK      terminal: ${term_id} (gallery terminal)"
+    if "$(resolve_helper_bin gallery-term)" installed "${term_id}"; then
+      echo "OK      $("$(resolve_helper_bin gallery-term)" app) present"
+    else
+      echo "MISSING $("$(resolve_helper_bin gallery-term)" app) present (gallery terminal list)"
+      ok=0
+    fi
+  fi
+
+  local gallery_term
+  gallery_term="$(resolve_helper_bin gallery-term)"
+  if [ -x "${gallery_term}" ]; then
+    echo "OK      gallery-term installed (${gallery_term})"
+  else
+    echo "MISSING gallery-term installed"
     ok=0
   fi
 
@@ -3537,16 +3818,36 @@ else:
     echo "WARN    gallery theme 'current' resolves to a theme with colors.toml"
   fi
 
-  if [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json" ]; then
-    echo "OK      iTerm2 dynamic profile gallery-theme.json exists"
-  else
-    echo "WARN    iTerm2 dynamic profile gallery-theme.json exists (run: gallery theme render)"
-  fi
+  if [ "${term_id}" = "iterm2" ]; then
+    if [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json" ]; then
+      echo "OK      iTerm2 dynamic profile gallery-theme.json exists"
+    else
+      echo "WARN    iTerm2 dynamic profile gallery-theme.json exists (run: gallery theme render)"
+    fi
 
-  if [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ]; then
-    echo "OK      iTerm2 dynamic profile gallery-console.json exists"
+    if [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ]; then
+      echo "OK      iTerm2 dynamic profile gallery-console.json exists"
+    else
+      echo "WARN    iTerm2 dynamic profile gallery-console.json exists (run: gallery theme render)"
+    fi
   else
-    echo "WARN    iTerm2 dynamic profile gallery-console.json exists (run: gallery theme render)"
+    local term_file
+    term_file="$(terminal_theme_file "${term_id}")"
+    if [ -f "${CONFIG_DIR}/state/terminals/${term_file}" ]; then
+      echo "OK      ${term_id} theme file terminals/${term_file} exists"
+    else
+      echo "WARN    ${term_id} theme file terminals/${term_file} exists (run: gallery theme render)"
+    fi
+    if [ "$(console_read_mode)" = "theme" ]; then
+      local cfg
+      cfg="$(console_config_file "${term_id}")"
+      if { [ "${term_id}" != "wezterm" ] && console_include_present "${cfg}" "$(console_include_line "${term_id}")"; } \
+        || { [ "${term_id}" = "wezterm" ] && wezterm_wired "${cfg}"; }; then
+        echo "OK      console follows the theme: ${cfg} loads it"
+      else
+        echo "WARN    console follows the theme but ${cfg} does not load it (run: gallery console theme)"
+      fi
+    fi
   fi
 
   if [ -f "${BORDERS_STATE_FILE}" ]; then
@@ -3658,6 +3959,9 @@ case "${command}" in
     ;;
   console)
     cmd_console "$@"
+    ;;
+  terminal)
+    cmd_terminal "$@"
     ;;
   font)
     cmd_font "$@"

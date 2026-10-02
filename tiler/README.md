@@ -32,8 +32,8 @@ Then, once per machine:
    Shortcuts… → Mission Control → enable *Switch to Desktop N* for every
    Desktop you use. super+N and super+shift+N are built on these Ctrl+N
    shortcuts because yabai cannot switch Spaces without the scripting addition.
-3. **iTerm → Secure Keyboard Entry off**, otherwise skhd is blind while iTerm
-   is frontmost.
+3. **Secure Keyboard Entry off** in your terminal (iTerm2, Ghostty and kitty have
+   it in their menus), otherwise skhd is blind while that terminal is frontmost.
 
 Prerequisites checked by the script: *Displays have separate Spaces* on,
 *Automatically rearrange Spaces* off, no Magnet/Rectangle running.
@@ -63,7 +63,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + ← → ↑ ↓ | resize by 60 px |
 | super + m | minimize |
 | super + w | close window |
-| super + return | new iTerm window, launched if iTerm is not running (first press: allow "skhd wants to control iTerm2") |
+| super + return | new terminal window in the configured terminal (`gallery terminal`; iTerm2 unless set otherwise), launched if it is not running (on iTerm2 and Ghostty, first press: allow "skhd wants to control iTerm2") |
 | super + shift + r | restart yabai, reload skhd |
 | super + a / shift + a | Claude desktop app / ChatGPT app (both in /Applications) |
 | super + c | Calendar |
@@ -150,7 +150,8 @@ If it ever proves too eager or too shy: `TREE_GUARD_THRESHOLD`,
 ## Learn (cheat sheets on a key)
 
 Omarchy's "Learn" menu, rebuilt on this desk. `tiler/learn` opens a
-floating iTerm window, centred on the display that had focus when the key
+floating terminal window (in the configured terminal; see `gallery terminal`),
+centred on the display that had focus when the key
 was pressed (the script finds its own window by its `Learn: …` title and
 moves, floats and centres it by id; a `yabairc` rule is the backup), with
 an fzf list of your markdown cheat sheets;
@@ -158,7 +159,14 @@ Enter renders the chosen one with glow, `q` or Esc closes. Three doors:
 
 - **super + space** — the menu; **super + shift + space** — the tiler keys directly.
 - **Spotlight → "Learn"** — `~/Applications/Learn.app`, a shell-script bundle
-  built by `tiler/learn install` (first launch: allow "Learn wants to control iTerm2").
+  built by `tiler/learn install` (first launch: allow "Learn wants to control iTerm2"
+  or Ghostty, if that is your terminal).
+
+The `yabairc` rule that floats Learn windows matches the app names iTerm2,
+Ghostty, kitty and WezTerm. Changing it on a running desk takes a restart of
+yabai, which rebuilds the layout, so apply it live instead:
+`yabai -m rule --add app="^(iTerm2|Ghostty|kitty|WezTerm)$" title="^Learn: " manage=off grid=6:6:1:1:4:4`
+and copy `yabairc` into `~/.config/yabai/` by hand.
 
 One source per sheet: the notes are plain markdown files read in place from
 one folder, never copied, and a note iCloud has evicted is fetched first.

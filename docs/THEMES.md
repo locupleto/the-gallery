@@ -2,7 +2,8 @@
 
 A theme is a directory holding a `colors.toml`. `tools/render-theme.py` reads
 the active one and writes everything that is coloured: the CSS, JSON and shell
-files other tools read, two iTerm2 profiles, a btop theme, a superfile theme,
+files other tools read, two iTerm2 profiles, theme files for Ghostty, kitty and
+WezTerm, a btop theme, a superfile theme,
 and (through hooks) the focus outline and the wallpaper. This page covers
 writing a theme, what the renderer derives and emits, and what changes when.
 
@@ -138,6 +139,11 @@ Each run writes all of these:
 | `~/.config/gallery/state/crystal.css` | CSS for the Übersicht widgets; empty unless widgets mode is `theme` |
 | `~/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json` | iTerm2 profile "Gallery" |
 | `~/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json` | iTerm2 profile "Console" |
+| `~/.config/gallery/state/terminals/ghostty.conf` | Ghostty theme: palette, colours, glass, font |
+| `~/.config/gallery/state/terminals/kitty.conf` | kitty theme |
+| `~/.config/gallery/state/terminals/wezterm.lua` | WezTerm config module for your `wezterm.lua` to merge |
+| `~/.config/gallery/state/terminals/gallery-osc.sh` | the palette as escape sequences, loaded in floating windows on terminals with no per-window config |
+| `~/.config/gallery/state/terminals/glass.env` | the glass values (`opacity`, `blur`) `bin/gallery-term` passes to WezTerm |
 | `~/.config/btop/themes/gallery.theme` | btop theme; `color_theme = "gallery"` is set in `~/.config/btop/btop.conf` |
 | `~/Library/Application Support/superfile/theme/gallery.toml` | superfile theme; `theme` and `transparent_background = true` are set in superfile's `config.toml` |
 
@@ -183,6 +189,47 @@ Source it from a shell script to colour the output. Variables:
 | `CRYSTAL_BAR_COLOR` | only in widgets `theme` mode: `rgba(r,g,b,1.0)` of the accent |
 
 `bin/gallery-borders` and the weather plugin read it.
+
+### Ghostty, kitty and WezTerm
+
+Written on every render, whatever terminal is configured (`gallery terminal`).
+All three map the same tokens: the 16 ANSI colours (`color0` to `color15`),
+`background`, `foreground`, `cursor`, the selection pair, the shared glass
+(opacity 0.88, blur 9, the inverse of the iTerm2 profiles' transparency 0.12),
+and, only while `gallery font set` holds a preference, the font family and size
+(the weight is not mapped).
+
+- `ghostty.conf` uses `palette = N=#rrggbb`, `background`, `foreground`,
+  `cursor-color`, `cursor-text`, `selection-background`, `selection-foreground`,
+  `background-opacity`, `background-blur`, `font-family`, `font-size`.
+- `kitty.conf` uses `colorN`, `background`, `foreground`, `cursor`,
+  `cursor_text_color`, `selection_background`, `selection_foreground`,
+  `background_opacity`, `background_blur`, `font_family`, `font_size`.
+- `wezterm.lua` is a module returning a table: `colors` (`foreground`,
+  `background`, `cursor_bg`, `cursor_fg`, `cursor_border`, `selection_bg`,
+  `selection_fg`, `ansi`, `brights`), `window_background_opacity`,
+  `macos_window_background_blur`, and `font`/`font_size`. It adds itself to
+  wezterm's config-reload watch list. In console `native` mode it returns an
+  empty table, because the Gallery never edits your Lua to switch it off.
+- `gallery-osc.sh` is a POSIX `sh` fragment: OSC 4 for the 16 colours and
+  OSC 10, 11, 12 for foreground, background and cursor. `bin/gallery-term`
+  sources it inside a floating Gallery window, which is how Ghostty (no
+  per-window config) and WezTerm get the theme on one window only.
+
+Floating Gallery windows always use the theme: iTerm2 through the "Gallery"
+profile, kitty through `--config` with `kitty.conf`, WezTerm through
+`--config` glass and the escape sequences, Ghostty through the escape
+sequences (its opacity and blur stay yours). Your everyday terminal follows the
+theme only after `gallery console theme`: iTerm2's "Console" profile, one
+include line in the Ghostty or kitty config, two Lua lines for WezTerm.
+
+After writing, the renderer asks every supported terminal that is already
+running, configured or not, to pick the change up: Ghostty over AppleScript
+(`reload_config`), and kitty with `kitty @ set-colors` when a remote-control
+socket is reachable (`allow_remote_control` and `listen_on` in `kitty.conf`).
+kitty also re-reads the changed include by itself, WezTerm reloads its module
+by itself, and iTerm2 reloads its dynamic profiles. Nothing is ever launched for
+this. `GALLERY_NO_TERMINAL_RELOAD=1` skips it.
 
 ### iTerm2 profiles
 
@@ -308,7 +355,8 @@ prints what would be applied without applying it.
 |---|---|---|---|
 | `gallery theme set <name>`, `theme next`, picking a theme in the Themes plugin | yes | all (log, borders, wallpaper) | re-injected |
 | `gallery theme render` | yes | none | not touched |
-| `gallery console theme\|native\|toggle` | yes (changes the Console profile) | none | not touched |
+| `gallery console theme\|native\|toggle` | yes (changes the Console profile, the WezTerm module) and, for Ghostty and kitty, adds or removes the include line in your config | none | not touched |
+| `gallery terminal set <name>` | yes | none | not touched |
 | `gallery font set\|native` | yes (profiles' font, `--gallery-font-*`) | none | not touched |
 | `gallery widgets theme\|native\|toggle` | yes (`crystal.css`, `CRYSTAL_BAR_COLOR`) | none | not touched |
 | `gallery borders width\|bright` | yes | none, but runs `gallery-borders apply` | not touched |
@@ -319,7 +367,9 @@ prints what would be applied without applying it.
 Notes:
 
 - "Renderer outputs" is every file in the table above. Running iTerm2 windows
-  pick up a changed profile because iTerm2 reloads dynamic profiles itself.
+  pick up a changed profile because iTerm2 reloads dynamic profiles itself;
+  Ghostty and kitty are nudged by the renderer and WezTerm reloads on its own
+  (see Ghostty, kitty and WezTerm above).
 - The focus outline is recoloured only by the `20-borders.sh` hook, by
   `gallery borders`, or by `./install.sh`, not by `theme render`.
 - Omarchy QML plugins read the theme's `colors.toml` directly through the

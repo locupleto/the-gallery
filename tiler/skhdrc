@@ -117,16 +117,19 @@ lalt - down  : yabai -m window --resize bottom:0:60  || yabai -m window --resize
 # raises an Automation prompt for the browser (or System Events) -- allow it once.
 ## new window in the default browser
 lalt - b : "$HOME/.config/skhd/browser-window"
-# New iTerm window (open -a only activates a running app). The first press raises
-# the Automation prompt "skhd wants to control iTerm2" — allow it once. The
-# explicit activate matters: an Apple Event from a background agent otherwise
-# leaves the new window unfocused. When iTerm is NOT running the Apple Event
-# launches it hidden and unactivated and every press adds another invisible
-# window (seen on the laptop, where iTerm is not kept running), and a cold
-# iTerm opens its own startup window anyway, so a cold iTerm is just launched.
-# The select is needed too: activate alone re-raises iTerm's previous key window.
-## new iTerm window
-lalt - return : if pgrep -xq iTerm2; then osascript -e 'tell application id "com.googlecode.iterm2"' -e 'set w to (create window with default profile)' -e 'activate' -e 'select w' -e 'end tell'; else open -a iTerm; fi
+# New terminal window, tiled, in whichever terminal `gallery terminal` has
+# configured (bin/gallery-term; iTerm2 unless set otherwise). On iTerm2 the first
+# press raises the Automation prompt "skhd wants to control iTerm2" — allow it
+# once. The explicit activate matters: an Apple Event from a background agent
+# otherwise leaves the new window unfocused. When iTerm is NOT running the Apple
+# Event launches it hidden and unactivated and every press adds another invisible
+# window (seen on the laptop, where iTerm is not kept running), and a cold iTerm
+# opens its own startup window anyway, so a cold iTerm is just launched. The
+# select is needed too: activate alone re-raises iTerm's previous key window.
+# gallery-term does all of that; the iTerm2 branch after it is the fallback for a
+# machine where the Gallery's own install has not run yet (no ~/bin/gallery-term).
+## new terminal window
+lalt - return : if [ -x "$HOME/bin/gallery-term" ]; then "$HOME/bin/gallery-term" open --role tile >/dev/null; elif pgrep -xq iTerm2; then osascript -e 'tell application id "com.googlecode.iterm2"' -e 'set w to (create window with default profile)' -e 'activate' -e 'select w' -e 'end tell'; else open -a iTerm; fi
 ## restart yabai, reload skhd
 shift + lalt - r : yabai --restart-service; skhd --reload
 
@@ -165,7 +168,7 @@ shift + lalt - o : open "$HOME/Downloads"
 ctrl + lalt - o : open "$HOME/Desktop"
 
 # --- learn (cheat sheets, Omarchy's "Learn" menu) --------------------------------
-# tiler/learn opens a floating iTerm window (yabairc floats titles starting with
+# tiler/learn opens a floating terminal window (yabairc floats titles starting with
 # "Learn") listing the cheat sheets (see tiler/README.md), rendered with glow. Spotlight has the
 # same menu as "Learn" (~/Applications/Learn.app, built by tiler/learn install).
 ## Learn menu: choose a cheat sheet

@@ -1,7 +1,7 @@
 # The Gallery key bindings, included by ~/.config/skhd/skhdrc via `.load "gallery.skhd"`.
 # skhd is the only hotkey grabber on this machine; Hammerspoon binds no keys of
 # its own. Each line calls the Gallery CLI, which opens terminal-style plugins
-# (tui/menu kinds) in a floating iTerm window itself and routes webview kinds
+# (tui/menu kinds) in a floating terminal window itself and routes webview kinds
 # over the hs IPC bridge.
 # Installed by the-gallery/install.sh; edit the copy in the repo, not this file.
 #
@@ -14,7 +14,7 @@ lalt + shift - 0 : "$HOME/bin/gallery" toggle gallery.sysmon
 lalt + ctrl - 0 : "$HOME/bin/gallery" toggle gallery.spaces
 ## Gallery: Radio Atlas (world radio globe)
 lalt + cmd - 0 : "$HOME/bin/gallery" toggle akshar.radio-atlas
-## Gallery: theme picker -- palette + wallpaper preview, Enter drops into that theme's backgrounds; ctrl-t inside toggles whether the iTerm console follows the theme, ctrl-w cycles the JankyBorders focus-outline width, ctrl-b toggles its "bright" mix
+## Gallery: theme picker -- palette + wallpaper preview, Enter drops into that theme's backgrounds; ctrl-t inside toggles whether the terminal console follows the theme, ctrl-w cycles the JankyBorders focus-outline width, ctrl-b toggles its "bright" mix
 shift + ctrl + lalt - space : "$HOME/bin/gallery" toggle gallery.themes
 ## Gallery: background picker (direct; image preview, current theme's wallpapers)
 shift + ctrl + lalt - b : "$HOME/bin/gallery" toggle gallery.backgrounds
