@@ -32,6 +32,7 @@
 #   gallery bg next [theme]
 #   gallery bg prev [theme]
 #   gallery bg apply [theme]
+#   gallery bg restore
 #   gallery console status
 #   gallery console theme
 #   gallery console native
@@ -51,6 +52,9 @@
 #   gallery borders status
 #   gallery borders width <1-12>
 #   gallery borders bright on|off|toggle
+#   gallery glass [status]
+#   gallery glass set <transparency 0-0.9> [<blur 0-64>]
+#   gallery glass default
 #   gallery weather
 #   gallery weather location --set <location> | --clear
 #   gallery weather units --set metric|imperial
@@ -60,7 +64,7 @@
 #   gallery home save [--roam A,B] [--dry-run]
 #   gallery home apply
 #   gallery ghosts [list|fix [OWNER|ID]|forget]
-#   gallery agent [open|inline|status|list|set <name>|dir [<path>|--clear]]
+#   gallery agent [open|inline|status|list|set <name> [--command "<line>"]|dir [<path>|--clear]]
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -85,6 +89,7 @@ CONSOLE_STATE_FILE="${CONFIG_DIR}/state/console.json"
 FONT_STATE_FILE="${CONFIG_DIR}/state/font.json"
 WIDGETS_STATE_FILE="${CONFIG_DIR}/state/widgets.json"
 BORDERS_STATE_FILE="${CONFIG_DIR}/state/borders.json"
+GLASS_STATE_FILE="${CONFIG_DIR}/state/glass.json"
 WEATHER_STATE_FILE="${CONFIG_DIR}/state/weather.json"
 # The OpenWeatherMap API key is kept out of WEATHER_STATE_FILE (and so out
 # of anything that dumps that file wholesale) in its own mode-600 file,
@@ -158,6 +163,7 @@ commands:
   bg next [theme]                 cycle to the next background, and apply it
   bg prev [theme]                 cycle to the previous background, and apply it
   bg apply [theme]                re-apply the active background
+  bg restore                      put back the wallpaper settings saved before the first background
   console status                  show whether the terminal console follows the theme
   console theme                   make the terminal console follow the active theme
   console native                  restore the terminal console to its own colours
@@ -178,6 +184,10 @@ commands:
   borders status                  show the focused-window border width/bright prefs
   borders width <1-12>            set the focused-window border width (default 5)
   borders bright on|off|toggle    mix the active border colour toward bright_foreground
+  glass [status]                  show the terminal window transparency and blur
+  glass set <transparency> [<blur>]
+                                   transparency 0-0.9 (0 = solid, default 0.12), blur radius 0-64 (default 9)
+  glass default                   back to the shipped glass (0.12 / 9)
   weather                         show the weather plugin's location/units/icons and key status
   weather location --set <loc>    set the OpenWeatherMap location (City,ISO-country-code)
   weather location --clear        revert the location to the default (Stockholm,SE)
@@ -192,6 +202,11 @@ commands:
   ghosts [list]                   windows yabai cannot see (born behind the lock screen)
   ghosts fix [OWNER|ID]           quit + relaunch the app owning ghost window(s)
   ghosts forget                   clear the ghosts service's reported/handled state
+  agent [open|inline|status|list]  launch / inspect the default coding agent
+  agent set <name>                pick a built-in agent (claude, gemini, opencode, codex, copilot, crush)
+  agent set <name> --command "<command line>"
+                                   use any other agent CLI, run as typed (single quotes only)
+  agent dir [<path>|--clear]      show, record or forget the agent's start directory
   reload                          request a Hammerspoon config reload
   log                             tail the Gallery log
   doctor                          check the local Gallery install
@@ -1679,6 +1694,23 @@ cmd_bg_apply() {
   echo "background: ${active} (${theme})"
 }
 
+# cmd_bg_restore -- put the wallpaper store back as it was before the first
+# background was applied (tools/hooks/30-wallpaper.sh saves it once), and
+# restart WallpaperAgent, which only reads the store on launch.
+cmd_bg_restore() {
+  local snapshot="${CONFIG_DIR}/state/wallpaper-original.plist"
+  local store="${HOME}/Library/Application Support/com.apple.wallpaper/Store/Index.plist"
+  if [ ! -f "${snapshot}" ]; then
+    echo "gallery: no saved wallpaper settings (${snapshot}); nothing to restore" >&2
+    echo "gallery: they are saved the first time a Gallery background is applied" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "${store}")"
+  cp -p "${snapshot}" "${store}"
+  killall WallpaperAgent 2>/dev/null || true
+  echo "background: restored ${store} from ${snapshot}; WallpaperAgent restarted"
+}
+
 cmd_bg() {
   local sub="${1:-}"
   [ $# -gt 0 ] && shift
@@ -1701,8 +1733,11 @@ cmd_bg() {
     apply)
       cmd_bg_apply "${1:-}"
       ;;
+    restore)
+      cmd_bg_restore
+      ;;
     "")
-      echo "usage: gallery bg <list|current|set|next|prev|apply>" >&2
+      echo "usage: gallery bg <list|current|set|next|prev|apply|restore>" >&2
       exit 1
       ;;
     *)
@@ -2688,6 +2723,141 @@ cmd_borders() {
       ;;
     *)
       echo "gallery: unknown borders subcommand: ${sub}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# --- glass (terminal window transparency + blur) ----------------------------
+#
+# The Gallery's terminal windows (the iTerm2 profiles, and the Ghostty/kitty/
+# WezTerm theme files) share one "glass": a transparency (0.0 solid .. 0.9)
+# and a blur radius (0..64). Recorded in GLASS_STATE_FILE as
+# {"transparency": <float>, "blur": <number>}; missing/invalid means the
+# shipped 0.12 / 9 -- the same defaults tools/render-theme.py applies when it
+# reads this file. `set` and `default` re-render, as the font verbs do.
+
+GLASS_DEFAULT_TRANSPARENCY=0.12
+GLASS_DEFAULT_BLUR=9
+
+# glass_read_prefs -- prints two lines: transparency and blur, each falling
+# back to its default for a missing file or a bad value, clamped like
+# render-theme.py's read_glass_prefs.
+glass_read_prefs() {
+  python3 -c '
+import json, math, sys
+
+path, t, b = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        v = data.get("transparency")
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+            t = max(0.0, min(0.9, v))
+        v = data.get("blur")
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+            b = max(0.0, min(64.0, v))
+except Exception:
+    pass
+print("%g" % round(t, 2))
+print("%g" % b)
+' "${GLASS_STATE_FILE}" "${GLASS_DEFAULT_TRANSPARENCY}" "${GLASS_DEFAULT_BLUR}" 2>/dev/null \
+    || printf '%s\n%s\n' "${GLASS_DEFAULT_TRANSPARENCY}" "${GLASS_DEFAULT_BLUR}"
+}
+
+# glass_write_prefs <transparency> <blur> -- atomically records the prefs in
+# GLASS_STATE_FILE (temp file + os.replace, same pattern as font_write_prefs).
+glass_write_prefs() {
+  local transparency="$1" blur="$2"
+  mkdir -p "$(dirname "${GLASS_STATE_FILE}")"
+  python3 -c '
+import json, os, sys, tempfile
+
+path = sys.argv[1]
+data = {"transparency": float(sys.argv[2]), "blur": float(sys.argv[3])}
+
+d = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".glass.", suffix=".json", dir=d)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+except Exception:
+    os.unlink(tmp)
+    raise
+' "${GLASS_STATE_FILE}" "${transparency}" "${blur}"
+}
+
+# glass_status_line -- "transparency 0.12, blur 9 (default)" or "... (custom)"
+glass_status_line() {
+  local prefs t b origin=custom
+  prefs="$(glass_read_prefs)"
+  t="$(printf '%s\n' "${prefs}" | sed -n 1p)"
+  b="$(printf '%s\n' "${prefs}" | sed -n 2p)"
+  [ -f "${GLASS_STATE_FILE}" ] || origin=default
+  printf 'transparency %s, blur %s (%s)' "${t}" "${b}" "${origin}"
+}
+
+# glass_apply_and_render -- re-renders the active theme (which rewrites the
+# iTerm profiles and the other terminals' files), or says the render was
+# skipped when no theme is set -- same contract as font_apply_and_render.
+glass_apply_and_render() {
+  if [ -z "$(theme_current_name)" ]; then
+    echo "glass: $(glass_status_line) -- render skipped (no current theme set)"
+    return 0
+  fi
+  if ! run_theme_render; then
+    echo "gallery: glass preference recorded but render failed" >&2
+    return 1
+  fi
+  echo "glass: $(glass_status_line)"
+}
+
+cmd_glass_set() {
+  local t="${1:-}" b="${2:-}"
+  if [ -z "${t}" ]; then
+    echo "usage: gallery glass set <transparency 0-0.9> [<blur 0-64>]" >&2
+    exit 1
+  fi
+  # A plain decimal (0, 0.3, .3), within 0..0.9.
+  if ! printf '%s' "${t}" | grep -Eq '^([0-9]+\.?[0-9]*|\.[0-9]+)$' \
+     || ! awk -v v="${t}" 'BEGIN { exit !(v >= 0 && v <= 0.9) }'; then
+    echo "gallery: glass transparency must be a number from 0 (solid) to 0.9" >&2
+    exit 1
+  fi
+  if [ -z "${b}" ]; then
+    b="$(glass_read_prefs | sed -n 2p)"   # keep the current blur
+  elif ! printf '%s' "${b}" | grep -Eq '^[0-9]+$' || [ "${b}" -gt 64 ]; then
+    echo "gallery: glass blur must be an integer from 0 to 64" >&2
+    exit 1
+  fi
+  glass_write_prefs "${t}" "${b}"
+  glass_apply_and_render
+}
+
+cmd_glass_default() {
+  rm -f "${GLASS_STATE_FILE}"
+  glass_apply_and_render
+}
+
+cmd_glass() {
+  local sub="${1:-status}"
+  [ $# -gt 0 ] && shift
+  case "${sub}" in
+    status)
+      echo "glass: $(glass_status_line)"
+      ;;
+    set)
+      cmd_glass_set "$@"
+      ;;
+    default)
+      cmd_glass_default
+      ;;
+    *)
+      echo "gallery: unknown glass subcommand: ${sub}" >&2
+      echo "usage: gallery glass [status] | set <transparency 0-0.9> [<blur 0-64>] | default" >&2
       exit 1
       ;;
   esac
@@ -3971,6 +4141,9 @@ case "${command}" in
     ;;
   borders)
     cmd_borders "$@"
+    ;;
+  glass)
+    cmd_glass "$@"
     ;;
   weather)
     cmd_weather "$@"

@@ -195,7 +195,8 @@ Source it from a shell script to colour the output. Variables:
 Written on every render, whatever terminal is configured (`gallery terminal`).
 All three map the same tokens: the 16 ANSI colours (`color0` to `color15`),
 `background`, `foreground`, `cursor`, the selection pair, the shared glass
-(opacity 0.88, blur 9, the inverse of the iTerm2 profiles' transparency 0.12),
+(by default opacity 0.88, blur 9, the inverse of the iTerm2 profiles'
+transparency 0.12; see `gallery glass`),
 and, only while `gallery font set` holds a preference, the font family and size
 (the weight is not mapped).
 
@@ -248,8 +249,14 @@ Both are dynamic profiles; iTerm2 reloads them when the file changes.
   [INSTALL.md](INSTALL.md#first-run-permissions).
 
 Both profiles use the theme's ordinary `background` (not `surface_background`)
-with the same glass: `Transparency` 0.12 and a blur of radius 9 (the constants
-`CONSOLE_TRANSPARENCY` and `CONSOLE_BLUR_RADIUS` in `tools/render-theme.py`).
+with the same glass: by default `Transparency` 0.12 and a blur of radius 9 (the
+defaults `CONSOLE_TRANSPARENCY` and `CONSOLE_BLUR_RADIUS` in
+`tools/render-theme.py`). `gallery glass set <transparency 0-0.9> [<blur 0-64>]`
+records your own in `~/.config/gallery/state/glass.json`
+(`{"transparency": 0.2, "blur": 12}`) and re-renders; `gallery glass default`
+removes it. The renderer clamps out-of-range values, and a malformed file only
+warns on stderr and falls back to the defaults. The other terminals get the same
+values as opacity (1 minus the transparency) and blur.
 Floating and tiled terminals therefore look alike. With `gallery font set`,
 both also get `Normal Font` and `Use Non-ASCII Font` false (Console only in
 `theme` mode); the font family is resolved to a PostScript name with
@@ -357,6 +364,7 @@ prints what would be applied without applying it.
 | `gallery theme render` | yes | none | not touched |
 | `gallery console theme\|native\|toggle` | yes (changes the Console profile, the WezTerm module) and, for Ghostty and kitty, adds or removes the include line in your config | none | not touched |
 | `gallery terminal set <name>` | yes | none | not touched |
+| `gallery glass set\|default` | yes (profiles' transparency and blur, the terminal files, `glass.env`) | none | not touched |
 | `gallery font set\|native` | yes (profiles' font, `--gallery-font-*`) | none | not touched |
 | `gallery widgets theme\|native\|toggle` | yes (`crystal.css`, `CRYSTAL_BAR_COLOR`) | none | not touched |
 | `gallery borders width\|bright` | yes | none, but runs `gallery-borders apply` | not touched |

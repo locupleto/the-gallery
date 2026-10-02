@@ -61,7 +61,7 @@ top to bottom: keys go in at the top, pixels come out at the bottom.
                                            │  every hotkey on the Mac goes through here
                                            ▼
             ┌───────────────────────────── skhd ──────────────────────────────┐
-            │           tiler/skhdrc  ──.load──▶  skhd/gallery.skhd           │
+            │    skhdrc ──.load──▶  local.skhd · tiler.skhd · gallery.skhd    │
             └───┬──────────────────────────┬──────────────────────────────┬───┘
           super+h/j/k/l               super+space              shift+ctrl+lalt+space,
       super+1..9, f, t ...                                        lalt+shift+0, ...
@@ -96,8 +96,8 @@ Two rules keep the picture this simple:
 
 - **skhd is the only hotkey grabber.** The Gallery never registers keys of
   its own; its bindings are one file, `skhd/gallery.skhd`, that the tiler's
-  `skhdrc` includes. Every key on the map above is a line in one of those
-  two files.
+  `skhdrc` loads after the tiler's own `tiler.skhd` and your `local.skhd`.
+  Every key on the map above is a line in one of those files.
 - **Hammerspoon is optional for most of it.** `tui` and `menu` plugins are
   pure shell + a terminal + yabai (`bin/gallery-tui`, `bin/gallery-menu`), so
   the Themes picker, System Monitor and Learn all work with the Spoon
@@ -151,7 +151,7 @@ running system is always a copy:
 
 | In the repo | Installed to | Job |
 |---|---|---|
-| `tiler/yabairc`, `tiler/skhdrc`, `tiler/learn`, `tiler/focus-dir`, `tiler/yabai-layout` | `~/.config/yabai/`, `~/.config/skhd/` | tiling, hotkeys, Learn |
+| `tiler/yabairc`, `tiler/skhdrc`, `tiler/tiler.skhd`, `tiler/learn`, `tiler/focus-dir`, `tiler/yabai-layout` | `~/.config/yabai/`, `~/.config/skhd/` | tiling, hotkeys, Learn |
 | `skhd/gallery.skhd` | `~/.config/skhd/gallery.skhd` | the Gallery's own key bindings |
 | `Gallery.spoon/` (`init.lua` + `lib/*.lua`) | `~/.hammerspoon/Spoons/Gallery.spoon` | plugin host: manifests, panel/overlay/service/bar-widget kinds, IPC |
 | `plugins/*/manifest.json` | `~/.config/gallery/plugins/` | bundled plugins; `gallery add <git-url>` puts third-party ones beside them |
@@ -216,15 +216,41 @@ Hammerspoon. macOS then asks for Accessibility (Hammerspoon, yabai, skhd)
 and a few Automation grants by hand; `gallery doctor` lists what is still
 missing. Updating later is `git pull` followed by the same `./install.sh`.
 
+The installer does not overwrite anything of yours without keeping it: a file
+it replaces is moved to `<name>.gallery-bak` first, a file it edits in place
+(such as `init.lua`) is copied there once before the first edit, and
+everything it writes is listed in `~/.config/gallery/state/install-manifest.tsv`.
+`./install.sh --dry-run` says what it would back up. To remove the Gallery and
+put the Mac back as it was:
+
+```sh
+./install.sh --uninstall          # restores backups, removes what it installed
+./install.sh --uninstall --purge  # ... and deletes ~/.config/gallery too
+```
+
+`--keep-wallpaper` skips the wallpaper restore (`gallery bg restore` does it
+on its own). The Homebrew formulae stay. Details are in
+[docs/INSTALL.md](docs/INSTALL.md#uninstalling).
+
 [docs/INSTALL.md](docs/INSTALL.md) is the full walkthrough: flags, the order
 of the permission grants, verification and troubleshooting.
+
+### Make it yours
+
+Your own keys go in `~/.config/skhd/local.skhd`, your own yabai settings in
+`~/.config/yabai/yabairc.local`, and your own themes, plugins, hooks and
+Learn sheets under `~/.config/gallery/`; updates never overwrite those.
+[docs/CUSTOMIZING.md](docs/CUSTOMIZING.md) says what is yours and what an
+update replaces, and has recipes for keys, tiling, themes, wallpapers, fonts,
+plugins, the coding agent and sheets.
 
 ## Tiling and hotkeys
 
 `install.sh` installs the tiler first (yabai, skhd, JankyBorders, Learn) via
 `tiler/install.sh`, then copies the Gallery's own key bindings into place.
 skhd is the only hotkey grabber on the system: Gallery bindings live in
-`skhd/gallery.skhd`, included by `tiler/skhdrc` with `.load "gallery.skhd"`,
+`skhd/gallery.skhd`, loaded by `tiler/skhdrc` (after your `local.skhd` and the
+tiler's `tiler.skhd`),
 so the Gallery never registers its own hotkeys. Pass `--skip-tiler` to
 `install.sh` to skip the tiler step (e.g. on a machine that should run only
 the plugin host and theming). See `tiler/README.md` for the full key table,
@@ -283,9 +309,10 @@ gallery terminal [status] | list | set <iterm2|ghostty|kitty|wezterm> |
 gallery font status | set <family> [size] [weight] | native | list |
 gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
+gallery glass [status] | set <transparency 0-0.9> [<blur 0-64>] | default |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery ghosts [list] | fix [OWNER|ID] | forget |
-gallery agent [open] | inline | status | list | set <name> | dir [<path>|--clear] |
+gallery agent [open] | inline | status | list | set <name> [--command "<line>"] | dir [<path>|--clear] |
 gallery reload | log | doctor | install
 ```
 
@@ -381,7 +408,13 @@ waits for an approval it cannot show is useless. That is a deliberate posture:
 the agent has full file and shell access, unattended, in that directory.
 `gallery agent set <name>` records the default in
 `state/agent.json` (`gallery agent list` shows which are installed), and
-`inline` runs it in the current terminal instead of a new window.
+`inline` runs it in the current terminal instead of a new window. Any other
+agent CLI works with `gallery agent set <name> --command "<command line>"`
+(for example `--command "aider --yes"`): the line is stored in `agent.json` and
+run, from the start directory, as typed, so put the program first and its own
+"do not ask" flag after it. It may not contain double quotes, backslashes or
+newlines (use single quotes inside it); `gallery agent set claude` goes back to
+a built-in.
 
 The window is an **ordinary terminal window, tiled like any other** — not a
 floating Gallery surface. Omarchy's launcher ends in `omarchy-launch-tui
@@ -427,6 +460,9 @@ list.
 - [docs/INSTALL.md](docs/INSTALL.md): step-by-step setup on a new Mac,
   installer flags, permissions in order, verification, updating and
   uninstalling, troubleshooting.
+- [docs/CUSTOMIZING.md](docs/CUSTOMIZING.md): making it yours: what an update
+  overwrites and what it keeps, your own keys, tiling settings, themes,
+  wallpapers, fonts, plugins, the coding agent and Learn sheets.
 - [docs/PLUGINS.md](docs/PLUGINS.md): writing a plugin: manifest fields, the
   kinds, the `window.gallery` bridge, enabled state, Spoon IPC, importing
   Omarchy plugins.

@@ -3,10 +3,11 @@
 # its own. Each line calls the Gallery CLI, which opens terminal-style plugins
 # (tui/menu kinds) in a floating terminal window itself and routes webview kinds
 # over the hs IPC bridge.
-# Installed by the-gallery/install.sh; edit the copy in the repo, not this file.
+# Installed by the-gallery/install.sh, which overwrites it; put your own keys and
+# overrides in ~/.config/skhd/local.skhd instead (it is loaded first and wins).
 #
 # Lines starting with "## " are picked up by the tiler key sheet generator.
-# Learn stays on super+space in the tiler's own skhdrc.
+# Learn stays on super+space in the tiler's own tiler.skhd.
 
 ## Gallery: system monitor (btop in a floating terminal)
 lalt + shift - 0 : "$HOME/bin/gallery" toggle gallery.sysmon

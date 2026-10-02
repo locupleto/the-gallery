@@ -20,7 +20,8 @@ read_borders_prefs), and writes:
   ~/.config/gallery/state/terminals/{ghostty.conf,kitty.conf,wezterm.lua,
     gallery-osc.sh,glass.env} (see "Ghostty, kitty, WezTerm" below)
   ~/.config/btop/themes/gallery.theme
-  ~/.config/btop/btop.conf (color_theme key only, rewritten in place)
+  ~/.config/btop/btop.conf (color_theme key only, rewritten in place; only
+    when btop is installed or its config dir exists)
   ~/Library/Application Support/superfile/theme/gallery.toml
   ~/Library/Application Support/superfile/config.toml (theme and
     transparent_background keys only, rewritten in place)
@@ -88,6 +89,7 @@ WIDGETS_STATE_PATH = STATE_DIR / "widgets.json"
 FONT_STATE_PATH = STATE_DIR / "font.json"
 CRYSTAL_CSS_PATH = STATE_DIR / "crystal.css"
 BORDERS_STATE_PATH = STATE_DIR / "borders.json"
+GLASS_STATE_PATH = STATE_DIR / "glass.json"
 ITERM_CONSOLE_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-console.json"
 BTOP_CONFIG_DIR = Path.home() / ".config" / "btop"
 BTOP_THEME_PATH = BTOP_CONFIG_DIR / "themes" / "gallery.theme"
@@ -95,6 +97,17 @@ BTOP_CONF_PATH = BTOP_CONFIG_DIR / "btop.conf"
 SUPERFILE_CONFIG_DIR = Path.home() / "Library" / "Application Support" / "superfile"
 SUPERFILE_THEME_PATH = SUPERFILE_CONFIG_DIR / "theme" / "gallery.toml"
 SUPERFILE_CONF_PATH = SUPERFILE_CONFIG_DIR / "config.toml"
+# {abs path of a config file: {key: its original line, or null if absent}},
+# written the first time the renderer changes a key and never overwritten, so
+# `--restore-confs` (run by the uninstaller) can put the user's values back.
+CONF_ORIGINALS_PATH = STATE_DIR / "conf-originals.json"
+# What the renderer writes for each key it owns, to tell on restore whether
+# the app (or the user) has changed it since.
+CONF_WRITTEN = {
+    "color_theme": '"gallery"',
+    "theme": '"gallery"',
+    "transparent_background": "true",
+}
 
 ANSI_NAMES = [
     "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
@@ -677,9 +690,9 @@ def render_iterm_profile(tokens: dict, name: str, font_normal: str | None) -> st
         # The same glass as the themed console, so a floating TUI reads like
         # the tiles behind it -- Omarchy applies one opacity rule to every
         # window, floating or tiled.
-        "Transparency": CONSOLE_TRANSPARENCY,
-        "Blur": True,
-        "Blur Radius": CONSOLE_BLUR_RADIUS,
+        "Transparency": glass_prefs()[0],
+        "Blur": glass_prefs()[1] > 0,
+        "Blur Radius": glass_prefs()[1],
     }
     for i in range(16):
         profile[f"Ansi {i} Color"] = iterm_color_dict(tokens[f"color{i}"])
@@ -695,9 +708,59 @@ def render_iterm_profile(tokens: dict, name: str, font_normal: str | None) -> st
 
 
 # iTerm2 "Transparency" is 0.0 (solid) .. 1.0 (invisible); "Blur Radius" is
-# the frosted-glass radius iTerm applies behind a transparent window.
+# the frosted-glass radius iTerm applies behind a transparent window. These two
+# are the DEFAULTS; `gallery glass set` records the user's own in
+# GLASS_STATE_PATH (read by glass_prefs below, which every renderer uses).
 CONSOLE_TRANSPARENCY = 0.12
 CONSOLE_BLUR_RADIUS = 9.0
+GLASS_MAX_TRANSPARENCY = 0.9   # 1.0 would be an invisible window
+GLASS_MAX_BLUR = 64.0
+
+_glass_cache: tuple[float, float] | None = None
+
+
+def read_glass_prefs() -> tuple[float, float]:
+    """(transparency, blur radius) from GLASS_STATE_PATH, {"transparency":
+    0.0-0.9, "blur": 0-64}. A missing file or key means the defaults above,
+    silently. A file that is not a JSON object, or a value that is not a
+    number, warns on stderr and falls back to the default for it (a render
+    must never fail over a hand-edited pref); numbers outside the range are
+    clamped."""
+    transparency, blur = CONSOLE_TRANSPARENCY, CONSOLE_BLUR_RADIUS
+    try:
+        text = GLASS_STATE_PATH.read_text()
+    except OSError:
+        return transparency, blur
+    try:
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("not a JSON object")
+    except ValueError as exc:
+        print(f"render-theme: ignoring {GLASS_STATE_PATH}: {exc}; using the default glass", file=sys.stderr)
+        return transparency, blur
+
+    def number(key: str, default: float, hi: float) -> float:
+        if key not in data:
+            return default
+        v = data[key]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            print(f"render-theme: {GLASS_STATE_PATH}: {key} must be a number; using {default:g}", file=sys.stderr)
+            return default
+        return float(max(0.0, min(hi, v)))
+
+    return (
+        round(number("transparency", transparency, GLASS_MAX_TRANSPARENCY), 2),
+        number("blur", blur, GLASS_MAX_BLUR),
+    )
+
+
+def glass_prefs() -> tuple[float, float]:
+    """read_glass_prefs once per process, so a bad file warns once, not once
+    per output file."""
+    global _glass_cache
+    if _glass_cache is None:
+        _glass_cache = read_glass_prefs()
+    return _glass_cache
 
 
 def render_iterm_console_profile(
@@ -740,9 +803,9 @@ def render_iterm_console_profile(
         # Window glass, stated here rather than inherited: the user's Default
         # profile carries ~20% transparency + blur, which read too light over
         # a bright wallpaper. Keep the blur, darken the tint (less see-through).
-        profile["Transparency"] = CONSOLE_TRANSPARENCY
-        profile["Blur"] = True
-        profile["Blur Radius"] = CONSOLE_BLUR_RADIUS
+        profile["Transparency"] = glass_prefs()[0]
+        profile["Blur"] = glass_prefs()[1] > 0
+        profile["Blur Radius"] = glass_prefs()[1]
         profile["Background Color"] = iterm_color_dict(tokens["background"])
         profile["Foreground Color"] = iterm_color_dict(tokens["foreground"])
         profile["Bold Color"] = iterm_color_dict(tokens["foreground"])
@@ -766,8 +829,8 @@ def render_iterm_console_profile(
 # whatever terminal is configured (they are cheap, and `gallery terminal set`
 # can then switch without a render of its own order). Each maps the same
 # Gallery tokens: the 16 ANSI colours, background/foreground, cursor, the
-# selection pair, the shared glass (CONSOLE_TRANSPARENCY inverted into an
-# opacity, CONSOLE_BLUR_RADIUS) and -- only while `gallery font set` holds a
+# selection pair, the shared glass (the transparency from glass_prefs inverted
+# into an opacity, plus its blur radius) and -- only while `gallery font set` holds a
 # preference -- the font family and size. bin/gallery-term reads two more
 # outputs: gallery-osc.sh (the palette as OSC escapes, for a float window on a
 # terminal with no per-window config) and glass.env (the glass values, for
@@ -779,7 +842,7 @@ TERMINALS_DIR = STATE_DIR / "terminals"
 def glass_opacity() -> float:
     """The window opacity every terminal gets: iTerm2's Transparency is
     0.0 (solid) .. 1.0 (invisible), the other terminals take the opposite."""
-    return round(1.0 - CONSOLE_TRANSPARENCY, 2)
+    return round(1.0 - glass_prefs()[0], 2)
 
 
 def render_ghostty_conf(tokens: dict, name: str, font_prefs: dict | None) -> str:
@@ -799,7 +862,7 @@ def render_ghostty_conf(tokens: dict, name: str, font_prefs: dict | None) -> str
         f"selection-background = {tokens['selection_background']}",
         f"selection-foreground = {tokens['selection_foreground']}",
         f"background-opacity = {glass_opacity():g}",
-        f"background-blur = {int(CONSOLE_BLUR_RADIUS)}",
+        f"background-blur = {int(glass_prefs()[1])}",
     ]
     if font_prefs:
         lines.append(f'font-family = "{font_prefs["family"]}"')
@@ -825,7 +888,7 @@ def render_kitty_conf(tokens: dict, name: str, font_prefs: dict | None) -> str:
         lines.append(f"color{i} {tokens[f'color{i}']}")
     lines += [
         f"background_opacity {glass_opacity():g}",
-        f"background_blur {int(CONSOLE_BLUR_RADIUS)}",
+        f"background_blur {int(glass_prefs()[1])}",
     ]
     if font_prefs:
         lines.append(f"font_family {font_prefs['family']}")
@@ -874,7 +937,7 @@ def render_wezterm_lua(
         f"    brights = {brights},",
         "  },",
         f"  window_background_opacity = {glass_opacity():g},",
-        f"  macos_window_background_blur = {int(CONSOLE_BLUR_RADIUS)},",
+        f"  macos_window_background_blur = {int(glass_prefs()[1])},",
         # One tab, no tab bar: a Gallery window reads like the other terminals'.
         "  hide_tab_bar_if_only_one_tab = true,",
     ]
@@ -911,7 +974,7 @@ def render_osc_script(tokens: dict, name: str) -> str:
 
 
 def render_glass_env() -> str:
-    return f"opacity={glass_opacity():g}\nblur={int(CONSOLE_BLUR_RADIUS)}\n"
+    return f"opacity={glass_opacity():g}\nblur={int(glass_prefs()[1])}\n"
 
 
 def find_gallery_term() -> str | None:
@@ -1106,6 +1169,39 @@ def render_btop_theme(tokens: dict, name: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _read_originals() -> dict:
+    try:
+        data = json.loads(CONF_ORIGINALS_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_conf_originals(path: Path, lines: list[str], keys: list[str]) -> None:
+    """Remember each key's current line (or null if absent) the first time the
+    renderer is about to change it. An existing record is never overwritten:
+    later renders see the Gallery's own values, not the user's."""
+    data = _read_originals()
+    entry = data.get(str(path))
+    if not isinstance(entry, dict):
+        entry = {}
+    end = next((i for i, l in enumerate(lines) if l.lstrip().startswith("[")), len(lines))
+    changed = False
+    for key in keys:
+        if key in entry:
+            continue
+        found = next(
+            (l for l in lines[:end] if "=" in l and l.split("=", 1)[0].strip() == key),
+            None,
+        )
+        entry[key] = found.rstrip("\n") if found is not None else None
+        changed = True
+    if changed:
+        data[str(path)] = entry
+        CONF_ORIGINALS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONF_ORIGINALS_PATH.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
 def set_conf_keys(path: Path, values: dict[str, str]) -> None:
     """Idempotently set each `key = value` line in a flat config file,
     leaving every other line untouched (the owning app may rewrite the file
@@ -1114,9 +1210,11 @@ def set_conf_keys(path: Path, values: dict[str, str]) -> None:
     an `[open_with]` table, so matching stops at the first table header and
     missing keys are inserted just above it (or appended when there is
     none). A missing file is created with just these keys, which both btop
-    and superfile fill out with their own defaults on the next start."""
+    and superfile fill out with their own defaults on the next start. The
+    original line of each key is recorded first (record_conf_originals)."""
     pending = dict(values)
     lines = path.read_text().splitlines(keepends=True) if path.is_file() else []
+    record_conf_originals(path, lines, list(values))
     if lines and not lines[-1].endswith("\n"):
         lines[-1] += "\n"
     end = next((i for i, l in enumerate(lines) if l.lstrip().startswith("[")), len(lines))
@@ -1127,6 +1225,62 @@ def set_conf_keys(path: Path, values: dict[str, str]) -> None:
     lines[end:end] = [f"{key} = {value}\n" for key, value in pending.items()]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(lines))
+
+
+def restore_conf_keys() -> int:
+    """Put back every key set_conf_keys changed: the recorded original line,
+    or no line at all if the key was absent. A key whose value is no longer
+    the one the renderer wrote is left alone (the app or the user has chosen
+    since). Also removes the rendered btop and superfile themes, empties that
+    would remain, and finally the record itself."""
+    data = _read_originals()
+    if not data:
+        print("restore-confs: nothing recorded, no btop/superfile keys to restore")
+    for name, entry in data.items():
+        path = Path(name)
+        if not path.is_file() or not isinstance(entry, dict):
+            print(f"restore-confs: {name}: gone, skipping")
+            continue
+        lines = path.read_text().splitlines(keepends=True)
+        end = next((i for i, l in enumerate(lines) if l.lstrip().startswith("[")), len(lines))
+        for key, orig in entry.items():
+            idx = next(
+                (i for i in range(end) if "=" in lines[i] and lines[i].split("=", 1)[0].strip() == key),
+                None,
+            )
+            if idx is None:
+                continue
+            current = lines[idx].split("=", 1)[1].strip()
+            if current != CONF_WRITTEN.get(key, current):
+                print(f"restore-confs: {name}: {key} changed since the Gallery set it, left as {current}")
+                continue
+            if orig is None:
+                del lines[idx]
+                end -= 1
+                print(f"restore-confs: {name}: removed {key} (it was not set before)")
+            else:
+                lines[idx] = orig + "\n"
+                print(f"restore-confs: {name}: {key} restored to: {orig.strip()}")
+        if "".join(lines).strip():
+            path.write_text("".join(lines))
+        else:
+            path.unlink()
+            print(f"restore-confs: {name}: removed (the Gallery created it)")
+    for theme in (BTOP_THEME_PATH, SUPERFILE_THEME_PATH):
+        if theme.is_file():
+            theme.unlink()
+            print(f"restore-confs: removed {theme}")
+    for d in (
+        BTOP_THEME_PATH.parent, BTOP_CONFIG_DIR,
+        SUPERFILE_THEME_PATH.parent, SUPERFILE_CONFIG_DIR,
+    ):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+    if CONF_ORIGINALS_PATH.is_file():
+        CONF_ORIGINALS_PATH.unlink()
+    return 0
 
 
 def update_btop_conf(theme_name: str) -> None:
@@ -1227,7 +1381,22 @@ def write_file(path: Path, content: str) -> None:
     path.write_text(content)
 
 
+def btop_present() -> bool:
+    """btop is installed, or has a config dir the user already made."""
+    import shutil
+
+    return shutil.which("btop") is not None or BTOP_CONFIG_DIR.is_dir()
+
+
+def superfile_present() -> bool:
+    import shutil
+
+    return shutil.which("spf") is not None or SUPERFILE_CONFIG_DIR.is_dir()
+
+
 def main(argv: list[str]) -> int:
+    if "--restore-confs" in argv:
+        return restore_conf_keys()
     print_only = "--print" in argv
 
     theme_dir = resolve_current_theme_dir()
@@ -1284,10 +1453,16 @@ def main(argv: list[str]) -> int:
     )
     write_file(TERMINALS_DIR / "gallery-osc.sh", render_osc_script(tokens, name))
     write_file(TERMINALS_DIR / "glass.env", render_glass_env())
-    write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
-    update_btop_conf("gallery")
-    write_file(SUPERFILE_THEME_PATH, render_superfile_theme(tokens, name, light))
-    update_superfile_conf("gallery")
+    # Companion apps are only touched when installed (binary on PATH, or a
+    # config dir already there): nothing is created for an app that is absent.
+    with_btop = btop_present()
+    with_superfile = superfile_present()
+    if with_btop:
+        write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
+        update_btop_conf("gallery")
+    if with_superfile:
+        write_file(SUPERFILE_THEME_PATH, render_superfile_theme(tokens, name, light))
+        update_superfile_conf("gallery")
 
     border_summary = (
         f"borders: width {border_tokens['border_width']}, "
@@ -1302,10 +1477,16 @@ def main(argv: list[str]) -> int:
     print(f"  {ITERM_CONSOLE_PROFILE_PATH} (console: {console_mode})")
     for terminal_file in ("ghostty.conf", "kitty.conf", "wezterm.lua", "gallery-osc.sh", "glass.env"):
         print(f"  {TERMINALS_DIR / terminal_file}")
-    print(f"  {BTOP_THEME_PATH}")
-    print(f"  {BTOP_CONF_PATH} (color_theme = gallery)")
-    print(f"  {SUPERFILE_THEME_PATH}")
-    print(f"  {SUPERFILE_CONF_PATH} (theme = gallery, transparent_background = true)")
+    if with_btop:
+        print(f"  {BTOP_THEME_PATH}")
+        print(f"  {BTOP_CONF_PATH} (color_theme = gallery)")
+    else:
+        print("  btop: not installed, skipped")
+    if with_superfile:
+        print(f"  {SUPERFILE_THEME_PATH}")
+        print(f"  {SUPERFILE_CONF_PATH} (theme = gallery, transparent_background = true)")
+    else:
+        print("  superfile: not installed, skipped")
     if font_normal:
         font_summary = f"font: {font_prefs['family']} {font_prefs['size']} {font_prefs['weight']}"
     elif font_prefs:

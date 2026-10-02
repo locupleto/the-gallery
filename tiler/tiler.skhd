@@ -1,0 +1,166 @@
+# skhd hotkeys for yabai: the tiler's own bindings. Installed by tiler/install.sh
+# to ~/.config/skhd/tiler.skhd and loaded by skhdrc (see tiler/skhdrc for the
+# load order and how to override a key here from ~/.config/skhd/local.skhd).
+#
+# LEFT Option (lalt) is "super", as in Hyprland/Omarchy. The RIGHT Option is never
+# bound here: on the Swedish layout it keeps typing @ | [ ] { } (Opt+2, Opt+7,
+# Opt+8/9, Opt+Shift+8/9), just like AltGr on Linux.
+#
+# Lines starting with "## " describe the binding(s) below them; tiler/learn turns
+# them into the key sheet (super+space > Tiler keys), so keep them current.
+#
+# Space switching goes through the Mission Control shortcuts (Ctrl+1..9), which
+# must be enabled in System Settings > Keyboard > Keyboard Shortcuts > Mission
+# Control for every Desktop you want to reach. yabai itself never switches Spaces
+# (that would need the scripting addition and a partially disabled SIP).
+
+# --- pass the keyboard through to a VM ----------------------------------------
+# If you run Omarchy in a VM (UTM), the guest's modifier is ALSO left Option
+# (Hyprland is configured with altwin:swap_lalt_lwin, so macOS never sees
+# Cmd+Space). Every lalt chord below would otherwise be swallowed by skhd before
+# the VM saw it, and the guest would be unusable. skhd stands down entirely
+# while UTM is focused. Harmless if you have no UTM; add other VM apps by name
+# (lowercase) to the list, or remove the block.
+#
+# Remapping the guest's Super to left Ctrl instead was considered and rejected: it
+# collides with Mission Control, which owns Ctrl+1..9 and Ctrl+arrows -- the very
+# shortcuts the Space bindings below drive -- so the guest would lose Super+N and
+# Super+arrows, and its Ctrl would land on Cmd where UTM cannot reliably hold it.
+.blacklist [
+    "utm"
+]
+
+# --- focus -------------------------------------------------------------------
+# Directional moves go through tiler/focus-dir rather than yabai's own `--focus DIR`:
+# yabai breaks distance ties by most-recently-focused, so with columns split at
+# different heights super+h from bottom-right can land top-left. focus-dir ranks
+# by largest overlap instead (Hyprland's rule). It exits 1 with no candidate, so
+# the display fallback still works.
+## focus the window west / south / north / east (continues onto the next display)
+lalt - h : "$HOME/.config/skhd/focus-dir" focus west  || yabai -m display --focus west
+lalt - j : "$HOME/.config/skhd/focus-dir" focus south || yabai -m display --focus south
+lalt - k : "$HOME/.config/skhd/focus-dir" focus north || yabai -m display --focus north
+lalt - l : "$HOME/.config/skhd/focus-dir" focus east  || yabai -m display --focus east
+## focus the previous window
+lalt - tab : yabai -m window --focus recent
+
+# --- move (swap tiles; fall through to the neighbouring display) ---------------
+## swap the window west / south / north / east (moves to the next display at the edge)
+shift + lalt - h : "$HOME/.config/skhd/focus-dir" swap west  || (yabai -m window --display west && yabai -m display --focus west)
+shift + lalt - j : "$HOME/.config/skhd/focus-dir" swap south || (yabai -m window --display south && yabai -m display --focus south)
+shift + lalt - k : "$HOME/.config/skhd/focus-dir" swap north || (yabai -m window --display north && yabai -m display --focus north)
+shift + lalt - l : "$HOME/.config/skhd/focus-dir" swap east  || (yabai -m window --display east && yabai -m display --focus east)
+
+# --- Spaces: super+N switches, super+shift+N sends the window and follows ------
+## switch to Space N (via the Mission Control Ctrl+N shortcut)
+lalt - 1 : skhd -k "ctrl - 1"
+lalt - 2 : skhd -k "ctrl - 2"
+lalt - 3 : skhd -k "ctrl - 3"
+lalt - 4 : skhd -k "ctrl - 4"
+lalt - 5 : skhd -k "ctrl - 5"
+lalt - 6 : skhd -k "ctrl - 6"
+lalt - 7 : skhd -k "ctrl - 7"
+lalt - 8 : skhd -k "ctrl - 8"
+lalt - 9 : skhd -k "ctrl - 9"
+## send the window to Space N and follow it
+shift + lalt - 1 : yabai -m window --space 1 && skhd -k "ctrl - 1"
+shift + lalt - 2 : yabai -m window --space 2 && skhd -k "ctrl - 2"
+shift + lalt - 3 : yabai -m window --space 3 && skhd -k "ctrl - 3"
+shift + lalt - 4 : yabai -m window --space 4 && skhd -k "ctrl - 4"
+shift + lalt - 5 : yabai -m window --space 5 && skhd -k "ctrl - 5"
+shift + lalt - 6 : yabai -m window --space 6 && skhd -k "ctrl - 6"
+shift + lalt - 7 : yabai -m window --space 7 && skhd -k "ctrl - 7"
+shift + lalt - 8 : yabai -m window --space 8 && skhd -k "ctrl - 8"
+shift + lalt - 9 : yabai -m window --space 9 && skhd -k "ctrl - 9"
+
+# --- displays ----------------------------------------------------------------
+## send the window to the other display and follow it
+shift + lalt - s : export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; w=$(yabai -m query --windows --window); wid=$(echo "$w" | jq -r ".id"); src=$(echo "$w" | jq -r ".display"); tot=$(yabai -m query --displays | jq "length"); yabai -m window "$wid" --display $(( src % tot + 1 )) && yabai -m window --focus "$wid"
+
+# --- window state --------------------------------------------------------------
+## toggle zoom (the window fills its display)
+lalt - f : yabai -m window --toggle zoom-fullscreen
+## toggle float (a floated window lands centred)
+lalt - t : yabai -m window --toggle float --grid 4:4:1:1:2:2
+## toggle the split direction
+shift + lalt - e : yabai -m window --toggle split
+## minimize
+lalt - m : yabai -m window --minimize
+## close the window
+lalt - w : yabai -m window --close
+
+# --- tree ----------------------------------------------------------------------
+## rotate the tree 90 degrees
+lalt - r : yabai -m space --rotate 90
+## balance all tiles
+shift + lalt - b : yabai -m space --balance
+## repair the tree: re-tile this Space from scratch
+# Cure for a region the tree still reserves for a window that is no longer
+# tiled (a minimized or vanished window whose node was never collapsed), which
+# shows up as a stripe of empty desktop the tiles refuse to grow into.
+# --balance only evens the ratios WITHIN the existing structure, so it cannot
+# clear a hole; dropping to float and back rebuilds the tree from whatever is
+# actually on the Space. Hand-tuned split ratios are lost, hence a separate key
+# rather than folding it into balance. Guarded so it never converts a
+# deliberately float (or stack) Space into bsp -- it only repairs a bsp one.
+ctrl + lalt - r : yabai -m query --spaces --space | grep -qE '"type": *"bsp"' && yabai -m space --layout float && yabai -m space --layout bsp
+## toggle stacked / tiled for the current Space
+lalt - s : yabai -m query --spaces --space | grep -qE '"type": *"stack"' && yabai -m space --layout bsp || yabai -m space --layout stack
+
+# --- resize (arrows: left/right narrower/wider, up/down shorter/taller) --------
+## resize by 60 px: left / right narrower / wider, up / down shorter / taller
+lalt - left  : yabai -m window --resize right:-60:0 || yabai -m window --resize left:60:0
+lalt - right : yabai -m window --resize right:60:0  || yabai -m window --resize left:-60:0
+lalt - up    : yabai -m window --resize bottom:0:-60 || yabai -m window --resize top:0:60
+lalt - down  : yabai -m window --resize bottom:0:60  || yabai -m window --resize top:0:-60
+
+# --- launch / service ------------------------------------------------------------
+# New window in the DEFAULT browser (resolved from LaunchServices; launched if not
+# running, else asked for a new window). See tiler/browser-window. The first press
+# raises an Automation prompt for the browser (or System Events) -- allow it once.
+## new window in the default browser
+lalt - b : "$HOME/.config/skhd/browser-window"
+# New terminal window, tiled, in whichever terminal `gallery terminal` has
+# configured (bin/gallery-term; iTerm2 unless set otherwise). On iTerm2 the first
+# press raises the Automation prompt "skhd wants to control iTerm2" — allow it
+# once. The explicit activate matters: an Apple Event from a background agent
+# otherwise leaves the new window unfocused. When iTerm is NOT running the Apple
+# Event launches it hidden and unactivated and every press adds another invisible
+# window (seen on the laptop, where iTerm is not kept running), and a cold iTerm
+# opens its own startup window anyway, so a cold iTerm is just launched. The
+# select is needed too: activate alone re-raises iTerm's previous key window.
+# gallery-term does all of that; the iTerm2 branch after it is the fallback for a
+# machine where the Gallery's own install has not run yet (no ~/bin/gallery-term).
+## new terminal window
+lalt - return : if [ -x "$HOME/bin/gallery-term" ]; then "$HOME/bin/gallery-term" open --role tile >/dev/null; elif pgrep -xq iTerm2; then osascript -e 'tell application id "com.googlecode.iterm2"' -e 'set w to (create window with default profile)' -e 'activate' -e 'select w' -e 'end tell'; else open -a iTerm; fi
+## restart yabai, reload skhd
+shift + lalt - r : yabai --restart-service; skhd --reload
+
+# --- apps (Omarchy web-app keys) -------------------------------------------------
+# Omarchy puts an app on each letter: a ChatGPT, shift+a Grok, c Calendar, e Email,
+# y YouTube, x X, g messaging. Which apps those are is personal, so only Calendar
+# is bound here; the rest are examples in tiler/local.skhd.example -- copy them
+# into ~/.config/skhd/local.skhd and point them at your own apps. (Split toggle
+# moved to shift+e to free super+e.)
+## Calendar
+lalt - c : open -a Calendar
+
+# --- folders (Finder) ------------------------------------------------------------
+# Omarchy's super+F opens the file manager; F is zoom here, so folders live on O.
+# `open <dir>` needs no Automation grant: it raises an existing Finder window on
+# that folder or opens a new one, which yabai tiles like any other window.
+## Finder: home folder
+lalt - o : open "$HOME"
+## Finder: Downloads
+shift + lalt - o : open "$HOME/Downloads"
+## Finder: Desktop
+ctrl + lalt - o : open "$HOME/Desktop"
+
+# --- learn (cheat sheets, Omarchy's "Learn" menu) --------------------------------
+# tiler/learn opens a floating terminal window (yabairc floats titles starting with
+# "Learn") listing the cheat sheets (see tiler/README.md), rendered with glow. Spotlight has the
+# same menu as "Learn" (~/Applications/Learn.app, built by tiler/learn install).
+## Learn menu: choose a cheat sheet
+lalt - space : "$HOME/.config/skhd/learn" open menu
+## the tiler key sheet, generated from this file
+shift + lalt - space : "$HOME/.config/skhd/learn" open show Tiler-Keys

@@ -229,6 +229,64 @@ grep -q 'palette = 0=' "${TERMDIR}/ghostty.conf" || fail "ghostty.conf is writte
 [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ] || fail "iTerm Console profile missing"
 say "rendered theme files for ghostty, kitty, wezterm (and the iTerm profiles still)"
 
+# --- 4b. glass: state/glass.json overrides the defaults, bad input never fails ---
+ITERM_CONSOLE="${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"
+printf '{"mode": "theme"}\n' > "${CFG}/state/console.json"
+printf '{"transparency": 0.3, "blur": 20}\n' > "${CFG}/state/glass.json"
+err="$(python3 "${RENDER}" 2>&1 >/dev/null)"
+[ -z "${err}" ] || fail "a valid glass.json should render silently, got: ${err}"
+assert_contains "$(cat "${TERMDIR}/ghostty.conf")" "background-opacity = 0.7" "glass.json opacity (ghostty)"
+assert_contains "$(cat "${TERMDIR}/ghostty.conf")" "background-blur = 20" "glass.json blur (ghostty)"
+assert_contains "$(cat "${TERMDIR}/kitty.conf")" "background_opacity 0.7" "glass.json opacity (kitty)"
+assert_contains "$(cat "${TERMDIR}/wezterm.lua")" "macos_window_background_blur = 20" "glass.json blur (wezterm)"
+[ "$(cat "${TERMDIR}/glass.env")" = "$(printf 'opacity=0.7\nblur=20')" ] || fail "glass.env should follow glass.json"
+python3 - "${ITERM_CONSOLE}" "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json" <<'PY' || fail "iTerm profiles should follow glass.json"
+import json, sys
+for path in sys.argv[1:]:
+    prof = json.load(open(path))["Profiles"][0]
+    assert prof["Transparency"] == 0.3 and prof["Blur Radius"] == 20.0 and prof["Blur"] is True, (path, prof)
+PY
+# out-of-range values are clamped, not rejected
+printf '{"transparency": 5, "blur": 500}\n' > "${CFG}/state/glass.json"
+python3 "${RENDER}" >/dev/null 2>&1
+[ "$(cat "${TERMDIR}/glass.env")" = "$(printf 'opacity=0.1\nblur=64')" ] || fail "glass.json should clamp to transparency 0.9, blur 64"
+printf '{"transparency": -1, "blur": -3}\n' > "${CFG}/state/glass.json"
+python3 "${RENDER}" >/dev/null 2>&1
+[ "$(cat "${TERMDIR}/glass.env")" = "$(printf 'opacity=1\nblur=0')" ] || fail "glass.json should clamp negatives to solid, no blur"
+# a bad value or a bad file warns on stderr and falls back to the defaults
+printf '{"transparency": "lots", "blur": 20}\n' > "${CFG}/state/glass.json"
+err="$(python3 "${RENDER}" 2>&1 >/dev/null)" || fail "a bad glass value must not fail the render"
+assert_contains "${err}" "transparency must be a number" "bad glass value warns"
+[ "$(cat "${TERMDIR}/glass.env")" = "$(printf 'opacity=0.88\nblur=20')" ] || fail "only the bad glass field should fall back"
+printf 'not json {' > "${CFG}/state/glass.json"
+err="$(python3 "${RENDER}" 2>&1 >/dev/null)" || fail "a corrupt glass.json must not fail the render"
+assert_contains "${err}" "ignoring" "corrupt glass.json warns"
+[ "$(cat "${TERMDIR}/glass.env")" = "$(printf 'opacity=0.88\nblur=9')" ] || fail "a corrupt glass.json should mean the defaults"
+printf '[1, 2]\n' > "${CFG}/state/glass.json"
+python3 "${RENDER}" >/dev/null 2>&1 || fail "a non-object glass.json must not fail the render"
+rm -f "${CFG}/state/glass.json"
+python3 "${RENDER}" >/dev/null 2>&1
+[ "$(cat "${TERMDIR}/glass.env")" = "$(printf 'opacity=0.88\nblur=9')" ] || fail "no glass.json should mean the defaults"
+python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["Profiles"][0]; assert p["Transparency"]==0.12 and p["Blur Radius"]==9.0' "${ITERM_CONSOLE}" || fail "default iTerm glass changed"
+
+# the CLI: gallery glass [status] | set <transparency> [<blur>] | default
+assert_contains "$("${GALLERY}" glass)" "transparency 0.12, blur 9 (default)" "glass status, defaults"
+out="$("${GALLERY}" glass set 0.4 30)"
+assert_contains "${out}" "transparency 0.4, blur 30 (custom)" "glass set"
+[ "$(cat "${TERMDIR}/glass.env")" = "$(printf 'opacity=0.6\nblur=30')" ] || fail "glass set should re-render the terminal files"
+"${GALLERY}" glass set 0 >/dev/null
+assert_contains "$("${GALLERY}" glass status)" "transparency 0, blur 30 (custom)" "glass set <t> keeps the blur"
+for bad in "0.95" "1" "-0.1" "abc" "0.1.2"; do
+  "${GALLERY}" glass set "${bad}" >/dev/null 2>&1 && fail "glass set ${bad} should be rejected"
+done
+"${GALLERY}" glass set 0.2 65 >/dev/null 2>&1 && fail "glass set with blur 65 should be rejected"
+"${GALLERY}" glass set 0.2 1.5 >/dev/null 2>&1 && fail "glass set with a fractional blur should be rejected"
+"${GALLERY}" glass bogus >/dev/null 2>&1 && fail "unknown glass subcommand should fail"
+assert_contains "$("${GALLERY}" glass default)" "transparency 0.12, blur 9 (default)" "glass default"
+[ ! -e "${CFG}/state/glass.json" ] || fail "glass default should remove glass.json"
+[ "$(cat "${TERMDIR}/glass.env")" = "$(printf 'opacity=0.88\nblur=9')" ] || fail "glass default should re-render the defaults"
+say "glass: glass.json honoured by every renderer, clamped, bad input warns; gallery glass set|default"
+
 # --- 5. console mode against throwaway configs ---------------------------------
 GH_CONF="${HOME}/.config/ghostty/config"
 KT_CONF="${HOME}/.config/kitty/kitty.conf"

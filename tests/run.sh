@@ -161,4 +161,6 @@ say "running tests/weather_test.sh"; "${SCRIPT_DIR}/weather_test.sh" || fail "we
 
 say "running tests/ghosts_test.sh"; "${SCRIPT_DIR}/ghosts_test.sh" || fail "ghosts_test.sh failed"
 
+say "running tests/install_test.sh"; "${SCRIPT_DIR}/install_test.sh" || fail "install_test.sh failed"
+
 say "all checks passed"

@@ -58,7 +58,10 @@ Flags:
 | Flag | Effect |
 |---|---|
 | `--dry-run` | print every step, change nothing (also passed to `tiler/install.sh`) |
-| `--uninstall` | remove the Gallery; see [Uninstalling](#uninstalling) |
+| `--uninstall` | remove the Gallery and restore what it replaced; see [Uninstalling](#uninstalling) |
+| `--purge` | with `--uninstall`: also delete `~/.config/gallery/`; asks first |
+| `--yes` | with `--purge`: do not ask (required when not run from a terminal) |
+| `--keep-wallpaper` | with `--uninstall`: do not restore the saved wallpaper settings |
 | `--skip-tiler` | do not run `tiler/install.sh` (yabai, skhd, JankyBorders, Learn); plugin host and theming only |
 | `--restart-tiler` | passed to `tiler/install.sh` as `--restart`: restart yabai and skhd even if their config did not change |
 | `--minimal` | do not `brew install` the companion apps (btop, superfile) |
@@ -68,8 +71,9 @@ An unknown flag prints the usage and exits 1.
 
 In order, the installer:
 
-1. Checks that `/Applications/Hammerspoon.app` exists and that `brew` is on
-   `PATH` (Homebrew is not required with `--skip-tiler --minimal`).
+1. Checks that `/Applications/Hammerspoon.app` exists (override the path with
+   `GALLERY_HAMMERSPOON_APP`) and that `brew` is on `PATH` (Homebrew is not
+   required with `--skip-tiler --minimal`).
 2. Installs btop and superfile with Homebrew unless `--minimal`. A failed
    install only warns. Prints an advisory for fzf, chafa, btop and spf if any
    is missing.
@@ -87,10 +91,11 @@ In order, the installer:
    `gallery-menu`, `gallery-borders`, `gallery-agent` and `gallery-qml` into
    `~/bin/`.
 6. Writes a block delimited by `-- gallery:begin` and `-- gallery:end` into
-   `~/.hammerspoon/init.lua` (creating the file, or appending to it), unless
-   the file already mentions "Gallery". The block loads `hs.ipc`, loads and
-   starts the Spoon, and reloads Hammerspoon when a `.lua` file under
-   `~/.hammerspoon/` changes.
+   `~/.hammerspoon/init.lua`: the file is created if missing; an existing one
+   is copied to `init.lua.gallery-bak` once and the block appended; a block
+   already there is replaced in place if it is out of date. The block loads
+   `hs.ipc`, loads and starts the Spoon, and reloads Hammerspoon when a `.lua`
+   file under `~/.hammerspoon/` changes.
 7. Copies `skhd/gallery.skhd` to `~/.config/skhd/`, runs `tiler/install.sh`
    (brew installs yabai, skhd, JankyBorders, fzf and glow; copies the rc files;
    starts the services, restarting one only when its effective config
@@ -98,7 +103,8 @@ In order, the installer:
 8. Links `~/.config/omarchy/current/theme` and
    `~/.local/state/omarchy/current/theme` to `~/.config/gallery/themes/current`
    so Omarchy QML plugins find their colours. A real directory at either path
-   is left alone.
+   is left alone; a symlink of yours is replaced, and its target recorded so
+   uninstalling points it back.
 9. Runs `gallery theme render`, re-syncs the focus outline if `borders` is
    running, and waits up to 12 seconds for the Spoon's ready stamp
    (`~/.config/gallery/state/ready`). If none appears it touches
@@ -106,9 +112,41 @@ In order, the installer:
    second miss it quits and relaunches Hammerspoon. If Hammerspoon was not
    running it is started in the background.
 
-The installer is idempotent. Re-running it never touches what is yours: the
-`state/` preferences, `gallery.json`, the `themes/current` link, themes you
-added by hand, and plugins added with `gallery add`.
+### What is backed up, and what is recorded
+
+The installer is idempotent, and it does not overwrite a file of yours without
+keeping it.
+
+- **Files it installs** (the rc files, `gallery.skhd`, the helper scripts, the
+  hooks, `~/bin/gallery*`): each is recorded with its checksum in
+  `~/.config/gallery/state/install-manifest.tsv`. If the destination already
+  exists and is not in the manifest, it is moved to `<name>.gallery-bak` first
+  (to `<name>.gallery-bak.<timestamp>` if that name is taken) and the message
+  says so. If it is in the manifest but you changed it since, your version is
+  copied to `<name>.gallery-edited.<timestamp>` before the new one goes in;
+  keep lasting changes in a local override file instead of editing installed
+  files. A copy that is unchanged is overwritten silently. A file left by an
+  older install, from before the manifest existed, is recognised by its
+  header: it is overwritten with a `.gallery-edited` safety copy, not treated
+  as yours.
+- **Files it edits in place** (`init.lua`, the Ghostty and kitty configs when
+  you run `gallery console theme`, btop's `btop.conf`, superfile's
+  `config.toml`): copied to `<name>.gallery-bak` before the first edit, and
+  never again. For btop and superfile the renderer also records the original
+  value of each key it sets in `state/conf-originals.json`, and only touches
+  them if the app is installed or its config directory already exists.
+- **Wallpaper**: before the first background is applied, the system's wallpaper
+  store is copied to `~/.config/gallery/state/wallpaper-original.plist`.
+  `gallery bg restore` puts it back and restarts the wallpaper agent.
+- **Directories the installer owns** (the Spoon, the bundled plugins, `qml/`,
+  `patches/`) are synced so they match the checkout. A file you added inside
+  one is copied to `~/.config/gallery/backup/<timestamp>/` before the sync
+  removes it. Edits to a shipped file in them are overwritten.
+
+Re-running it never touches the `state/` preferences, `gallery.json`, the
+`themes/current` link, themes you added by hand, or plugins added with
+`gallery add`. `--dry-run` says which files it would back up and which it would
+overwrite.
 
 ## First-run permissions
 
@@ -280,20 +318,44 @@ fast-forwards git-managed plugins and re-applies any macOS patches from
 ./install.sh --uninstall --skip-tiler
 ```
 
-This stops yabai and skhd and removes their rc files, `Learn.app` and the
-tiler helpers (unless `--skip-tiler`), removes the installed Spoon, and removes
-the `gallery*` commands from `~/bin/`. It leaves in place:
+The aim is that the Mac ends up as it was. The uninstaller works from the
+install manifest and the backups described under
+[What is backed up](#what-is-backed-up-and-what-is-recorded):
 
-- `~/.config/gallery/` (plugins, themes, state, preferences);
-- `~/.config/skhd/gallery.skhd`;
-- the Homebrew formulae, including btop and superfile;
-- the iTerm2 dynamic profile files, the `state/terminals/` files, the include
-  line `gallery console theme` added to a Ghostty or kitty config, and the btop
-  and superfile theme files the renderer wrote;
-- `~/.hammerspoon/init.lua`. Remove the block between `-- gallery:begin` and
-  `-- gallery:end` by hand.
+- stops yabai and skhd and unregisters their launchd services
+  (`--uninstall-service`), so they do not start again at the next login
+  (skipped with `--skip-tiler`). It also stops JankyBorders, unless
+  `brew services list` shows it registered, in which case it is left running;
+- removes each file it installed if it is still unchanged, and moves one you
+  edited to `<name>.gallery-edited.<timestamp>`; where an installed file
+  replaced one of yours, the `.gallery-bak` is moved back. This covers the rc
+  files, the tiler helpers, `Learn.app`, `gallery.skhd`, the hooks and the
+  `gallery*` commands in `~/bin/`;
+- removes the Gallery block from `~/.hammerspoon/init.lua` (restoring the
+  backup if the file is otherwise as it was, deleting the file if the
+  installer created it and nothing else is in it) and then the Spoon;
+- removes the `include` line from your kitty config, the `config-file` line
+  from your Ghostty config, and `~/.wezterm.lua` if it is still exactly what
+  the Gallery wrote (a wezterm config of yours is only reported);
+- removes the iTerm2 profile `gallery-theme.json`, and `gallery-console.json`
+  unless iTerm2's default profile is still Console, in which case it keeps the
+  file and says to set your own profile as the default first;
+- restores the btop and superfile settings it changed, and removes the themes
+  it rendered for them;
+- removes the two Omarchy theme links if they point into `~/.config/gallery`;
+- restores the saved wallpaper settings (`--keep-wallpaper` skips this);
+- ends with a summary of what was restored, removed and kept.
 
-Delete `~/.config/gallery/` yourself for a clean slate.
+It leaves in place `~/.config/gallery/` (plugins, themes, state, the
+manifest's backups) and the Homebrew formulae, including btop and superfile.
+`--purge` also deletes `~/.config/gallery/` and the Gallery's log, after
+everything above has been restored. Empty directories the installer created
+are removed.
+
+```sh
+./install.sh --uninstall --dry-run   # lists each file it would remove or restore
+./install.sh --uninstall --purge
+```
 
 ## Troubleshooting
 
