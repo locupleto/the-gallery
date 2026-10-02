@@ -223,12 +223,12 @@ sequences (its opacity and blur stay yours). Your everyday terminal follows the
 theme only after `gallery console theme`: iTerm2's "Console" profile, one
 include line in the Ghostty or kitty config, two Lua lines for WezTerm.
 
-After writing, the renderer asks the configured terminal, if it is already
-running, to pick the change up: Ghostty over AppleScript (`reload_config`),
-kitty with `kitty @ set-colors` when a remote-control socket is reachable
-(`allow_remote_control` and `listen_on` in `kitty.conf`; without one, new
-windows get the theme and running ones keep their colours). WezTerm reloads by
-itself and iTerm2 reloads its dynamic profiles. Nothing is ever launched for
+After writing, the renderer asks every supported terminal that is already
+running, configured or not, to pick the change up: Ghostty over AppleScript
+(`reload_config`), and kitty with `kitty @ set-colors` when a remote-control
+socket is reachable (`allow_remote_control` and `listen_on` in `kitty.conf`).
+kitty also re-reads the changed include by itself, WezTerm reloads its module
+by itself, and iTerm2 reloads its dynamic profiles. Nothing is ever launched for
 this. `GALLERY_NO_TERMINAL_RELOAD=1` skips it.
 
 ### iTerm2 profiles

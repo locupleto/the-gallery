@@ -41,6 +41,12 @@ a floating TUI:
 
 ![Radio Atlas and the weather panel](assets/screenshots/plugins.jpg)
 
+**Your terminal.** iTerm2, Ghostty, kitty and WezTerm all take the theme,
+the glass and the font, and follow a theme change live (see
+[Terminals](#terminals)):
+
+![iTerm2, Ghostty, kitty and WezTerm tiled side by side in one theme](assets/screenshots/terminals.jpg)
+
 ## The whole thing on one page
 
 Nothing here is a daemon of its own. The Gallery is three borrowed tools
@@ -246,7 +252,7 @@ Floating Gallery windows always get the Gallery theme; tiled windows
 |---|---|---|---|---|
 | iTerm2 | the "Gallery" dynamic profile | set by the command | dynamic profiles reload themselves | the "Console" profile (set as default once, see below) |
 | Ghostty | palette set by escape sequences in that window (opacity and blur are yours) | set by a wrapper | `reload_config` over AppleScript, if running | one `config-file = ?...` line in `~/.config/ghostty/config` |
-| kitty | `--config` with the rendered `kitty.conf` | `--title` | `kitty @ set-colors`, if remote control is on | one `include ...` line in `~/.config/kitty/kitty.conf` |
+| kitty | `--config` with the rendered `kitty.conf` | `--title` | kitty re-reads the changed include itself; `kitty @ set-colors` too, if remote control is on | one `include ...` line in `~/.config/kitty/kitty.conf` |
 | WezTerm | `--config` glass plus escape-sequence palette | set by a wrapper | automatic (the module is on wezterm's reload watch list) | two Lua lines in your `wezterm.lua` |
 
 The renderer writes `ghostty.conf`, `kitty.conf` and `wezterm.lua` into
@@ -255,10 +261,10 @@ configured. `console theme` adds exactly one marked include line to the config
 of Ghostty or kitty (creating the file if missing, with a `.gallery-bak` copy
 before the first edit of an existing one); `console native` removes it. For
 WezTerm it never edits your Lua: it prints the two lines to add, and writes
-`~/.wezterm.lua` with them only when you have no wezterm config at all. For
-kitty to be updated live, enable remote control in `kitty.conf`
-(`allow_remote_control socket-only` and `listen_on unix:/tmp/kitty`); without
-it, new windows get the theme and running ones keep their colours.
+`~/.wezterm.lua` with them only when you have no wezterm config at all. Running
+kitty windows pick a theme change up by re-reading the changed include; with
+remote control enabled in `kitty.conf` (`allow_remote_control socket-only` and
+`listen_on unix:/tmp/kitty`) the renderer also pushes the colours at once.
 
 iTerm2 and Ghostty are driven over AppleScript, so the first window raises the
 Automation prompt for the caller. Alacritty is not supported yet: `gallery-term`

@@ -175,9 +175,10 @@ Per terminal, beyond the install:
   should not leave Ghostty's own startup window behind.
 - **kitty.** Nothing for floating windows. `gallery console theme` adds an
   `include` line for `state/terminals/kitty.conf` to
-  `~/.config/kitty/kitty.conf`. For colours to change in running windows, enable
-  remote control there: `allow_remote_control socket-only` and
-  `listen_on unix:/tmp/kitty`.
+  `~/.config/kitty/kitty.conf`. Running windows re-read the changed include
+  on a theme change; enabling remote control there (`allow_remote_control
+  socket-only` and `listen_on unix:/tmp/kitty`) also lets the renderer push the
+  colours at once.
 - **WezTerm.** Nothing for floating windows. For `gallery console theme`,
   the Gallery prints two lines for your `wezterm.lua`
   (and writes `~/.wezterm.lua` with them if you have no config):
