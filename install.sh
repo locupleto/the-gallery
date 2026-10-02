@@ -111,10 +111,13 @@ require_hammerspoon() {
 # Optional tools used by individual tui plugins. Missing ones only degrade
 # the plugin that needs them, so this is advisory, never fatal.
 advise_optional_tools() {
-  local tool
-  for tool in fzf chafa btop; do
+  local pair tool formula
+  # command:formula -- superfile's command is spf.
+  for pair in fzf:fzf chafa:chafa btop:btop spf:superfile; do
+    tool="${pair%%:*}"
+    formula="${pair#*:}"
     if ! command -v "${tool}" >/dev/null 2>&1; then
-      echo "[gallery] optional: ${tool} not found -- install with: brew install ${tool}" >&2
+      echo "[gallery] optional: ${tool} not found -- install with: brew install ${formula}" >&2
     fi
   done
 }
