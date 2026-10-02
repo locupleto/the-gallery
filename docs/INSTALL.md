@@ -59,7 +59,8 @@ Flags:
 |---|---|
 | `--dry-run` | print every step, change nothing (also passed to `tiler/install.sh`) |
 | `--uninstall` | remove the Gallery and restore what it replaced; see [Uninstalling](#uninstalling) |
-| `--purge` | with `--uninstall`: also delete `~/.config/gallery/` |
+| `--purge` | with `--uninstall`: also delete `~/.config/gallery/`; asks first |
+| `--yes` | with `--purge`: do not ask (required when not run from a terminal) |
 | `--keep-wallpaper` | with `--uninstall`: do not restore the saved wallpaper settings |
 | `--skip-tiler` | do not run `tiler/install.sh` (yabai, skhd, JankyBorders, Learn); plugin host and theming only |
 | `--restart-tiler` | passed to `tiler/install.sh` as `--restart`: restart yabai and skhd even if their config did not change |

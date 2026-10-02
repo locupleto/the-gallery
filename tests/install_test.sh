@@ -263,7 +263,9 @@ $(diff <(echo "${listing_before_ex}") <(echo "${after_ex}"))"
 assert_file "${H}/.config/gallery" "A ~/.config/gallery kept without --purge"
 say "A: uninstall restores every seeded file byte for byte and stops/unregisters the services"
 
-"${INSTALL}" --uninstall --purge >/dev/null 2>&1 || fail "A: uninstall --purge failed"
+if "${INSTALL}" --uninstall --purge </dev/null >/dev/null 2>&1; then fail "A: --purge ran without a confirmation"; fi
+assert_file "${H}/.config/gallery" "A an unconfirmed --purge changes nothing"
+"${INSTALL}" --uninstall --purge --yes >/dev/null 2>&1 || fail "A: uninstall --purge failed"
 assert_gone "${H}/.config/gallery" "A --purge"
 say "A: --purge removes ~/.config/gallery"
 
@@ -299,7 +301,7 @@ assert_contains "$(cat "${H}/.config/skhd/local.skhd")" "echo mine" "B reinstall
 assert_contains "$(cat "${H}/.config/skhd/local.skhd")" "echo mine" "B uninstall keeps an edited local.skhd"
 rm -f "${H}/.config/skhd/local.skhd"; rmdir "${H}/.config/skhd" 2>/dev/null || true
 rm -rf "${H}/Library/Application Support/iTerm2"
-"${INSTALL}" --uninstall --purge >/dev/null 2>&1 || fail "B: uninstall --purge failed"
+"${INSTALL}" --uninstall --purge --yes >/dev/null 2>&1 || fail "B: uninstall --purge failed"
 listing "${H}" > "${WORK_DIR}/B.after"
 diff "${WORK_DIR}/B.before" "${WORK_DIR}/B.after" >/dev/null || fail "B: uninstall left a trace:
 $(diff "${WORK_DIR}/B.before" "${WORK_DIR}/B.after")"

@@ -67,16 +67,20 @@ RESTART_TILER=0
 MINIMAL=0
 PURGE=0
 KEEP_WALLPAPER=0
+ASSUME_YES=0
 
 usage() {
   cat <<'USAGE' >&2
-usage: install.sh [--dry-run] [--uninstall [--purge] [--keep-wallpaper]] [--skip-tiler] [--restart-tiler] [--minimal]
+usage: install.sh [--dry-run] [--uninstall [--purge [--yes]] [--keep-wallpaper]] [--skip-tiler] [--restart-tiler] [--minimal]
   --dry-run        print what would happen (including each file it would back
                    up or restore), change nothing
   --uninstall      remove the Gallery (and, unless --skip-tiler, the tiler) and
                    put back every file of yours it replaced or edited; keeps
                    ~/.config/gallery (your state) and the Homebrew formulae
-  --purge          with --uninstall: also delete ~/.config/gallery
+  --purge          with --uninstall: also delete ~/.config/gallery, including
+                   plugins and themes you added and a real sheets/ folder;
+                   asks first (or pass --yes)
+  --yes            with --purge: do not ask
   --keep-wallpaper with --uninstall: do not restore the saved wallpaper settings
   --skip-tiler     do not run tiler/install.sh (yabai/skhd/borders/Learn)
   --restart-tiler  pass --restart through to tiler/install.sh, forcing a
@@ -108,6 +112,9 @@ for arg in "$@"; do
     --keep-wallpaper)
       KEEP_WALLPAPER=1
       ;;
+    --yes)
+      ASSUME_YES=1
+      ;;
     --help|-h)
       usage
       exit 0
@@ -124,6 +131,34 @@ if [ "${UNINSTALL}" -eq 0 ] && [ "$((PURGE + KEEP_WALLPAPER))" -gt 0 ]; then
   echo "[gallery] --purge and --keep-wallpaper only apply to --uninstall" >&2
   usage
   exit 1
+fi
+
+# --purge deletes things only the user has (added plugins and themes, a real
+# sheets/ folder, every preference), so it is confirmed before anything is
+# touched -- not halfway through the uninstall.
+if [ "${PURGE}" -eq 1 ] && [ "${DRY_RUN}" -eq 0 ] && [ "${ASSUME_YES}" -eq 0 ]; then
+  purge_dir="${HOME}/.config/gallery"
+  if [ ! -t 0 ]; then
+    echo "[gallery] --purge deletes ${purge_dir}; not a terminal, so pass --yes to confirm" >&2
+    exit 1
+  fi
+  echo "[gallery] --purge will delete ${purge_dir}, including:"
+  for d in "${purge_dir}"/plugins/* "${purge_dir}"/themes/*; do
+    [ -d "${d}" ] && [ ! -L "${d}" ] || continue
+    case "$(basename "${d}")" in gallery.*|current) continue ;; esac
+    [ -d "${SCRIPT_DIR:-.}/themes/$(basename "${d}")" ] && continue
+    echo "[gallery]   ${d}"
+  done
+  if [ -d "${purge_dir}/sheets" ] && [ ! -L "${purge_dir}/sheets" ]; then
+    echo "[gallery]   ${purge_dir}/sheets (a folder, not a link: your sheets go with it)"
+  fi
+  echo "[gallery]   and every preference in ${purge_dir}/state"
+  printf '[gallery] type "yes" to delete it: '
+  read -r answer || answer=""
+  if [ "${answer}" != "yes" ]; then
+    echo "[gallery] not purging; nothing was changed"
+    exit 1
+  fi
 fi
 
 GL_DRY="${DRY_RUN}"

@@ -78,7 +78,8 @@ touched. Put lasting changes in the places marked "you".
 `--purge` deletes the whole of `~/.config/gallery/`, after everything else has
 been restored. That includes what you added there: your themes and their
 backgrounds, plugins from `gallery add` and `gallery clone`, hooks, sheets,
-saved preferences, backups and the manifest. It does not ask. Copy out what
+saved preferences, backups and the manifest. It lists what it found and asks
+you to type "yes" first (`--yes` skips the question). Copy out what
 you want to keep first. `--keep-wallpaper` skips putting the saved wallpaper
 settings back. The full list of what is undone is under
 [Uninstalling](INSTALL.md#uninstalling) in INSTALL.md.
