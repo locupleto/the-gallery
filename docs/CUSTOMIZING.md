@@ -272,7 +272,7 @@ note](../tiler/README.md#swedish-keyboard-note) as one example.
 
 #### Finding a keycode
 
-`skhd --observe` (also `skhd -o`) prints the keycode and modifiers of every
+`skhd --observe` (or `skhd -o`) prints the keycode and modifiers of every
 key you press. Run it in a terminal, press the key, and use the printed
 value after the `-` in a binding. Stop it with ctrl-c. Do not run it inside
 a terminal that has Secure Keyboard Entry on.
