@@ -477,10 +477,11 @@ def build_tokens(raw: dict, theme_dir: Path) -> tuple[dict, bool]:
 
     tokens.setdefault("accent", accent)
     tokens.setdefault("background", background)
-    # The Gallery UI surface -- QML plugin panels, the iTerm floating-window
-    # canvas, and btop's background -- is painted with the theme's deepest
-    # tone so every surface reads as one near-black UI. Falls back to the
-    # ordinary background for any theme that omits darker_background.
+    # The Gallery UI surface -- QML plugin panels and other non-terminal
+    # chrome -- is painted with the theme's deepest tone. Terminal windows
+    # (floating or tiled) use the ordinary background under one shared glass
+    # instead, as Omarchy gives every window the same opacity. Falls back to
+    # the ordinary background for any theme that omits darker_background.
     tokens["surface_background"] = pick(
         "darker_background", "background", default=background
     )
@@ -650,10 +651,10 @@ def render_iterm_profile(tokens: dict, name: str, font_normal: str | None) -> st
     profile = {
         "Name": "Gallery",
         "Guid": "gallery-theme",
-        "Background Color": iterm_color_dict(tokens["surface_background"]),
+        "Background Color": iterm_color_dict(tokens["background"]),
         "Foreground Color": iterm_color_dict(tokens["foreground"]),
         "Cursor Color": iterm_color_dict(tokens["cursor"]),
-        "Cursor Text Color": iterm_color_dict(tokens["surface_background"]),
+        "Cursor Text Color": iterm_color_dict(tokens["background"]),
         "Selection Color": iterm_color_dict(tokens["selection_background"]),
         "Selected Text Color": iterm_color_dict(tokens["selection_foreground"]),
         "Use Separate Colors for Light and Dark Mode": False,
@@ -670,7 +671,12 @@ def render_iterm_profile(tokens: dict, name: str, font_normal: str | None) -> st
         "Visual Bell": False,
         "Close Sessions On End": True,
         "Prompt Before Closing 2": 0,
-        "Transparency": 0.0,
+        # The same glass as the themed console, so a floating TUI reads like
+        # the tiles behind it -- Omarchy applies one opacity rule to every
+        # window, floating or tiled.
+        "Transparency": CONSOLE_TRANSPARENCY,
+        "Blur": True,
+        "Blur Radius": CONSOLE_BLUR_RADIUS,
     }
     for i in range(16):
         profile[f"Ansi {i} Color"] = iterm_color_dict(tokens[f"color{i}"])
@@ -710,12 +716,11 @@ def render_iterm_console_profile(
 
     theme mode: adds the active Gallery theme's colours as overrides, same
     token set render_iterm_profile uses for the floating Gallery profile,
-    EXCEPT the background is tokens["background"] (the theme's own ordinary
-    background), not tokens["surface_background"] (that is the Gallery UI
-    panel's deliberately-darker tint, not what an everyday terminal should
-    show). No window-behaviour keys here either (Close Sessions On End,
-    Window Type, etc.) -- those make sense only for the floating, ephemeral
-    Gallery TUI host, never for an always-open everyday terminal.
+    with the same background and glass (the floating profile matches this
+    one, as Omarchy gives every window one opacity). No window-behaviour
+    keys here (Close Sessions On End, Window Type, etc.) -- those make sense
+    only for the floating, ephemeral Gallery TUI host, never for an
+    always-open everyday terminal.
 
     font_normal (the resolved "<PostScriptName> <size>" from `gallery
     font set`, or None for "native") is only ever applied in theme mode --
@@ -778,7 +783,9 @@ def render_btop_theme(tokens: dict, name: str) -> str:
     orange = or_(tokens.get("orange"), tokens["color3"])
 
     pairs = [
-        ("main_bg", tokens["surface_background"]),
+        # Empty = the terminal's own background, so btop takes on its host
+        # window's glass instead of painting a solid slab over it.
+        ("main_bg", ""),
         ("main_fg", tokens["foreground"]),
         ("title", tokens["accent"]),
         ("hi_fg", tokens["accent"]),
@@ -878,13 +885,13 @@ def render_superfile_theme(tokens: dict, name: str, light: bool) -> str:
     define -- checked against catppuccin-mocha.toml from superfile 1.6.0)
     mapped from Gallery tokens.
 
-    Backgrounds use the same deepest surface tone as btop and the floating
-    iTerm canvas; with transparent_background on (update_superfile_conf)
+    Backgrounds use the theme's ordinary background, like the terminal
+    windows; with transparent_background on (update_superfile_conf)
     superfile leaves most of them unpainted anyway, so the terminal's own
-    Gallery background shows through. Accent drives everything "active";
+    glass shows through. Accent drives everything "active";
     muted drives the neutral chrome, mirroring render_btop_theme.
     """
-    surface = tokens["surface_background"]
+    surface = tokens["background"]
     neutral = tokens.get("muted") or tokens["color8"]
     syntax = SUPERFILE_SYNTAX_STYLES.get(name, "github" if light else "github-dark")
 
