@@ -13,6 +13,33 @@ day to day:
    Omarchy 4's plugin system: each plugin is a directory with a
    `manifest.json`, so plugins come and go without touching Gallery itself.
 
+![A tiled desktop in the osaka-jade theme: nvim, superfile, btop and fastfetch, with the accent outline on the focused window](assets/screenshots/tiling.jpg)
+
+## A look around
+
+**One theme, everywhere at once.** `gallery theme set` recolours the
+terminals, the focus outline, the wallpaper, btop and superfile together.
+Here is the same desktop in osaka-jade, tokyo-night, catppuccin-latte and
+gruvbox:
+
+![The same tiled desktop in four themes](assets/screenshots/themes.jpg)
+
+**Floating TUIs, Omarchy style.** Pickers and glance-and-dismiss tools open
+as floating, centred terminals over the tiles, under the same glass. The
+theme picker previews each theme's palette and wallpapers; the Learn menu
+pages through cheat sheets, including one generated from the live key
+bindings:
+
+![The theme picker floating over the tiles](assets/screenshots/theme-picker.jpg)
+
+![The Learn menu showing the generated key-binding sheet](assets/screenshots/learn.jpg)
+
+**Omarchy plugins on macOS.** Radio Atlas is an unmodified Omarchy QML
+plugin, running through the Gallery's Quickshell shim; the weather panel is
+a floating TUI:
+
+![Radio Atlas and the weather panel](assets/screenshots/plugins.jpg)
+
 ## The whole thing on one page
 
 Nothing here is a daemon of its own. The Gallery is three borrowed tools
