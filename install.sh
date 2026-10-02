@@ -113,6 +113,20 @@ require_hammerspoon() {
   fi
 }
 
+# Homebrew is a prerequisite, never installed from here (its installer wants
+# sudo and an interactive terminal). Checked up front so a Mac without it
+# fails before anything is copied, rather than half-way through in
+# tiler/install.sh. Not needed when neither the tiler nor the companion apps
+# are being installed.
+require_homebrew() {
+  [ "${SKIP_TILER}" -eq 1 ] && [ "${MINIMAL}" -eq 1 ] && return 0
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "[gallery] Homebrew not found -- install it first: https://brew.sh" >&2
+    echo "[gallery] (or run with --skip-tiler --minimal to install without it)" >&2
+    exit 1
+  fi
+}
+
 # Companion apps the theme renderer colours to match: btop (the System
 # Monitor plugin) and superfile (the `spf` file manager). Installed by
 # default so a new Mac comes out complete; --minimal skips them. A failed
@@ -193,6 +207,7 @@ if [ "${UNINSTALL}" -eq 1 ]; then
 fi
 
 require_hammerspoon
+require_homebrew
 install_companion_apps
 advise_optional_tools
 
