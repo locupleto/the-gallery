@@ -68,10 +68,11 @@ MINIMAL=0
 PURGE=0
 KEEP_WALLPAPER=0
 ASSUME_YES=0
+NO_WALLPAPERS=0
 
 usage() {
   cat <<'USAGE' >&2
-usage: install.sh [--dry-run] [--uninstall [--purge [--yes]] [--keep-wallpaper]] [--skip-tiler] [--restart-tiler] [--minimal]
+usage: install.sh [--dry-run] [--uninstall [--purge [--yes]] [--keep-wallpaper]] [--skip-tiler] [--restart-tiler] [--minimal] [--no-wallpapers]
   --dry-run        print what would happen (including each file it would back
                    up or restore), change nothing
   --uninstall      remove the Gallery (and, unless --skip-tiler, the tiler) and
@@ -86,6 +87,7 @@ usage: install.sh [--dry-run] [--uninstall [--purge [--yes]] [--keep-wallpaper]]
   --restart-tiler  pass --restart through to tiler/install.sh, forcing a
                    yabai/skhd restart even if their config did not change
   --minimal        do not brew install the companion apps (btop, superfile)
+  --no-wallpapers  do not download Omarchy's wallpapers for the themes
 USAGE
 }
 
@@ -114,6 +116,9 @@ for arg in "$@"; do
       ;;
     --yes)
       ASSUME_YES=1
+      ;;
+    --no-wallpapers)
+      NO_WALLPAPERS=1
       ;;
     --help|-h)
       usage
@@ -465,6 +470,34 @@ run mkdir -p "${THEMES_DEST}"
 # the `current` symlink (also under THEMES_DEST) must never be touched here.
 run rsync -a --exclude 'current' "${THEMES_SRC}/" "${THEMES_DEST}/"
 
+# Omarchy's wallpapers are not in this repository: they are their artists'
+# work, which Omarchy ships with no licence of its own, so they are downloaded
+# from Omarchy itself, for every theme that has none yet (an update fetches
+# only what a new theme lacks). --no-wallpapers skips this; a failed download
+# only warns, and tools/fetch-omarchy-backgrounds.sh can be re-run by hand.
+WALLPAPERS_FETCHED=" "
+if [ "${NO_WALLPAPERS}" -eq 1 ] || [ -n "${GALLERY_NO_WALLPAPERS:-}" ]; then
+  echo "[gallery] not fetching Omarchy's wallpapers (--no-wallpapers)"
+else
+  missing=()
+  for theme_dir in "${THEMES_SRC}"/*/; do
+    name="$(basename "${theme_dir}")"
+    ls "${THEMES_DEST}/${name}/backgrounds/"* >/dev/null 2>&1 || missing+=("${name}")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "[gallery] fetching Omarchy's wallpapers for ${#missing[@]} theme(s) from github.com/basecamp/omarchy"
+    for name in "${missing[@]}"; do
+      if [ "${DRY_RUN}" -eq 1 ]; then
+        echo "[dry] tools/fetch-omarchy-backgrounds.sh ${name}"
+      elif "${SCRIPT_DIR}/tools/fetch-omarchy-backgrounds.sh" "${name}" >/dev/null 2>&1; then
+        WALLPAPERS_FETCHED="${WALLPAPERS_FETCHED}${name} "
+      else
+        echo "[gallery] could not fetch the wallpapers for ${name}; later: tools/fetch-omarchy-backgrounds.sh ${name}" >&2
+      fi
+    done
+  fi
+fi
+
 echo "[gallery] installing theme renderer to ${RENDER_TOOL_DEST}"
 run mkdir -p "$(dirname "${RENDER_TOOL_DEST}")"
 gl_install_file "${RENDER_TOOL_SRC}" "${RENDER_TOOL_DEST}" 755
@@ -747,6 +780,14 @@ if [ "${DRY_RUN}" -eq 1 ]; then
 else
   if "${BIN_DEST}" theme render >/dev/null 2>&1; then
     echo "[gallery] theme rendered ($(readlink "${THEMES_DEST}/current" 2>/dev/null || echo current))"
+    # The current theme's wallpapers arrived just now (a first install): put
+    # one on the desktop. On an update the wallpaper is left as it is.
+    current_theme="$(readlink "${THEMES_DEST}/current" 2>/dev/null || true)"
+    case "${WALLPAPERS_FETCHED}" in
+      *" ${current_theme} "*)
+        [ -n "${current_theme}" ] && "${BIN_DEST}" bg apply >/dev/null 2>&1 \
+          && echo "[gallery] wallpaper set from ${current_theme}'s backgrounds" || true ;;
+    esac
   else
     echo "[gallery] theme render failed; run 'gallery theme render' by hand" >&2
   fi

@@ -36,7 +36,6 @@ a terminal first (see [Prerequisites](#prerequisites)):
 git clone https://github.com/locupleto/the-gallery && cd the-gallery
 ./install.sh               # install; macOS then asks for a few permissions
 gallery doctor             # check that everything is in place
-tools/fetch-omarchy-backgrounds.sh --all   # Omarchy's wallpapers, about 50 MB
 gallery agent dir ~/Code   # the folder that holds your repos: your agent starts there
 ```
 
@@ -75,8 +74,8 @@ gruvbox:
 ![The same tiled desktop in four themes](assets/screenshots/themes.jpg)
 
 **Omarchy's wallpapers come along.** Every theme brings its own
-backgrounds from Omarchy (`tools/fetch-omarchy-backgrounds.sh` fetches
-them; they are not in this repository). The tokyo-night theme on its
+backgrounds. They are not in this repository: the installer downloads them
+from Omarchy itself (about 50 MB; `--no-wallpapers` skips that). The tokyo-night theme on its
 quattro wallpaper:
 
 ![tokyo-night: two tiles beside Omarchy's quattro wallpaper](assets/screenshots/wallpapers.jpg)

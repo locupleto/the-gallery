@@ -85,6 +85,7 @@ Flags:
 | `--skip-tiler` | do not run `tiler/install.sh` (yabai, skhd, JankyBorders, Learn); plugin host and theming only |
 | `--restart-tiler` | passed to `tiler/install.sh` as `--restart`: restart yabai and skhd even if their config did not change |
 | `--minimal` | do not `brew install` the companion apps (btop, superfile) |
+| `--no-wallpapers` | do not download Omarchy's wallpapers (about 50 MB from github.com/basecamp/omarchy) |
 | `-h`, `--help` | print usage |
 
 An unknown flag prints the usage and exits 1.
@@ -304,7 +305,9 @@ the folder with that in mind. More in
   `~/.config/gallery/Gallery.app`, and launches nothing. The installer does
   not do this itself so it stays fast and offline; the venv is also built on
   the first run of any `qml` plugin. See [PLUGINS.md](PLUGINS.md).
-- **Wallpapers.** They are never in the repository. From the checkout:
+- **Wallpapers.** They are never in the repository; the installer downloads
+  Omarchy's own for every theme that has none yet, unless run with
+  `--no-wallpapers`. To fetch them later, or again:
 
   ```sh
   tools/fetch-omarchy-backgrounds.sh --all        # or one theme name; --force re-downloads

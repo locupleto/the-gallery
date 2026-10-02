@@ -33,6 +33,7 @@ trap 'rm -rf "${WORK_DIR}"' EXIT
 
 # --- stubs ----------------------------------------------------------------------
 STUBS="${WORK_DIR}/stubs"
+export GALLERY_NO_WALLPAPERS=1   # no downloads from Omarchy during the test
 STUB_LOG="${WORK_DIR}/stub.log"
 mkdir -p "${STUBS}"
 : > "${STUB_LOG}"

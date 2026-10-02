@@ -542,8 +542,9 @@ are never removed by an update.
 
 Wallpapers are per theme: images in
 `~/.config/gallery/themes/<theme>/backgrounds/` (`jpg`, `jpeg`, `png`, `heic`,
-`webp`). They are not in the repository. Fetch the Omarchy ones for a vendored
-theme from a checkout, and add your own by copying files in:
+`webp`). They are not in the repository; the installer downloads the Omarchy
+ones (re-fetch one theme from a checkout as below), and you add your own by
+copying files in:
 
 ```sh
 tools/fetch-omarchy-backgrounds.sh tokyo-night      # or --all

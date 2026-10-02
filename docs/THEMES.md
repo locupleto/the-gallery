@@ -319,7 +319,9 @@ at a different hooks directory (the tests use it).
 
 ## Wallpapers
 
-Wallpapers are not in this repository. Fetch them for the themes you want:
+Wallpapers are not in this repository. `./install.sh` downloads Omarchy's
+own for every theme that has none yet (`--no-wallpapers` skips that), and
+the same script it uses can be run by hand:
 
 ```sh
 tools/fetch-omarchy-backgrounds.sh <theme-name>      # one vendored theme

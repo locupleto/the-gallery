@@ -49,8 +49,8 @@ ship with Omarchy's themes (for example tokyo-night's `1-quattro.webp`,
 kanagawa's `1-kanagawa.jpg`, osaka-jade's `1-glowing-city.webp`). They are
 the work of their respective artists, and Omarchy states no licence for them
 beyond its MIT notice. The image files themselves are not in this
-repository: `tools/fetch-omarchy-backgrounds.sh` downloads them from
-Omarchy on your machine.
+repository: the installer (through `tools/fetch-omarchy-backgrounds.sh`)
+downloads them from Omarchy onto your machine.
 
 ## Radio Atlas
 
