@@ -325,8 +325,16 @@ bright_radio() {
   printf '%soff %son' "$off_mark" "$on_mark"
 }
 
+# native_label -- what "console native" means on the configured terminal:
+# iTerm2's Default profile, or on any other terminal simply its own config.
+native_label() {
+  local t
+  t="$("${HOME}/bin/gallery-term" name 2>/dev/null || echo iterm2)"
+  if [[ "$t" == iterm2 ]]; then printf 'iTerm Default'; else printf 'own config'; fi
+}
+
 # static_header -- the header's fixed first three lines: which theme is
-# presently active plus the key hints, the iTerm console's current mode,
+# presently active plus the key hints, the terminal console's current mode,
 # and the JankyBorders width/bright prefs. Queries `gallery theme current`,
 # console_mode, and borders_prefs itself (rather than taking them as
 # arguments) so both the top-level --header (built once, interactively) and
@@ -340,7 +348,7 @@ static_header() {
   if [[ "$mode" == "theme" ]]; then
     console_line="Console: follows theme  (ctrl-t toggles)"
   else
-    console_line="Console: iTerm Default  (ctrl-t toggles)"
+    console_line="Console: $(native_label)  (ctrl-t toggles)"
   fi
   # The Übersicht line is appended only on a Mac where it means something
   # (see widgets_available); elsewhere the header is exactly as before.
@@ -359,7 +367,7 @@ static_header() {
     # with the widgets line), so every key hint stays visible.
     case "$mode" in
       theme) console_line="Console: follows theme  ctrl-t" ;;
-      *)     console_line="Console: iTerm Default  ctrl-t" ;;
+      *)     console_line="Console: $(native_label)  ctrl-t" ;;
     esac
     [[ -n "$widgets_line" ]] && widgets_line="${widgets_line/  (ctrl-u toggles)/  ctrl-u}"
     printf 'Current: %s  Enter applies, Esc closes\n%s\nBorder width %s  ctrl-w\nBorder bright %s  ctrl-b\n' \
@@ -568,7 +576,7 @@ fzf_args=(
   # change-header first is a best-effort "please wait" cue: fzf renders it
   # before the blocking execute-silent runs.
   --bind "enter:change-header(Applying theme, please wait...)+execute-silent(${gallery_q} theme set {1})+become(${bg_q} --from-themes)"
-  # ctrl-t: flip the iTerm console between following the theme and staying
+  # ctrl-t: flip the terminal console between following the theme and staying
   # on its own Default colours, then refresh the header/preview-label so the
   # "Console: ..." line reflects the new mode immediately.
   --bind "ctrl-t:execute-silent(${gallery_q} console toggle)+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"

@@ -8,7 +8,7 @@
 # Unlike the *_test.lua files (which run inside a headless or live
 # Hammerspoon Lua environment via `hs`), a tui-kind plugin is deliberately
 # NOT routed through Hammerspoon at all -- gallery open/close/toggle
-# resolve it locally to gallery-tui, which spawns a real iTerm2 window,
+# resolve it locally to gallery-tui, which spawns a real window of the configured terminal (iTerm2, Ghostty, kitty or WezTerm),
 # titled "Gallery: <manifest.name>", that yabai floats and centres (rule
 # label gallery-tui, grid 6:6:1:1:4:4). This script therefore drives the
 # INSTALLED CLI (~/bin/gallery, ~/bin/gallery-tui) exactly as a user would,
@@ -28,6 +28,10 @@ PLUGIN_NAME="System Monitor"
 TITLE="Gallery: ${PLUGIN_NAME}"
 GALLERY_BIN="${HOME}/bin/gallery"
 GALLERY_TUI_BIN="${HOME}/bin/gallery-tui"
+# The app name yabai reports for the configured terminal (iTerm2, Ghostty,
+# kitty, WezTerm -- see `gallery terminal`); the window checks below filter on it.
+TUI_APP="$("${HOME}/bin/gallery-term" app 2>/dev/null || echo iTerm2)"
+export TUI_APP
 PY="/usr/bin/python3"
 CMD_TIMEOUT=20
 
@@ -45,7 +49,7 @@ fail() {
 # dump_windows -- prints the current yabai window list on failure, so a CI
 # log has something to diagnose from without re-running interactively.
 dump_windows() {
-  echo "[tui_test] yabai -m query --windows (iTerm2 only):" >&2
+  echo "[tui_test] yabai -m query --windows (${TUI_APP} only):" >&2
   yabai -m query --windows 2>/dev/null \
     | "${PY}" -c '
 import json, sys
@@ -55,14 +59,14 @@ except Exception as e:
     print("  <could not parse yabai output: %s>" % e)
     sys.exit(0)
 for w in data:
-    if w.get("app") == "iTerm2":
+    if w.get("app") == __import__("os").environ["TUI_APP"]:
         print("  id=%s title=%r floating=%s visible=%s frame=%s" % (
             w.get("id"), w.get("title"), w.get("is-floating"),
             w.get("is-visible"), w.get("frame")))
 ' 2>&1 | sed 's/^/[tui_test]   /' >&2 || true
 }
 
-# window_count -- number of iTerm2 windows with our exact title.
+# window_count -- number of terminal windows with our exact title.
 window_count() {
   local json
   json="$(yabai -m query --windows 2>/dev/null || true)"
@@ -75,7 +79,7 @@ try:
 except Exception:
     print(0)
     sys.exit(0)
-print(sum(1 for w in data if w.get("app") == "iTerm2" and w.get("title") == title))
+print(sum(1 for w in data if w.get("app") == __import__("os").environ["TUI_APP"] and w.get("title") == title))
 ' "${TITLE}"
 }
 
@@ -92,7 +96,7 @@ try:
     data = json.loads(sys.stdin.read())
 except Exception:
     sys.exit(0)
-matches = [w for w in data if w.get("app") == "iTerm2" and w.get("title") == title]
+matches = [w for w in data if w.get("app") == __import__("os").environ["TUI_APP"] and w.get("title") == title]
 if not matches:
     sys.exit(0)
 w = matches[0]
@@ -185,8 +189,8 @@ if ! command -v yabai >/dev/null 2>&1; then
   trap - EXIT
   exit 0
 fi
-if ! osascript -e 'exists application "iTerm2"' >/dev/null 2>&1; then
-  say "SKIP: iTerm2 not installed"
+if ! osascript -e "exists application \"${TUI_APP}\"" >/dev/null 2>&1; then
+  say "SKIP: ${TUI_APP} not installed"
   trap - EXIT
   exit 0
 fi
