@@ -14,7 +14,8 @@ the Mac you already have.
 
 - **Tiling, the Omarchy way.** New windows tile themselves (yabai). Left
   Option is "super", the keys are Omarchy's (skhd), and the focused window
-  wears an outline in the theme's accent colour (JankyBorders). Can't
+  wears an outline in the theme's accent colour (JankyBorders, macOS 14 and
+  later). Can't
   remember a key? super + space opens the Learn menu, a set of cheat sheets
   that includes one generated from the live key bindings.
 - **One theme, everywhere.** Pick one of Omarchy's themes and it is applied
@@ -254,7 +255,15 @@ left alone by the installer.
 
 ### Prerequisites
 
-Have these in place on a new Mac before running the installer:
+Have these in place on a new Mac before running the installer. The Gallery
+runs on macOS 12 Monterey and later, on Apple silicon and Intel alike:
+
+| macOS | What is different |
+|---|---|
+| 14 Sonoma and later | nothing: everything below works |
+| 13 Ventura | no focus outline (JankyBorders needs macOS 14; the installer skips it). Not tested here: if Homebrew has no prebuilt packages for it, use `--minimal` as on Monterey |
+| 12 Monterey | no focus outline; Hammerspoon 1.0.0 and iTerm2 3.6.x installed by hand, kitty instead of Ghostty, and `--minimal` to skip hours of compiling (see [Older Macs](docs/INSTALL.md#prerequisites)) |
+
 
 | Prerequisite | How | Why |
 |---|---|---|
@@ -276,7 +285,7 @@ The stock `/bin/bash` 3.2 is enough.
 This copies the Spoon and bundled plugins onto the boot volume (see the
 rationale comment in `install.sh` for why they are copied rather than
 symlinked) and wires `~/.hammerspoon/init.lua` to load Gallery. It also
-installs yabai, skhd, JankyBorders, fzf and glow, plus the companion apps
+installs yabai, skhd, JankyBorders (macOS 14 and later), fzf and glow, plus the companion apps
 btop (the System Monitor plugin) and superfile (a themed `spf` file manager)
 unless run with `--minimal`, renders the current theme, and starts
 Hammerspoon. macOS then asks for Accessibility (Hammerspoon, yabai, skhd)
