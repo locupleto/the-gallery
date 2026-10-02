@@ -1,0 +1,45 @@
+# Your own skhd key bindings. Copy to ~/.config/skhd/local.skhd (the installers
+# create that file empty if it is absent) and uncomment what you want. The
+# installers never overwrite it, so it survives updates.
+#
+# Rules, from skhd's source (see the end of tiler/skhdrc):
+#   - local.skhd is loaded BEFORE gallery.skhd. A hotkey defined twice is not an
+#     error: the FIRST definition wins silently. So a line here replaces the same
+#     key in gallery.skhd, but cannot replace a binding in the shipped skhdrc.
+#   - skhd has no "unbind". To switch a Gallery key off, bind it to a no-op.
+#   - skhd hotloads this file, but only if it existed when skhd started; after
+#     creating it by hand run `skhd --reload` once.
+#   - Lines starting with "## " describe the binding below them and appear in the
+#     Learn key sheet (super+space). The "# --- apps ---" header files them under
+#     the existing "Apps" section; use another name for a section of your own.
+#     Re-run `tiler/learn install` (or the installer) to regenerate the sheet.
+#
+# Left Option (lalt) is "super". Syntax: https://github.com/asmvik/skhd
+
+# --- apps (Omarchy's app slots: uncomment and point at your apps) ---------------
+# Omarchy puts an app on each letter: a ChatGPT, shift+a Grok, c Calendar (bound
+# in skhdrc), e Email, y YouTube, x X, g messaging. Web apps saved from Safari
+# live in ~/Applications; `open -a` activates the window they have.
+## AI assistant
+#lalt - a : open -a "/Applications/Claude.app"
+## second AI assistant
+#shift + lalt - a : open -a "/Applications/ChatGPT.app"
+## Email web app
+#lalt - e : open -a "$HOME/Applications/Gmail.app"
+## YouTube web app
+#lalt - y : open -a "$HOME/Applications/YouTube.app"
+## X web app
+#lalt - x : open -a "$HOME/Applications/X.app"
+## messaging
+#lalt - g : open -a Telegram
+## third AI assistant
+#shift + lalt - g : open -a "$HOME/Applications/Grok.app"
+
+# --- your own keys ------------------------------------------------------------
+## open a project folder in the editor
+#lalt - p : open -a "Visual Studio Code" "$HOME/projects"
+
+# --- switch a Gallery binding off ----------------------------------------------
+# Same key as in gallery.skhd, bound to a no-op, so the Gallery's line is the
+# duplicate and is dropped. (Does not work for keys defined in skhdrc itself.)
+#lalt + ctrl - 0 : true

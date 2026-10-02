@@ -382,6 +382,8 @@ fi
 SKHD_DIR="${HOME_DIR}/.config/skhd"
 run mkdir -p "${SKHD_DIR}"
 run install -m 644 "${SCRIPT_DIR}/skhd/gallery.skhd" "${SKHD_DIR}/gallery.skhd"
+# local.skhd (the user's own bindings, loaded by skhdrc): seeded once, never overwritten.
+[ -e "${SKHD_DIR}/local.skhd" ] || run install -m 644 "${SCRIPT_DIR}/tiler/local.skhd.example" "${SKHD_DIR}/local.skhd"
 
 # --- tiler (yabai, skhd, JankyBorders, Learn) --------------------------------------
 # The Gallery's tiling layer lives in tiler/ in this same repo. Its installer places

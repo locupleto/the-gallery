@@ -111,6 +111,10 @@ run install -m 644 skhdrc  "$SKHD_RC"
 # still resolves -- and a standalone `tiler/install.sh` run (Gallery skipped
 # or not yet installed) works on its own.
 [ -e "$(dirname "$SKHD_RC")/gallery.skhd" ] || run install -m 644 /dev/null "$(dirname "$SKHD_RC")/gallery.skhd"
+# local.skhd: the user's own key bindings (skhdrc loads it before gallery.skhd).
+# Seeded once from the all-commented example so skhd hotloads it from the start;
+# NEVER overwritten.
+[ -e "$(dirname "$SKHD_RC")/local.skhd" ] || run install -m 644 local.skhd.example "$(dirname "$SKHD_RC")/local.skhd"
 # The Learn script lives next to skhdrc (skhd and Learn.app run under launchd, which
 # cannot read this volume); it also writes the generated key sheet into the vault
 # and builds ~/Applications/Learn.app for Spotlight.

@@ -13,11 +13,13 @@
 # Control for every Desktop you want to reach. yabai itself never switches Spaces
 # (that would need the scripting addition and a partially disabled SIP).
 
-# --- pass the keyboard through to the Omarchy VM -------------------------------
-# Inside UTM the guest runs Omarchy, whose modifier is ALSO left Option (Hyprland
-# is configured with altwin:swap_lalt_lwin, so macOS never sees Cmd+Space). Every
-# lalt chord below would otherwise be swallowed by skhd before the VM saw it, and
-# the guest would be unusable. skhd stands down entirely while UTM is focused.
+# --- pass the keyboard through to a VM ----------------------------------------
+# If you run Omarchy in a VM (UTM), the guest's modifier is ALSO left Option
+# (Hyprland is configured with altwin:swap_lalt_lwin, so macOS never sees
+# Cmd+Space). Every lalt chord below would otherwise be swallowed by skhd before
+# the VM saw it, and the guest would be unusable. skhd stands down entirely
+# while UTM is focused. Harmless if you have no UTM; add other VM apps by name
+# (lowercase) to the list, or remove the block.
 #
 # Remapping the guest's Super to left Ctrl instead was considered and rejected: it
 # collides with Mission Control, which owns Ctrl+1..9 and Ctrl+arrows -- the very
@@ -134,27 +136,13 @@ lalt - return : if [ -x "$HOME/bin/gallery-term" ]; then "$HOME/bin/gallery-term
 shift + lalt - r : yabai --restart-service; skhd --reload
 
 # --- apps (Omarchy web-app keys) -------------------------------------------------
-# Safari web apps live in ~/Applications; open -a activates the one window they have.
-# Omarchy: a ChatGPT, shift+a Grok, c Calendar, e Email, y YouTube, x X, g messaging
-# (WhatsApp there; Telegram here; the AI keys are Claude (desktop app in
-# /Applications) and ChatGPT here; Grok sits on shift+g). Split toggle moved to shift+e to
-# free super+e.
-## Claude desktop app
-lalt - a : open -a "/Applications/Claude.app"
-## ChatGPT app
-shift + lalt - a : open -a "/Applications/ChatGPT.app"
+# Omarchy puts an app on each letter: a ChatGPT, shift+a Grok, c Calendar, e Email,
+# y YouTube, x X, g messaging. Which apps those are is personal, so only Calendar
+# is bound here; the rest are examples in tiler/local.skhd.example -- copy them
+# into ~/.config/skhd/local.skhd and point them at your own apps. (Split toggle
+# moved to shift+e to free super+e.)
 ## Calendar
 lalt - c : open -a Calendar
-## Gmail web app
-lalt - e : open -a "$HOME/Applications/Gmail.app"
-## YouTube web app
-lalt - y : open -a "$HOME/Applications/YouTube.app"
-## X web app
-lalt - x : open -a "$HOME/Applications/X.app"
-## Telegram (Omarchy's messaging slot)
-lalt - g : open -a Telegram
-## Grok web app
-shift + lalt - g : open -a "$HOME/Applications/Grok.app"
 
 # --- folders (Finder) ------------------------------------------------------------
 # Omarchy's super+F opens the file manager; F is zoom here, so folders live on O.
@@ -176,10 +164,26 @@ lalt - space : "$HOME/.config/skhd/learn" open menu
 ## the tiler key sheet, generated from this file
 shift + lalt - space : "$HOME/.config/skhd/learn" open show Tiler-Keys
 
+# === Your own bindings: ~/.config/skhd/local.skhd =============================
+# User-owned, never shipped or overwritten (template: tiler/local.skhd.example;
+# the installers create it empty if absent). Its "## " lines show up in Learn
+# too. ORDER MATTERS, verified in skhd's source (v0.3.9, parse.c + hashtable.h):
+#   - skhd parses this file's own hotkeys first and only THEN the .load files,
+#     in the order written here.
+#   - A hotkey defined twice is NOT an error and NOT a warning: the FIRST
+#     definition wins and the later one is dropped silently.
+# So local.skhd is loaded before gallery.skhd, which lets it replace any Gallery
+# binding (and add new keys), but it can never replace a binding written in this
+# file. To disable a Gallery key, rebind it in local.skhd to a no-op (`: true`).
+# A missing .load file is only a warning in skhd's err log, not a failed config,
+# but a file that did not exist at start-up is not hotloaded until `skhd --reload`;
+# hence the installer creates it empty.
+.load "local.skhd"
+
 # === The Gallery (Hammerspoon plugin host) — bindings in gallery.skhd (below) ===
 # Bindings live in gallery.skhd next to this file, copied into place by the
 # Gallery's own install.sh (same repo, tiler/ + skhd/). skhd stays the only
 # hotkey grabber; the Gallery binds no keys of its own. tiler/install.sh
 # creates an empty file if the Gallery step has not run yet, so this include
-# never fails.
+# is always hotloaded.
 .load "gallery.skhd"
