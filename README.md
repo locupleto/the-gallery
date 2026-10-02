@@ -25,6 +25,17 @@ gruvbox:
 
 ![The same tiled desktop in four themes](assets/screenshots/themes.jpg)
 
+**Omarchy's wallpapers come along.** Every theme brings its own
+backgrounds from Omarchy (`tools/fetch-omarchy-backgrounds.sh` fetches
+them; they are not in this repository). The tokyo-night theme on its
+quattro wallpaper:
+
+![tokyo-night: two tiles beside Omarchy's quattro wallpaper](assets/screenshots/wallpapers.jpg)
+
+And kanagawa, retro-82, catppuccin and lupine, each on its own background:
+
+![Four themes on their own Omarchy wallpapers](assets/screenshots/wallpapers-more.jpg)
+
 **Floating TUIs, Omarchy style.** Pickers and glance-and-dismiss tools open
 as floating, centred terminals over the tiles, under the same glass. The
 theme picker previews each theme's palette and wallpapers; the Learn menu
