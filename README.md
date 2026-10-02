@@ -36,6 +36,7 @@ a terminal first (see [Prerequisites](#prerequisites)):
 git clone https://github.com/locupleto/the-gallery && cd the-gallery
 ./install.sh               # install; macOS then asks for a few permissions
 gallery doctor             # check that everything is in place
+gallery agent dir ~/Code   # the folder that holds your repos: your agent starts there
 ```
 
 (The installer puts `gallery` in `~/bin`; if that is not on your PATH yet, it

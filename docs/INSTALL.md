@@ -7,6 +7,7 @@ Contents: [Prerequisites](#prerequisites) -
 [Run the installer](#run-the-installer) -
 [First-run permissions](#first-run-permissions) -
 [Verify](#verify) -
+[Set up your coding agent](#set-up-your-coding-agent) -
 [Optional extras](#optional-extras) -
 [Updating](#updating) -
 [Uninstalling](#uninstalling) -
@@ -264,6 +265,24 @@ See [THEMES.md](THEMES.md).
 
 Then try a binding: `super+space` (left Option plus space) opens Learn, and
 `gallery open gallery.sysmon` opens the System Monitor in a floating window.
+
+## Set up your coding agent
+
+shift + ctrl + super + a opens a coding agent (Claude Code by default) in a
+new tile. Tell it two things once per Mac:
+
+```sh
+gallery agent set claude       # or codex, gemini, opencode, copilot, crush,
+                               # or: set <name> --command "<any CLI>"
+gallery agent dir ~/Code       # the folder that holds your repositories
+gallery agent status           # check both
+```
+
+The agent starts in that folder, so it asks to trust it once and that covers
+every repository inside it. Without a folder set it starts in your home
+folder. It runs without stopping to ask before each command or edit, so pick
+the folder with that in mind. More in
+[Getting started](GETTING-STARTED.md#set-up-your-coding-agent).
 
 ## Optional extras
 
