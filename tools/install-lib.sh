@@ -142,7 +142,16 @@ gl_backup_path() {
 # one of its first lines names the Gallery or tiler/. Older installs have no
 # manifest, so this is how they are told from a user's own file.
 gl_recognisable() {
-  head -n 40 "$1" 2>/dev/null | grep -qiE 'gallery|tiler/'
+  # Files the Gallery names after itself (~/bin/gallery-*, anything under
+  # ~/.config/gallery) only need to mention it; files with generic names
+  # (yabairc, skhdrc, learn, ...) need one of the shipped header markers, so a
+  # user's own config that merely says "gallery" is backed up, not overwritten.
+  case "$1" in
+    */gallery*|"${GL_CONFIG_DIR}"/*)
+      head -n 40 "$1" 2>/dev/null | grep -qiE 'gallery|tiler/' ;;
+    *)
+      head -n 40 "$1" 2>/dev/null | grep -qE 'the-gallery|The Gallery|tiler/' ;;
+  esac
 }
 
 # gl_put <src> <dest> <mode> -- the actual copy, with the manifest entry.
