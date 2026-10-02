@@ -82,10 +82,9 @@ local DEFAULT_THEME = {
 
 -- Resolved per the contract: `yabai` from Homebrew's fixed Apple Silicon
 -- prefix, and crystal_sampler's metrics.json from HTOP_TEMP_DIR as
--- configured in crystal-widgets-v2/widgets/crystal_common.sh and this
--- machine's installed org.ottosson.crystal-sampler LaunchAgent
--- (HTOP_TEMP_DIR=$HOME/tmp); confirmed present on this machine at
--- ~/tmp/metrics.json.
+-- configured by the author's optional, not-public crystal widgets and their
+-- sampler LaunchAgent (HTOP_TEMP_DIR=$HOME/tmp); without them the file is
+-- absent and the metrics subscription simply gets no data.
 local YABAI_PATH = "/opt/homebrew/bin/yabai"
 local METRICS_PATH = os.getenv("HOME") .. "/tmp/metrics.json"
 

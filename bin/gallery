@@ -57,7 +57,7 @@
 #   gallery home save [--roam A,B] [--dry-run]
 #   gallery home apply
 #   gallery ghosts [list|fix [OWNER|ID]|forget]
-#   gallery agent [open|inline|status|list|set <name>]
+#   gallery agent [open|inline|status|list|set <name>|dir [<path>|--clear]]
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -2049,16 +2049,17 @@ cmd_font() {
 
 # --- Übersicht crystal widgets mode ------------------------------------------
 #
-# The crystal widgets (locupleto/crystal-widgets-v2, an Übersicht desktop
-# widget set) can either follow the active Gallery theme -- their static
-# white becomes the theme's lightest foreground, their bar fill the accent --
-# or keep their own shipped colours. Recorded in WIDGETS_STATE_FILE as
-# {"mode": "theme"} or {"mode": "native"}; missing/invalid means native, the
-# same contract as the iTerm console mode above. Switching modes re-runs the
-# renderer, which rewrites state/crystal.css (read by the widgets'
-# crystal-theme.widget every couple of seconds) and adds or drops
-# CRYSTAL_BAR_COLOR in theme.sh (read by their crystal_common.sh on every
-# refresh), so the desktop follows within a refresh or two.
+# The crystal widgets (the author's separate, optional, not-public Übersicht
+# desktop widget set; without it this mode is a no-op) can either follow the
+# active Gallery theme -- their static white becomes the theme's lightest
+# foreground, their bar fill the accent -- or keep their own shipped colours.
+# Recorded in WIDGETS_STATE_FILE as {"mode": "theme"} or {"mode": "native"};
+# missing/invalid means native, the same contract as the iTerm console mode
+# above. Switching modes re-runs the renderer, which rewrites
+# state/crystal.css (read by the widgets' crystal-theme.widget every couple
+# of seconds) and adds or drops CRYSTAL_BAR_COLOR in theme.sh (read by their
+# crystal_common.sh on every refresh), so the desktop follows within a
+# refresh or two.
 #
 # The setting only makes sense while Übersicht is running with these
 # widgets; widgets_available is what the theme picker consults to decide

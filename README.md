@@ -183,9 +183,8 @@ Have these in place on a new Mac before running the installer:
 | Prerequisite | How | Why |
 |---|---|---|
 | **Homebrew** | [brew.sh](https://brew.sh) | the installer brews everything else; it stops up front if `brew` is missing |
-| A GitHub SSH key | — | to clone this (private) repo |
 | iTerm2 + Hammerspoon | `brew install --cask iterm2 hammerspoon` | every floating TUI window; the plugin host (the installer refuses to run without Hammerspoon.app) |
-| The Obsidian vault, synced | — | the Learn menu reads its sheets from it |
+| *Optional:* a folder of markdown sheets | — | the Learn menu reads them; Obsidian is not required (see Learn) |
 | *Optional:* chafa, uv | `brew install chafa uv` | picker previews; the venv for the `qml` kind |
 
 The stock `/bin/bash` 3.2 is enough.
@@ -204,9 +203,7 @@ btop (the System Monitor plugin) and superfile (a themed `spf` file manager)
 unless run with `--minimal`, renders the current theme, and starts
 Hammerspoon. macOS then asks for Accessibility (Hammerspoon, yabai, skhd)
 and a few Automation grants by hand; `gallery doctor` lists what is still
-missing. The step-by-step walkthrough, validated on a second Mac, is the
-vault note `Projects/The-Gallery/Installing-On-A-New-Mac.md`. Updating later
-is `git pull` followed by the same `./install.sh`.
+missing. Updating later is `git pull` followed by the same `./install.sh`.
 
 ## Tiling and hotkeys
 
@@ -235,7 +232,7 @@ gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery ghosts [list] | fix [OWNER|ID] | forget |
-gallery agent [open] | inline | status | list | set <name> |
+gallery agent [open] | inline | status | list | set <name> | dir [<path>|--clear] |
 gallery reload | log | doctor | install
 ```
 
@@ -299,8 +296,10 @@ Nerd Fonts. The QML plugin host (`qml/host.py`) reads the same file and,
 when a family is set and installed, puts it first in the "monospace" alias
 fallback list it already resolves Omarchy's icon font from.
 
-`widgets ...` does the same for the Übersicht crystal widgets
-(locupleto/crystal-widgets-v2), and is just as optional: `native` (the
+`widgets ...` does the same for the author's crystal widgets, a separate,
+optional Übersicht widget set that is not public. Without it `gallery widgets
+available` exits 1, the picker's widgets line is hidden, and `widgets theme`
+only records the mode. It is just as optional as the rest: `native` (the
 default) leaves them on their own shipped colours, `theme` swaps their
 static white for the theme's lightest foreground and their CPU/mem/swap bar
 fill for the accent. The renderer writes `~/.config/gallery/state/crystal.css`
@@ -326,13 +325,13 @@ render. Inside the theme picker, `ctrl-w` cycles width through the presets
 
 `agent ...` launches a coding agent in a terminal window, modelled on
 Omarchy 4's `omarchy-agent`. `shift+ctrl+super+a` — Omarchy's own keys — opens
-the default agent in the estate's git root
-(`/Volumes/Work/development/projects/git`, override with
-`GALLERY_AGENT_DIR`; if it is unreachable the agent starts in `$HOME` rather
-than not at all). Omarchy starts in `$HOME/Work` for the same reason the
-Gallery starts in the git root: an agent will not remember a trust decision
-for `$HOME`, so one directory holding every repo means one approval instead of
-one per session. Like Omarchy, each agent is started with its own spelling of
+the default agent in `$HOME`, or in the directory recorded with `gallery
+agent dir <path>` (per machine; `GALLERY_AGENT_DIR` overrides it, and if it
+is unreachable the agent starts in `$HOME` rather than not at all). Omarchy
+starts in `$HOME/Work` because an agent will not remember a trust decision
+for `$HOME`: pointing it at one directory holding every repo means one
+approval instead of one per session. Like Omarchy, each agent is started with
+its own spelling of
 "do not stop to ask" — `claude --permission-mode bypassPermissions`, `gemini
 --yolo`, `opencode --auto`, and so on — because a keypress-launched agent that
 waits for an approval it cannot show is useless. That is a deliberate posture:
@@ -382,5 +381,5 @@ list.
 
 ## Documentation
 
-Full design notes and decisions live in the Obsidian vault, under
-`Projects/The-Gallery/`. This README stays short on purpose.
+The author keeps fuller design notes in a private Obsidian vault; this README
+stays short on purpose.

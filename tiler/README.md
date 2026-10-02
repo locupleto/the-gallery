@@ -82,7 +82,7 @@ tile swaps.
 On the Swedish layout the Option key types `@` (⌥2), `|` (⌥7), `[` `]` (⌥8/9)
 and `{` `}` (⌥⇧8/9). Only the **left** Option is bound here, so type those
 symbols with the **right** Option — exactly like AltGr on Linux. Because of
-that, the voice assistant's push-to-talk on the Studio is the **right
+that, the author's voice assistant's push-to-talk is the **right
 Command** key (`PTT_KEY=cmd_r` in its LaunchAgent), no longer right Option.
 
 
@@ -153,17 +153,22 @@ Omarchy's "Learn" menu, rebuilt on this desk. `tiler/learn` opens a
 floating iTerm window, centred on the display that had focus when the key
 was pressed (the script finds its own window by its `Learn: …` title and
 moves, floats and centres it by id; a `yabairc` rule is the backup), with
-an fzf list of the vault's `Cheat-Sheets` notes;
+an fzf list of your markdown cheat sheets;
 Enter renders the chosen one with glow, `q` or Esc closes. Three doors:
 
 - **super + space** — the menu; **super + shift + space** — the tiler keys directly.
 - **Spotlight → "Learn"** — `~/Applications/Learn.app`, a shell-script bundle
   built by `tiler/learn install` (first launch: allow "Learn wants to control iTerm2").
 
-One source per sheet: the notes are read in place from the Obsidian vault
-(`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault/Cheat-Sheets`,
-override with `OBSIDIAN_VAULT` or `LEARN_SHEETS`), never copied, and an
-evicted iCloud note is fetched first. The only generated sheet is
+One source per sheet: the notes are plain markdown files read in place from
+one folder, never copied, and an evicted iCloud note is fetched first.
+Obsidian is optional. The folder is `LEARN_SHEETS` if set, else
+`Cheat-Sheets` inside `OBSIDIAN_VAULT`, else inside the default iCloud vault
+(`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault`) when
+that exists, else `~/.config/gallery/sheets`, which `learn install` creates.
+To use any folder of `.md` files, `export LEARN_SHEETS=~/my-sheets` (also in
+the environment skhd runs under). With no sheets of your own the menu lists
+just the generated `Tiler-Keys`. The only generated sheet is
 `Tiler-Keys.md`, written from the `## description` lines above each binding
 in `skhdrc` — so keep those lines current; `tiler/install.sh` regenerates the
 note and the app every run. Dependencies: `fzf`, `glow` (Homebrew, installed
@@ -214,8 +219,8 @@ what notices.
 The one consumer outside this repo is the voice assistant (`ai_voice_assistant`),
 and super+b is the one key that depends on it: the binding runs its
 `desktop.py` from `~/.ai_voice_assistant` when that holds a venv python (the
-Studio's synced runtime), else from the repo checkout under
-`~/Developer/projects/git` (the laptop, which also has a bare
+author's synced runtime), else from the repo checkout under
+`~/Developer/projects/git` (a machine that also has a bare
 `~/.ai_voice_assistant` state folder, hence the test for the python and not
 the directory). `gallery doctor` reports which runtime it resolves.
 Its `desktop.py` detects yabai at runtime (`DESKTOP_TILER=auto`) and routes
