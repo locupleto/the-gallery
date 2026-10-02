@@ -47,10 +47,17 @@ Notes:
 ## Run the installer
 
 ```sh
-git clone <this repository> the-gallery
+git clone https://github.com/locupleto/the-gallery
 cd the-gallery
 ./install.sh --dry-run     # optional: print what would happen, change nothing
 ./install.sh
+```
+
+The `gallery` command is installed in `~/bin`. If that folder is not on your
+PATH, the installer ends with a note and the line to add (once):
+
+```sh
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zprofile
 ```
 
 Flags:

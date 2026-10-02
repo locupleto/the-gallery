@@ -784,3 +784,15 @@ else
 fi
 
 echo "[gallery] install complete"
+
+# The CLI lives in ~/bin, which a fresh Mac does not have on PATH. Say so
+# rather than edit the user's shell startup files.
+case ":${PATH}:" in
+  *":${HOME_DIR}/bin:"*) ;;
+  *)
+    echo "[gallery] note: ${HOME_DIR}/bin is not on your PATH, so the gallery command is not found yet."
+    echo "[gallery]       Add it once, then open a new terminal:"
+    echo "[gallery]         echo 'export PATH=\"\$HOME/bin:\$PATH\"' >> ~/.zprofile"
+    echo "[gallery]       (until then: ~/bin/gallery doctor)"
+    ;;
+esac

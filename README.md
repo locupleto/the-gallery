@@ -1,6 +1,6 @@
 # The Gallery
 
-**An Omarchy-style tiled desktop for macOS.**
+**An Omarchy-style tiled desktop for macOS, and a fine place to run your coding agents.**
 
 [Omarchy](https://omarchy.org) is David Heinemeier Hansson's take on what a
 desktop should be: Arch Linux and Hyprland, set up so that windows tile
@@ -20,15 +20,39 @@ the Mac you already have.
 - **One theme, everywhere.** Pick one of Omarchy's themes and it is applied
   to everything at once: your terminal (iTerm2, Ghostty, kitty or WezTerm),
   the focus outline, the wallpaper, btop, superfile and the font.
+- **Made for coding agents.** One key (shift + ctrl + super + a) opens your
+  agent of choice (Claude Code, Codex, Gemini, opencode, or any other CLI) in a
+  new tile, started in the folder you keep your projects in. Run three side
+  by side, each on its own task, and move between them with the keyboard.
 - **Omarchy plugins on a Mac.** A small plugin host, modelled on Omarchy 4's
   plugin system, runs floating terminal tools, background services and
   unmodified Omarchy QML plugins such as Radio Atlas.
 
-**Try it without committing.** Press shift + ctrl + super + escape (or run
-`gallery off`) and you are back to plain macOS: the tiling stops, the
-outline goes, left Option types characters again. Press it again (or run
-`gallery on`) and the tiles return. If it is not for you,
-`./install.sh --uninstall` puts back every file it changed.
+**Try it without committing.** Getting in, trying it and getting out again
+are each one command. You need [Homebrew](https://brew.sh), Hammerspoon and
+a terminal first (see [Prerequisites](#prerequisites)):
+
+```sh
+git clone https://github.com/locupleto/the-gallery && cd the-gallery
+./install.sh               # install; macOS then asks for a few permissions
+gallery doctor             # check that everything is in place
+```
+
+(The installer puts `gallery` in `~/bin`; if that is not on your PATH yet, it
+prints the one line to add.)
+
+Then press **super + space** (super is left Option) for the Learn menu, or
+**super + shift + space** for every key on one sheet, and open a few windows
+with **super + return**. To take a break from it:
+
+```sh
+gallery off                # plain macOS again: no tiling, keys back to normal
+gallery on                 # and back (or press shift + ctrl + super + escape)
+```
+
+And if you miss the old way for good, `./install.sh --uninstall` removes it
+and puts back every file it changed. The full walk-through is in
+[Getting started](docs/GETTING-STARTED.md).
 
 Credit where it is due: the ideas, the key bindings, the themes, the
 wallpapers and the plugin model are Omarchy's. The theme colours and QML
@@ -57,6 +81,13 @@ quattro wallpaper:
 And kanagawa, retro-82, catppuccin and lupine, each on its own background:
 
 ![Four themes on their own Omarchy wallpapers](assets/screenshots/wallpapers-more.jpg)
+
+**Your agents, tiled.** Claude Code building a web page, Gemini running the
+tests for an API and a second Claude tidying some notes, each in its own
+tile and its own project folder (see
+[Set up your coding agent](docs/GETTING-STARTED.md#set-up-your-coding-agent)):
+
+![Claude Code, Gemini and Claude Code working side by side in tokyo-night](assets/screenshots/agents.jpg)
 
 **Floating TUIs, Omarchy style.** Pickers and glance-and-dismiss tools open
 as floating, centred terminals over the tiles, under the same glass. The
