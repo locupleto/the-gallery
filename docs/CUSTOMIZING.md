@@ -7,6 +7,8 @@ them, and gives short recipes. It links to the reference pages instead of
 repeating them: the [README](../README.md) for what each part is,
 [INSTALL.md](INSTALL.md) for the installer, [THEMES.md](THEMES.md),
 [PLUGINS.md](PLUGINS.md) and [tiler/README.md](../tiler/README.md).
+New to tiling? Start with [GETTING-STARTED.md](GETTING-STARTED.md); common
+problems are answered in [FAQ.md](FAQ.md).
 
 Contents: [What is yours](#what-is-yours-and-what-an-update-overwrites) -
 [Keys](#keys) - [Tiling](#tiling) - [Themes](#themes) -
@@ -148,6 +150,136 @@ Calendar (`super + c`) and the Finder keys (`super + o`) are in
 `tiler.skhd` too, and you can override them the same way. Web apps saved from
 Safari live in `~/Applications`; `open -a` raises the window they already
 have.
+
+### Keyboard layouts
+
+skhd builds its key map from your current keyboard layout and rebuilds it
+(and reloads the config) whenever you switch input source. A letter in a
+binding therefore means "the key that types that letter on your layout".
+`lalt - h` follows the letter H, not a physical position:
+
+- On QWERTZ, `y` and `z` swap places; on AZERTY, `a`/`q` and `z`/`w` swap.
+  The bindings follow the letters, so the keys move with them.
+- On Dvorak or Colemak, `h j k l` are no longer a row, so focus and swap are
+  no longer under your right hand.
+- Named keys (`space`, `return`, `tab`, the arrows) do not depend on the
+  layout.
+
+#### Layouts whose digit row types symbols (AZERTY)
+
+skhd can only look up a character the layout produces without modifiers. If
+it cannot, it silently falls back to keycode 0, the US "A" position. On
+French and Belgian AZERTY the unshifted digit row types `& é " ' ( § è ! ç à`,
+so every `lalt - 1` to `lalt - 9` binding in `tiler.skhd` breaks, and so do the
+`skhd -k "ctrl - N"` strings they send to Mission Control. The `0` in the
+Gallery's plugin keys (`gallery.skhd`) breaks the same way.
+
+The fix is hexadecimal keycodes. They are physical positions, so they do not
+depend on the layout, and skhd accepts them both in bindings and in
+`skhd -k`. The digit row (US positions):
+
+| Digit | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Keycode | `0x12` | `0x13` | `0x14` | `0x15` | `0x17` | `0x16` | `0x1A` | `0x1C` | `0x19` | `0x1D` |
+
+Put this in `~/.config/skhd/local.skhd`. It mirrors the Space lines of
+`tiler.skhd` and the plugin lines of `gallery.skhd`, with hex in both the
+hotkey and the `skhd -k` string:
+
+```sh
+# Switch to Space N (via the Mission Control Ctrl+N shortcut)
+lalt - 0x12 : skhd -k "ctrl - 0x12"
+lalt - 0x13 : skhd -k "ctrl - 0x13"
+lalt - 0x14 : skhd -k "ctrl - 0x14"
+lalt - 0x15 : skhd -k "ctrl - 0x15"
+lalt - 0x17 : skhd -k "ctrl - 0x17"
+lalt - 0x16 : skhd -k "ctrl - 0x16"
+lalt - 0x1A : skhd -k "ctrl - 0x1A"
+lalt - 0x1C : skhd -k "ctrl - 0x1C"
+lalt - 0x19 : skhd -k "ctrl - 0x19"
+
+# Send the window to Space N and follow it
+shift + lalt - 0x12 : yabai -m window --space 1 && skhd -k "ctrl - 0x12"
+shift + lalt - 0x13 : yabai -m window --space 2 && skhd -k "ctrl - 0x13"
+shift + lalt - 0x14 : yabai -m window --space 3 && skhd -k "ctrl - 0x14"
+shift + lalt - 0x15 : yabai -m window --space 4 && skhd -k "ctrl - 0x15"
+shift + lalt - 0x17 : yabai -m window --space 5 && skhd -k "ctrl - 0x17"
+shift + lalt - 0x16 : yabai -m window --space 6 && skhd -k "ctrl - 0x16"
+shift + lalt - 0x1A : yabai -m window --space 7 && skhd -k "ctrl - 0x1A"
+shift + lalt - 0x1C : yabai -m window --space 8 && skhd -k "ctrl - 0x1C"
+shift + lalt - 0x19 : yabai -m window --space 9 && skhd -k "ctrl - 0x19"
+
+# The Gallery's plugin keys on the 0 key
+lalt + shift - 0x1D : "$HOME/bin/gallery" toggle gallery.sysmon
+lalt + ctrl - 0x1D : "$HOME/bin/gallery" toggle gallery.spaces
+lalt + cmd - 0x1D : "$HOME/bin/gallery" toggle akshar.radio-atlas
+```
+
+`local.skhd` is loaded first, so these win. Leave off the `## ` description
+lines: the key sheet keeps listing the shipped `super + 1 ... 9` rows, which
+read better than hex.
+
+The shipped lines stay in `tiler.skhd` and are not harmful, but on AZERTY
+they all resolve to keycode 0, so the key at the US "A" position (it types
+`q`) now also acts as `super + 1` (and `super + shift + 1`, and the plugin
+keys). If that bothers you, switch those keys off after your own lines in
+`local.skhd`. Nothing the Gallery ships binds a letter key at that position
+on AZERTY, so this takes nothing else away; just do not bind `lalt - q`
+yourself afterwards, because skhd resolves it to keycode 0 as well. Do this
+only on AZERTY: on a QWERTY layout keycode 0 is the real `a` key.
+
+```sh
+lalt - 0x00 : true
+shift + lalt - 0x00 : true
+ctrl + lalt - 0x00 : true
+cmd + lalt - 0x00 : true
+```
+
+#### Vim keys by position (Dvorak, Colemak)
+
+If you want `h j k l` to stay a row under your right hand, bind by keycode.
+The US positions are h `0x04`, j `0x26`, k `0x28`, l `0x25`. Mirror the focus
+and swap lines of `tiler.skhd` (the `focus-dir` helper is installed in
+`~/.config/skhd/`):
+
+```sh
+lalt - 0x04 : "$HOME/.config/skhd/focus-dir" focus west  || yabai -m display --focus west
+lalt - 0x26 : "$HOME/.config/skhd/focus-dir" focus south || yabai -m display --focus south
+lalt - 0x28 : "$HOME/.config/skhd/focus-dir" focus north || yabai -m display --focus north
+lalt - 0x25 : "$HOME/.config/skhd/focus-dir" focus east  || yabai -m display --focus east
+
+shift + lalt - 0x04 : "$HOME/.config/skhd/focus-dir" swap west  || (yabai -m window --display west && yabai -m display --focus west)
+shift + lalt - 0x26 : "$HOME/.config/skhd/focus-dir" swap south || (yabai -m window --display south && yabai -m display --focus south)
+shift + lalt - 0x28 : "$HOME/.config/skhd/focus-dir" swap north || (yabai -m window --display north && yabai -m display --focus north)
+shift + lalt - 0x25 : "$HOME/.config/skhd/focus-dir" swap east  || (yabai -m window --display east && yabai -m display --focus east)
+```
+
+The shipped letter lines keep working on wherever those letters now are. If
+you would rather keep the letters, rebind the same commands to whatever keys
+suit your layout.
+
+#### Typing characters on Option
+
+Many layouts type characters with Option: `@` is Option+L on a German
+layout, `{ } [ ] | ~` sit on Option on several others, and Polish and Czech
+use it for diacritics. A left-Option chord the Gallery binds no longer types
+its character; chords it does not bind still do. Either Option key types the
+same characters on macOS, so type characters with the **right** Option: the
+Gallery never binds it. There is no way to free a single left-Option chord,
+because skhd has no unbind and binding it to `: true` swallows it as well.
+tiler/README.md has the [Swedish layout
+note](../tiler/README.md#swedish-keyboard-note) as one example.
+
+#### Finding a keycode
+
+`skhd --observe` (also `skhd -o`) prints the keycode and modifiers of every
+key you press. Run it in a terminal, press the key, and use the printed
+value after the `-` in a binding. Stop it with ctrl-c. Do not run it inside
+a terminal that has Secure Keyboard Entry on.
+
+After editing `local.skhd`, skhd reloads it by itself if the file existed
+when skhd started; otherwise run `skhd --reload` once. Regenerate the key
+sheet with `~/.config/skhd/learn install` (the installer does the same).
 
 ### The Gallery's keys
 

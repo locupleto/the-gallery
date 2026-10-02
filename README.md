@@ -237,6 +237,9 @@ of the permission grants, verification and troubleshooting.
 
 ### Make it yours
 
+New to tiling? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md); common
+problems are in [docs/FAQ.md](docs/FAQ.md).
+
 Your own keys go in `~/.config/skhd/local.skhd`, your own yabai settings in
 `~/.config/yabai/yabairc.local`, and your own themes, plugins, hooks and
 Learn sheets under `~/.config/gallery/`; updates never overwrite those.
@@ -457,6 +460,11 @@ list.
 
 ## Documentation
 
+- [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md): the first half hour: the
+  help keys, a guided walk, the commands you use most, setting up a coding
+  agent.
+- [docs/FAQ.md](docs/FAQ.md): keys that do nothing, Spaces, characters,
+  windows that will not tile, updating and uninstalling.
 - [docs/INSTALL.md](docs/INSTALL.md): step-by-step setup on a new Mac,
   installer flags, permissions in order, verification, updating and
   uninstalling, troubleshooting.
