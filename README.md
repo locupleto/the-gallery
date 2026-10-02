@@ -14,9 +14,8 @@ the Mac you already have.
 
 - **Tiling, the Omarchy way.** New windows tile themselves (yabai). Left
   Option is "super", the keys are Omarchy's (skhd), and the focused window
-  wears an outline in the theme's accent colour (JankyBorders, macOS 14 and
-  later). Can't
-  remember a key? super + space opens the Learn menu, a set of cheat sheets
+  wears an outline in the theme's accent colour (JankyBorders on macOS 14
+  and later, Hammerspoon before that). Can't remember a key? super + space opens the Learn menu, a set of cheat sheets
   that includes one generated from the live key bindings.
 - **One theme, everywhere.** Pick one of Omarchy's themes and it is applied
   to everything at once: your terminal (iTerm2, Ghostty, kitty or WezTerm),
@@ -261,8 +260,8 @@ runs on macOS 12 Monterey and later, on Apple silicon and Intel alike:
 | macOS | What is different |
 |---|---|
 | 14 Sonoma and later | nothing: everything below works |
-| 13 Ventura | no focus outline (JankyBorders needs macOS 14; the installer skips it). Not tested here: if Homebrew has no prebuilt packages for it, use `--minimal` as on Monterey |
-| 12 Monterey | no focus outline; Hammerspoon 1.0.0 and iTerm2 3.6.x installed by hand, kitty instead of Ghostty, and `--minimal` to skip hours of compiling (see [Older Macs](docs/INSTALL.md#prerequisites)) |
+| 13 Ventura | the focus outline is drawn by Hammerspoon, because JankyBorders needs macOS 14 (the installer skips it); it trails a window you drag by a moment. Not tested here: if Homebrew has no prebuilt packages for it, use `--minimal` as on Monterey |
+| 12 Monterey | the Hammerspoon focus outline, as on Ventura; Hammerspoon 1.0.0 and iTerm2 3.6.x installed by hand, kitty instead of Ghostty, and `--minimal` to skip hours of compiling (see [Older Macs](docs/INSTALL.md#prerequisites)) |
 
 
 | Prerequisite | How | Why |

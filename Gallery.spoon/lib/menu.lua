@@ -13,9 +13,9 @@
 --- Items come from manifest.gallery.menu.source, one of:
 ---   {"type":"static","items":[{...}, ...]}
 ---   {"type":"command","command":"/path/bin","args":[...]}
---- For "command", the process is run synchronously (hs.task:start() then
---- :waitUntilExit()) and its stdout is read as one JSON object per line;
---- each decoded line becomes a choice. A line that fails to decode is
+--- For "command", the chooser opens at once and is filled when the process
+--- exits; its stdout is read as one JSON object per line and each decoded
+--- line becomes a choice. A line that fails to decode is
 --- skipped and logged, never raised.
 ---
 --- Each item is expected to look like:
@@ -71,16 +71,15 @@ local function loadStaticItems(sourceCfg)
   return {}
 end
 
---- Run sourceCfg.command (with sourceCfg.args) synchronously via hs.task
---- and parse its stdout as one JSON object per line. Never raises;
---- unparsable lines are skipped and logged.
-local function loadCommandItems(ctx, id, sourceCfg)
-  local items = {}
-
+--- Run sourceCfg.command (with sourceCfg.args) via hs.task and parse its
+--- stdout as one JSON object per line, then call done(items) when it
+--- exits. It never waits for the process (see lib/service.lua's runCommand
+--- for why). Never raises; unparsable lines are skipped and logged.
+local function loadCommandItems(ctx, id, sourceCfg, done)
   local command = sourceCfg.command
   if type(command) ~= "string" or command == "" then
     ctx.log("WARN", "menu source for " .. id .. " has no command")
-    return items
+    return
   end
 
   local args = sourceCfg.args
@@ -88,56 +87,54 @@ local function loadCommandItems(ctx, id, sourceCfg)
     args = {}
   end
 
-  local stdout = ""
   local newOk, task = pcall(hs.task.new, expandHome(command), function(exitCode, out, err)
-    stdout = out or ""
     if exitCode ~= 0 then
       ctx.log("WARN", "menu source command for " .. id .. " exited " .. tostring(exitCode) .. ": " .. tostring(err))
     end
+    local items = {}
+    for line in (out or ""):gmatch("[^\r\n]+") do
+      local trimmed = line:match("^%s*(.-)%s*$")
+      if trimmed ~= "" then
+        local decodeOk, decoded = pcall(hs.json.decode, trimmed)
+        if decodeOk and type(decoded) == "table" then
+          table.insert(items, decoded)
+        else
+          ctx.log("WARN", "menu source line for " .. id .. " is not valid JSON: " .. trimmed)
+        end
+      end
+    end
+    pcall(done, items)
   end, expandArgs(args))
   if not newOk or not task then
     ctx.log("WARN", "failed to create menu source task for " .. id)
-    return items
+    return
   end
 
   local startOk = false
   pcall(function() startOk = task:start() end)
   if not startOk then
     ctx.log("WARN", "failed to start menu source task for " .. id)
-    return items
   end
-  pcall(function() task:waitUntilExit() end)
-
-  for line in stdout:gmatch("[^\r\n]+") do
-    local trimmed = line:match("^%s*(.-)%s*$")
-    if trimmed ~= "" then
-      local decodeOk, decoded = pcall(hs.json.decode, trimmed)
-      if decodeOk and type(decoded) == "table" then
-        table.insert(items, decoded)
-      else
-        ctx.log("WARN", "menu source line for " .. id .. " is not valid JSON: " .. trimmed)
-      end
-    end
-  end
-
-  return items
 end
 
-local function loadItems(ctx, id, menuCfg)
+--- The menu's items: a static list at once, or a command's output when it
+--- arrives. Calls done(items) either way.
+local function loadItems(ctx, id, menuCfg, done)
   local source = menuCfg.source
   if type(source) ~= "table" then
     ctx.log("WARN", "menu " .. id .. " has no gallery.menu.source")
-    return {}
+    done({})
+    return
   end
 
   if source.type == "static" then
-    return loadStaticItems(source)
+    done(loadStaticItems(source))
   elseif source.type == "command" then
-    return loadCommandItems(ctx, id, source)
+    loadCommandItems(ctx, id, source, done)
+  else
+    ctx.log("WARN", "unknown menu source type for " .. id .. ": " .. tostring(source.type))
+    done({})
   end
-
-  ctx.log("WARN", "unknown menu source type for " .. id .. ": " .. tostring(source.type))
-  return {}
 end
 
 local function runAction(ctx, id, action)
@@ -209,7 +206,6 @@ function M.open(ctx, id)
   end
 
   local menuCfg = (manifest.gallery and manifest.gallery.menu) or {}
-  local items = loadItems(ctx, id, menuCfg)
 
   local chooser
   local newOk, newErr = pcall(function()
@@ -225,7 +221,6 @@ function M.open(ctx, id)
     return "error: could not create menu for " .. id
   end
 
-  pcall(function() chooser:choices(items) end)
   pcall(function() chooser:placeholderText(menuCfg.placeholder or "") end)
   pcall(function() chooser:width(menuCfg.width or DEFAULT_WIDTH) end)
   pcall(function() chooser:rows(menuCfg.rows or DEFAULT_ROWS) end)
@@ -234,7 +229,16 @@ function M.open(ctx, id)
   M.choosers[id] = chooser
   pcall(function() chooser:show() end)
 
-  ctx.log("INFO", "opened menu " .. id .. " with " .. tostring(#items) .. " item(s)")
+  -- A command source fills the shown chooser when its output arrives.
+  loadItems(ctx, id, menuCfg, function(items)
+    if M.choosers[id] ~= chooser then
+      return
+    end
+    pcall(function() chooser:choices(items) end)
+    ctx.log("INFO", "menu " .. id .. ": " .. tostring(#items) .. " item(s)")
+  end)
+
+  ctx.log("INFO", "opened menu " .. id)
   return "opened " .. id
 end
 

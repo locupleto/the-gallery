@@ -27,6 +27,10 @@
 # style (style=round) and the pre-hyprland-override fallback constants
 # below (for an older, un-rerendered theme.sh) are still hardcoded here.
 #
+# JankyBorders needs macOS 14. Without it, Hammerspoon draws the outline
+# instead (Gallery.spoon/lib/outline.lua): apply and status then go to the
+# Spoon, which reads the same tokens from state/theme.json.
+#
 # The tiler's yabairc (tiler/yabairc, same repo) prefers this script when
 # it is installed and only falls back to its own hardcoded invocation when
 # it is not (see that file's comment).
@@ -37,6 +41,7 @@
 #                                 (default action)
 #   gallery-borders status    -- print the daemon's pid, active/inactive
 #                                 colour, width, and bright state in use
+#                                 (or the Hammerspoon outline's state)
 #
 set -euo pipefail
 
@@ -190,10 +195,25 @@ launch_detached() {
   disown
 }
 
+# outline_call <apply|status|stop> -- the Hammerspoon outline used when
+# JankyBorders is not installed. Prints its status line; fails quietly when
+# Hammerspoon is not running.
+outline_call() {
+  local hs_wrapper="${HOME}/bin/gallery-hs"
+  if [ ! -x "${hs_wrapper}" ] || ! pgrep -xq Hammerspoon; then
+    echo "Hammerspoon is not running"
+    return 1
+  fi
+  "${hs_wrapper}" -t 5 "return spoon.Gallery and spoon.Gallery:outline('$1') or 'Gallery Spoon not loaded'" 2>/dev/null \
+    || { echo "Hammerspoon did not answer"; return 1; }
+}
+
 cmd_apply() {
-  # No JankyBorders (it needs macOS 14): no outline, and nothing to fail over.
+  # No JankyBorders (it needs macOS 14): Hammerspoon draws the outline.
   if [ ! -x "${BORDERS_BIN}" ]; then
-    echo "gallery-borders: borders is not installed; no focus outline on this Mac" >&2
+    local line
+    line="$(outline_call apply)" || true
+    echo "gallery-borders: no JankyBorders; Hammerspoon outline: ${line}"
     return 0
   fi
 
@@ -234,6 +254,16 @@ cmd_status() {
     read -r bright
   } < <(resolve_border_style)
   pid="$(borders_pid)"
+
+  if [ ! -x "${BORDERS_BIN}" ]; then
+    local line
+    if line="$(outline_call status)" && [ "${line#running}" != "${line}" ]; then
+      echo "Hammerspoon outline ${line}, active ${active} (${hex})"
+      return 0
+    fi
+    echo "Hammerspoon outline ${line}"
+    exit 1
+  fi
 
   bright_label="off"
   [ "${bright}" = "1" ] && bright_label="on"

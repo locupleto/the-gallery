@@ -3756,6 +3756,10 @@ cmd__pause() {
   date '+%Y-%m-%d %H:%M:%S' > "${PAUSED_FILE}"
   command -v yabai >/dev/null 2>&1 && yabai --stop-service >/dev/null 2>&1 || true
   pkill -x borders 2>/dev/null || true
+  # The Hammerspoon outline (Macs without JankyBorders) also goes.
+  if [ -x "${HOME}/bin/gallery-hs" ] && pgrep -xq Hammerspoon; then
+    "${HOME}/bin/gallery-hs" -t 3 "return spoon.Gallery and spoon.Gallery:outline('stop') or ''" >/dev/null 2>&1 || true
+  fi
   desktop_note "Gallery off: plain macOS. shift+ctrl+super+esc (or: gallery on) brings it back."
   echo "Gallery off: tiling, focus outline and keys paused (gallery on, or shift+ctrl+super+escape, to resume)"
 }
@@ -4051,6 +4055,22 @@ else:
     fi
   else
     echo "WARN    yabai has accessibility references (yabai not installed)"
+  fi
+
+  # The focus outline: JankyBorders, or (before macOS 14) the Spoon's own.
+  if [ -x /opt/homebrew/bin/borders ] || [ -x /usr/local/bin/borders ]; then
+    if pgrep -xq borders; then
+      echo "OK      focus outline (JankyBorders running)"
+    elif [ ! -f "${PAUSED_FILE}" ]; then
+      echo "WARN    focus outline (JankyBorders installed but not running; gallery-borders apply starts it)"
+    fi
+  elif command -v hs >/dev/null 2>&1 && [ ! -f "${PAUSED_FILE}" ]; then
+    local outline_line
+    outline_line="$(hs_call "return spoon.Gallery and spoon.Gallery:outline('status') or 'Gallery Spoon not loaded'" 2>/dev/null || true)"
+    case "${outline_line}" in
+      running*) echo "OK      focus outline (drawn by Hammerspoon: ${outline_line})" ;;
+      *) echo "WARN    focus outline (no JankyBorders; Hammerspoon outline ${outline_line:-did not answer}; gallery-borders apply starts it)" ;;
+    esac
   fi
 
   local theme_current_link="${THEME_DIR}/current"

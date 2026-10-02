@@ -76,6 +76,7 @@ local Menu = dofile(resourcePath("lib/menu.lua"))
 local Overlay = dofile(resourcePath("lib/overlay.lua"))
 local Service = dofile(resourcePath("lib/service.lua"))
 local Feed = dofile(resourcePath("lib/feed.lua"))
+local Outline = dofile(resourcePath("lib/outline.lua"))
 
 -- Exposed on the Spoon object itself (not just as local upvalues) so
 -- tests (tests/kinds_test.lua) can introspect each module's own state --
@@ -86,6 +87,7 @@ obj.Panel = Panel -- exposed for tests and tooling; open/close/toggle route by k
 obj.Overlay = Overlay
 obj.Service = Service
 obj.Feed = Feed
+obj.Outline = Outline
 
 Log.path = os.getenv("HOME") .. "/Library/Logs/gallery.log"
 obj.statePath = State.defaultPath()
@@ -291,6 +293,9 @@ function obj:start()
   Service.rescan(self)
   Feed.rescan(self)
 
+  -- The focus outline, on Macs where JankyBorders cannot run.
+  pcall(Outline.start, self)
+
   pcall(function()
     hs.fs.mkdir(os.getenv("HOME") .. "/.config/gallery/state")
     local f = io.open(self.readyPath, "w")
@@ -317,8 +322,26 @@ function obj:stop()
 
   Service.stopAll()
   Feed.stopAll()
+  pcall(Outline.stop)
 
   return self
+end
+
+--- The focus outline drawn here when JankyBorders is not installed (see
+--- lib/outline.lua). verb: "apply" re-reads the theme and starts, restyles
+--- or stops it to match; "stop" removes it; "status" describes it. Returns
+--- the status line.
+function obj:outline(verb)
+  if verb == "apply" then
+    local ok, t = pcall(Theme.load, self.themesDir)
+    if ok and type(t) == "table" then
+      self.theme = t
+    end
+    pcall(Outline.apply, self)
+  elseif verb == "stop" then
+    pcall(Outline.stop)
+  end
+  return Outline.status()
 end
 
 --- True if id should be considered enabled (see lib/state.lua).
@@ -794,6 +817,7 @@ function obj:themeReload()
   end
 
   self.theme = newTheme
+  pcall(Outline.apply, self)
 
   local cssOk, css = pcall(Theme.cssVariables, newTheme)
   if not cssOk or type(css) ~= "string" then

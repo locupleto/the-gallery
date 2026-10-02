@@ -6,7 +6,8 @@ automatically (binary space partitioning, gaps, the 7:5 house split) and
 [skhd](https://github.com/asmvik/skhd) adds keyboard control with **left
 Option as "super"**, the same muscle memory as Hyprland. JankyBorders draws a
 crisp accent outline around the focused window, following the active Gallery
-theme when the Gallery is installed. The Learn sheet (`super + space`) is
+theme when the Gallery is installed (before macOS 14, where JankyBorders
+cannot run, the Gallery's Hammerspoon Spoon draws it instead). The Learn sheet (`super + space`) is
 Omarchy's cheat-sheet menu, rebuilt on this desk -- see "Learn" below.
 
 ## Install

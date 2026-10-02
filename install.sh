@@ -223,6 +223,22 @@ install_companion_apps() {
   done
 }
 
+# jq: the Ghost Windows service reads yabai's JSON with it. macOS 15 and later
+# ship /usr/bin/jq; older systems need it from Homebrew. Needed even with
+# --minimal, and quick to build where Homebrew has no prebuilt package.
+install_jq() {
+  if command -v jq >/dev/null 2>&1; then
+    echo "[gallery] jq found ($(command -v jq))"
+    return 0
+  fi
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "[gallery] jq not found and no Homebrew -- the Ghost Windows check needs it: brew install jq" >&2
+    return 0
+  fi
+  run brew install jq \
+    || echo "[gallery] brew install jq failed -- the Ghost Windows check will not work without it" >&2
+}
+
 # Optional tools used by individual tui plugins. Missing ones only degrade
 # the plugin that needs them, so this is advisory, never fatal.
 advise_optional_tools() {
@@ -445,6 +461,7 @@ fi
 
 require_hammerspoon
 require_homebrew
+install_jq
 install_companion_apps
 advise_optional_tools
 

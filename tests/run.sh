@@ -104,6 +104,11 @@ if ! printf '%s\n' "${manifest_out}" | grep -q "^PASS "; then
 fi
 say "manifest_test.lua OK"
 
+say "running tests/outline_test.lua through hs"
+outline_out="$(run_hs_file 30 "${SCRIPT_DIR}/outline_test.lua")"
+printf '%s\n' "${outline_out}"
+printf '%s\n' "${outline_out}" | grep -q "^PASS " || fail "outline_test.lua did not report PASS"
+
 say "running tests/theme_test.lua through hs"
 theme_out="$(run_hs_file 30 "${SCRIPT_DIR}/theme_test.lua")"
 printf '%s\n' "${theme_out}"

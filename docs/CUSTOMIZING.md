@@ -415,7 +415,9 @@ if you add or remove a Space in Mission Control. The template is
 
 ### The focus outline
 
-JankyBorders draws the outline on the focused window. The colour comes from the
+JankyBorders draws the outline on the focused window. Before macOS 14, where
+JankyBorders cannot run, Hammerspoon draws it instead, from the same settings.
+The colour comes from the
 theme: its `hyprland_active_border` key if it has one, else `accent`
 ([THEMES.md](THEMES.md#authoring-a-theme)). You set the shape:
 
@@ -429,6 +431,11 @@ Both are kept in `state/borders.json` and re-applied on every theme change.
 In the theme picker, `ctrl-w` cycles the width (3, 5, 8, 12) and `ctrl-b`
 toggles bright. To change the outline for one theme only, give that theme a
 `hyprland_active_border` (a gradient is allowed) in its `colors.toml`.
+
+`gallery borders status` says which of the two draws the outline. The
+Hammerspoon one follows window events, so it trails a window being dragged by
+a moment and is drawn above other windows; `gallery off` removes it along with
+the tiling.
 
 ## Themes
 

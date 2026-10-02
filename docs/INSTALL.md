@@ -46,14 +46,19 @@ Notes:
     Ghostty needs macOS 13. kitty still supports macOS 12 (0.49 does) and is
     the best of the supported terminals there: `gallery terminal set kitty`,
     then `gallery console theme` for its colours.
-  - JankyBorders needs macOS 14, so there is no focus outline before Sonoma;
-    the installer skips it and says so.
+  - JankyBorders needs macOS 14, so the installer skips it before Sonoma and
+    Hammerspoon draws the focus outline instead. It takes the same colour and
+    width, and `gallery borders` sets it the same way. It is not quite as
+    smooth: while you drag or resize a window the outline follows a moment
+    behind, and it sits above other windows rather than just under them.
   - Homebrew no longer has prebuilt packages for macOS 12 and builds from
     source. That is quick for yabai and skhd and takes a few minutes for fzf
     and glow (Go), but btop pulls in LLVM, which takes hours on an old Mac:
     run `./install.sh --minimal` to leave btop and superfile out.
   - The macOS Python 3 (3.9 on Monterey) is enough for the theme renderer;
     nothing else needs installing for it.
+  - macOS 15 and later include `jq`; on older systems the installer brews it
+    (the Ghost Windows check needs it), even with `--minimal`.
   - On a Homebrew that has never installed an app (a cask), the first one asks
     for your password, because Homebrew must create `/usr/local/Caskroom`;
     run it in a terminal on that Mac, for example

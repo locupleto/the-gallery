@@ -137,12 +137,13 @@ for f in yabai skhd; do
 done
 # JankyBorders (borders): draws the accent outline around the focused window
 # (launched from yabairc). Needs no scripting addition, so SIP stays enabled.
-# JankyBorders needs macOS 14; on older systems the tiler runs without the
-# outline (yabairc and gallery-borders start it only when it is installed).
+# JankyBorders needs macOS 14; on older systems the Gallery's Hammerspoon
+# Spoon draws the outline instead (Gallery.spoon/lib/outline.lua), and a
+# tiler-only install has none.
 if brew list --formula borders >/dev/null 2>&1; then
     echo "[tiler] borders already installed ($(brew list --versions borders))"
 elif [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 14 ]; then
-    echo "[tiler] macOS $(sw_vers -productVersion): JankyBorders needs macOS 14 or later, so there is no focus outline on this Mac"
+    echo "[tiler] macOS $(sw_vers -productVersion): JankyBorders needs macOS 14 or later; the Gallery draws the focus outline with Hammerspoon instead"
 else
     run brew install "FelixKratz/formulae/borders"
 fi

@@ -16,9 +16,9 @@
 ---
 --- Each enabled bar-widget-kind plugin gets manifest.gallery.widget.command
 --- (with .args) run every manifest.gallery.widget.interval seconds
---- (default 10) via hs.timer.doEvery, synchronously from this module's
---- point of view (hs.task:start() then :waitUntilExit()) so M.runNow(id)
---- can be used by tests without racing the task's completion callback.
+--- (default 10) via hs.timer.doEvery. A run finishes in the task's
+--- completion callback, which writes the feed file; a run still going at
+--- the next tick is not doubled.
 ---
 --- The command's stdout is parsed as JSON; if it doesn't decode to a
 --- table it is wrapped as {"text": <trimmed stdout>} instead (per the
@@ -102,13 +102,23 @@ local function runCommand(ctx, id, record, cfg)
     return
   end
 
-  local exitCode, stdout
+  if record.task then
+    return
+  end
+
+  -- Finishes in the completion callback rather than waiting for the
+  -- process; see the note in lib/service.lua's runCommand.
   local newOk, task = pcall(hs.task.new, command, function(code, out, err)
-    exitCode = code
-    stdout = out
+    record.task = nil
     if code ~= 0 then
       ctx.log("WARN", "widget " .. id .. " exited " .. tostring(code) .. ": " .. tostring(err))
     end
+    if M.widgets[id] ~= record then
+      return
+    end
+    record.lastRun = os.time()
+    record.code = code
+    pcall(writeFeed, ctx, id, out)
   end, args)
 
   if not newOk or not task then
@@ -122,25 +132,7 @@ local function runCommand(ctx, id, record, cfg)
     ctx.log("WARN", "failed to start task for widget " .. id)
     return
   end
-  pcall(function() task:waitUntilExit() end)
-
-  -- hs.task:waitUntilExit() only guarantees the OS process has exited, not
-  -- that the completion callback above has already run (observed by hand:
-  -- under heavy system load the two can be seconds apart) -- so the exit
-  -- code comes from task:terminationStatus(), available the moment the
-  -- process exits, rather than the callback's `code` upvalue, which may
-  -- still be nil here. stdout has no such synchronous accessor and stays
-  -- best-effort: if the callback truly hasn't run yet, writeFeed below
-  -- falls back to {"text": ""} for this tick rather than raising, and the
-  -- next tick (or the next runNow) picks up cleanly.
-  local statusOk, terminationStatus = pcall(function() return task:terminationStatus() end)
-  if statusOk and terminationStatus ~= nil then
-    exitCode = terminationStatus
-  end
-
-  record.lastRun = os.time()
-  record.code = exitCode
-  writeFeed(ctx, id, stdout)
+  record.task = task
 end
 
 --- Schedule (or reschedule) id's widget timer. No-op if id is unknown,
@@ -225,8 +217,9 @@ function M.rescan(ctx)
   end
 end
 
---- Force an immediate run of id's command, bypassing its timer. Exposed
---- for tests (see tests/kinds_test.lua). Requires id to already have a
+--- Start an immediate run of id's command, bypassing its timer; the feed
+--- file is written when it exits. Exposed for tests (see
+--- tests/kinds_test.lua). Requires id to already have a
 --- running widget (i.e. M.start has scheduled it).
 function M.runNow(id)
   local record = M.widgets[id]

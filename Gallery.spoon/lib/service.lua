@@ -12,12 +12,11 @@
 ---
 --- Each enabled service-kind plugin gets manifest.gallery.service.command
 --- (with .args) run every manifest.gallery.service.interval seconds
---- (default 60, floored at 5) via hs.timer.doEvery. Each run is
---- synchronous from this module's point of view (hs.task:start() then
---- :waitUntilExit()) so a run's result -- and the heartbeat file write
---- that follows it -- is never split across two event-loop turns; this
---- also lets M.runNow(id) be used by tests without a race against the
---- task's completion callback. On a non-zero exit with
+--- (default 60, floored at 5) via hs.timer.doEvery. A run finishes in
+--- the task's completion callback (see runCommand for why it never waits
+--- on the process), which records the result and writes the heartbeat. A
+--- run still going when the next tick comes is not doubled. On a non-zero
+--- exit with
 --- manifest.gallery.service.restartOnFailure true, retries after 5s up to
 --- 3 times before giving up and logging.
 ---
@@ -111,13 +110,51 @@ runCommand = function(ctx, id, record, cfg)
     command = os.getenv("HOME") .. command:sub(2)
   end
 
-  local exitCode, stdout
+  -- One run at a time: a slow command is not started again on top of itself.
+  if record.task then
+    return
+  end
+
+  -- The run finishes in the completion callback, never by waiting for the
+  -- process: hs.task:waitUntilExit() spins the run loop, other Lua callbacks
+  -- (timers, window events) run inside it, and Hammerspoon then crashes in
+  -- the waiting call (seen on 1.0.0, macOS 12, with the focus outline's
+  -- timers running).
+  local function finish(exitCode, stdout)
+    record.task = nil
+    if M.services[id] ~= record then
+      return
+    end
+    record.lastRun = os.time()
+    record.code = exitCode
+    record.stdoutTail = tailString(stdout, STDOUT_TAIL_BYTES)
+    writeHeartbeat(id, record)
+
+    if exitCode ~= nil and exitCode ~= 0 then
+      if cfg.restartOnFailure and record.retries < MAX_RETRIES then
+        record.retries = record.retries + 1
+        record.restarts = record.restarts + 1
+        ctx.log("INFO", "service " .. id .. " restart " .. record.retries .. "/" .. MAX_RETRIES .. " in " .. RETRY_DELAY .. "s")
+        record.retryTimer = hs.timer.doAfter(RETRY_DELAY, function()
+          if M.services[id] == record then
+            runCommand(ctx, id, record, cfg)
+          end
+        end)
+      elseif cfg.restartOnFailure then
+        record.failed = true
+        ctx.log("ERROR", "service " .. id .. " failed after " .. MAX_RETRIES .. " restarts; giving up")
+      end
+    else
+      record.retries = 0
+      record.failed = false
+    end
+  end
+
   local newOk, task = pcall(hs.task.new, command, function(code, out, err)
-    exitCode = code
-    stdout = out
     if code ~= 0 then
       ctx.log("WARN", "service " .. id .. " exited " .. tostring(code) .. ": " .. tostring(err))
     end
+    pcall(finish, code, out)
   end, args)
 
   if not newOk or not task then
@@ -131,44 +168,7 @@ runCommand = function(ctx, id, record, cfg)
     ctx.log("WARN", "failed to start task for service " .. id)
     return
   end
-  pcall(function() task:waitUntilExit() end)
-
-  -- hs.task:waitUntilExit() only guarantees the OS process has exited, not
-  -- that the completion callback above has already run (observed by hand:
-  -- under heavy system load the two can be seconds apart) -- so the exit
-  -- code comes from task:terminationStatus(), which is available the
-  -- moment the process exits, rather than from the callback's `code`
-  -- upvalue, which may still be nil here. stdout has no such synchronous
-  -- accessor and stays best-effort (nil if the callback truly hasn't run
-  -- yet); see the same note in lib/feed.lua.
-  local statusOk, terminationStatus = pcall(function() return task:terminationStatus() end)
-  if statusOk and terminationStatus ~= nil then
-    exitCode = terminationStatus
-  end
-
-  record.lastRun = os.time()
-  record.code = exitCode
-  record.stdoutTail = tailString(stdout, STDOUT_TAIL_BYTES)
-  writeHeartbeat(id, record)
-
-  if exitCode ~= nil and exitCode ~= 0 then
-    if cfg.restartOnFailure and record.retries < MAX_RETRIES then
-      record.retries = record.retries + 1
-      record.restarts = record.restarts + 1
-      ctx.log("INFO", "service " .. id .. " restart " .. record.retries .. "/" .. MAX_RETRIES .. " in " .. RETRY_DELAY .. "s")
-      record.retryTimer = hs.timer.doAfter(RETRY_DELAY, function()
-        if M.services[id] == record then
-          runCommand(ctx, id, record, cfg)
-        end
-      end)
-    elseif cfg.restartOnFailure then
-      record.failed = true
-      ctx.log("ERROR", "service " .. id .. " failed after " .. MAX_RETRIES .. " restarts; giving up")
-    end
-  else
-    record.retries = 0
-    record.failed = false
-  end
+  record.task = task
 end
 
 --- Schedule (or reschedule) id's service timer. No-op if id is unknown,
@@ -237,6 +237,7 @@ function M.stop(id)
   if record.retryTimer then
     pcall(function() record.retryTimer:stop() end)
   end
+  -- A run in flight finishes on its own; finish() ignores a stopped record.
   M.services[id] = nil
 end
 
@@ -263,9 +264,9 @@ function M.rescan(ctx)
   end
 end
 
---- Force an immediate run of id's command, bypassing its timer. Exposed
---- for tests (see tests/kinds_test.lua) so a heartbeat can be asserted
---- without waiting up to a full interval. Requires id to already have a
+--- Start an immediate run of id's command, bypassing its timer. It returns
+--- at once; the heartbeat is written when the command exits. Exposed for
+--- tests (see tests/kinds_test.lua). Requires id to already have a
 --- running service (i.e. M.start has scheduled it).
 function M.runNow(id)
   local record = M.services[id]

@@ -171,7 +171,8 @@ Obsidian: no. Learn reads plain markdown files from
 
 Yes. On an Intel Mac with a current macOS nothing is different. macOS 12
 Monterey and 13 Ventura work too, with older Hammerspoon and iTerm2 builds,
-kitty as the best terminal, no focus outline before macOS 14, and
+kitty as the best terminal, a focus outline drawn by Hammerspoon instead of
+JankyBorders before macOS 14, and
 `./install.sh --minimal` to avoid hours of compiling. The details are under
 "Older Macs" in [INSTALL.md](INSTALL.md#prerequisites).
 
