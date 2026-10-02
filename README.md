@@ -176,8 +176,7 @@ btop (the System Monitor plugin) and superfile (a themed `spf` file manager)
 unless run with `--minimal`, renders the current theme, and starts
 Hammerspoon. macOS then asks for Accessibility (Hammerspoon, yabai, skhd)
 and a few Automation grants by hand; `gallery doctor` lists what is still
-missing. Updating later
-is `git pull` followed by the same `./install.sh`.
+missing. Updating later is `git pull` followed by the same `./install.sh`.
 
 ## Tiling and hotkeys
 
@@ -206,7 +205,7 @@ gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery ghosts [list] | fix [OWNER|ID] | forget |
-gallery agent [open] | inline | status | list | set <name> |
+gallery agent [open] | inline | status | list | set <name> | dir [<path>|--clear] |
 gallery reload | log | doctor | install
 ```
 
@@ -299,12 +298,13 @@ render. Inside the theme picker, `ctrl-w` cycles width through the presets
 
 `agent ...` launches a coding agent in a terminal window, modelled on
 Omarchy 4's `omarchy-agent`. `shift+ctrl+super+a` — Omarchy's own keys — opens
-the default agent in `$HOME` (set `GALLERY_AGENT_DIR` to start somewhere
-else, e.g. the directory holding all your repos; if it is unreachable the
-agent starts in `$HOME` rather than not at all). Omarchy starts in
-`$HOME/Work` because an agent will not remember a trust decision for `$HOME`:
-pointing `GALLERY_AGENT_DIR` at one directory holding every repo means one
-approval instead of one per session. Like Omarchy, each agent is started with its own spelling of
+the default agent in `$HOME`, or in the directory recorded with `gallery
+agent dir <path>` (per machine; `GALLERY_AGENT_DIR` overrides it, and if it
+is unreachable the agent starts in `$HOME` rather than not at all). Omarchy
+starts in `$HOME/Work` because an agent will not remember a trust decision
+for `$HOME`: pointing it at one directory holding every repo means one
+approval instead of one per session. Like Omarchy, each agent is started with
+its own spelling of
 "do not stop to ask" — `claude --permission-mode bypassPermissions`, `gemini
 --yolo`, `opencode --auto`, and so on — because a keypress-launched agent that
 waits for an approval it cannot show is useless. That is a deliberate posture:

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Cheat sheets on a key — Omarchy's "Learn" menu for this desk.
 #
-# The sheets are markdown notes in one folder (an Obsidian vault's Cheat-Sheets
-# by default, or $LEARN_SHEETS; one source, read in place, never copied). The only generated one is Tiler-Keys.md, built
-# from the "## description" lines in tiler/skhdrc so the sheet can never drift
-# from the bindings. Sheets render in a floating, centred iTerm window (glow
-# rendering, paged by fzf; q or Esc closes it). Doors: super+space (menu), super+shift+space (tiler
-# keys), and "Learn" in Spotlight (~/Applications/Learn.app).
+# The sheets are markdown notes in one folder (an Obsidian vault's
+# Cheat-Sheets by default, or $LEARN_SHEETS; one source, read in place, never
+# copied). The only generated one is Tiler-Keys.md, built from the
+# "## description" lines in tiler/skhdrc so the sheet can never drift from the
+# bindings. Sheets render in a floating, centred iTerm window (glow rendering,
+# paged by fzf; q or Esc closes it). Doors: super+space (menu),
+# super+shift+space (tiler keys), and "Learn" in Spotlight
+# (~/Applications/Learn.app).
 #
 #   learn open menu|show <Sheet>   open a floating iTerm window running the command
 #                                  (centred on the display that has focus)
