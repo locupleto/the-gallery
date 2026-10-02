@@ -11,6 +11,7 @@
 # instead of handing it to iTerm.
 #
 set -euo pipefail
+export GALLERY_NO_NOTIFY=1   # no real notifications from the missing-agent path
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"

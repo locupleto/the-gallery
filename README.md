@@ -261,6 +261,7 @@ Have these in place on a new Mac before running the installer:
 | A terminal: iTerm2, Ghostty, kitty or WezTerm | `brew install --cask iterm2` (or `ghostty`, `kitty`, `wezterm`) | every floating TUI window, Learn, `super+return` and the agent window; see Terminals |
 | Hammerspoon | `brew install --cask hammerspoon` | the plugin host (the installer refuses to run without Hammerspoon.app) |
 | *Optional:* a folder of markdown sheets | — | the Learn menu reads them; Obsidian is not required (see Learn) |
+| *Optional:* a coding agent | `brew install --cask claude-code` (or Codex, Gemini, opencode, ...) | the agent key, shift + ctrl + super + a; see `gallery agent list` |
 | *Optional:* chafa, uv | `brew install chafa uv` | picker previews; the venv for the `qml` kind |
 
 The stock `/bin/bash` 3.2 is enough.

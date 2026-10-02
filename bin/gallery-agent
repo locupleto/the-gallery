@@ -277,9 +277,13 @@ case "${1:-open}" in
   open)
     # Checked here as well as in `launch`, so a missing agent is reported in
     # the terminal the key was pressed from instead of in a window that
-    # opens and closes again before it can be read.
+    # opens and closes again before it can be read. From the key there is no
+    # terminal, so it is also shown as a notification.
     a="$(current_agent)"
-    command -v "$(agent_program "$a")" >/dev/null 2>&1 || die "${a} is not installed (gallery agent list)"
+    if ! command -v "$(agent_program "$a")" >/dev/null 2>&1; then
+      [ -n "${GALLERY_NO_NOTIFY:-}" ] || /usr/bin/osascript -e "display notification \"${a} is not installed. Install it, or choose another agent: gallery agent list\" with title \"Gallery: no coding agent\"" >/dev/null 2>&1 || true
+      die "${a} is not installed (gallery agent list)"
+    fi
     open_window "${SELF}"
     ;;
   inline|launch)
