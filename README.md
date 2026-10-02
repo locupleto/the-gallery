@@ -149,29 +149,37 @@ left alone by the installer.
 
 ## Install
 
+### Prerequisites
+
+Have these in place on a new Mac before running the installer:
+
+| Prerequisite | How | Why |
+|---|---|---|
+| **Homebrew** | [brew.sh](https://brew.sh) | the installer brews everything else; it stops up front if `brew` is missing |
+| A GitHub SSH key | — | to clone this (private) repo |
+| iTerm2 + Hammerspoon | `brew install --cask iterm2 hammerspoon` | every floating TUI window; the plugin host (the installer refuses to run without Hammerspoon.app) |
+| The Obsidian vault, synced | — | the Learn menu reads its sheets from it |
+| *Optional:* chafa, uv | `brew install chafa uv` | picker previews; the venv for the `qml` kind |
+
+The stock `/bin/bash` 3.2 is enough.
+
+### Running it
+
 ```sh
 ./install.sh
 ```
 
 This copies the Spoon and bundled plugins onto the boot volume (see the
 rationale comment in `install.sh` for why they are copied rather than
-symlinked) and wires `~/.hammerspoon/init.lua` to load Gallery.
-
-On a new Mac, before running it: Homebrew, a GitHub SSH key, iTerm2 and
-Hammerspoon (`brew install --cask iterm2 hammerspoon`; the installer refuses
-to run without Hammerspoon.app), and the Obsidian vault synced (the Learn
-menu reads its sheets from it). Optional but wanted for the full experience:
-`brew install chafa uv` (picker previews, the `qml` kind). The
-script itself installs yabai, skhd, JankyBorders, fzf and glow, plus the
-companion apps btop (the System Monitor plugin) and superfile (a themed
-`spf` file manager) unless run with `--minimal`, copies
-everything it needs onto the boot volume, renders the current theme, and
-starts Hammerspoon; the stock `/bin/bash` 3.2 is enough. macOS then asks for
-Accessibility (Hammerspoon, yabai, skhd) and a few Automation grants by
-hand; `gallery doctor` lists what is still missing. The step-by-step
-walkthrough, validated on a second Mac, is the vault note
-`Projects/The-Gallery/Installing-On-A-New-Mac.md`. Updating later is `git
-pull` followed by the same `./install.sh`.
+symlinked) and wires `~/.hammerspoon/init.lua` to load Gallery. It also
+installs yabai, skhd, JankyBorders, fzf and glow, plus the companion apps
+btop (the System Monitor plugin) and superfile (a themed `spf` file manager)
+unless run with `--minimal`, renders the current theme, and starts
+Hammerspoon. macOS then asks for Accessibility (Hammerspoon, yabai, skhd)
+and a few Automation grants by hand; `gallery doctor` lists what is still
+missing. The step-by-step walkthrough, validated on a second Mac, is the
+vault note `Projects/The-Gallery/Installing-On-A-New-Mac.md`. Updating later
+is `git pull` followed by the same `./install.sh`.
 
 ## Tiling and hotkeys
 
