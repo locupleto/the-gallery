@@ -88,6 +88,7 @@ WIDGETS_STATE_PATH = STATE_DIR / "widgets.json"
 FONT_STATE_PATH = STATE_DIR / "font.json"
 CRYSTAL_CSS_PATH = STATE_DIR / "crystal.css"
 BORDERS_STATE_PATH = STATE_DIR / "borders.json"
+GLASS_STATE_PATH = STATE_DIR / "glass.json"
 ITERM_CONSOLE_PROFILE_PATH = ITERM_DYNAMIC_PROFILES_DIR / "gallery-console.json"
 BTOP_CONFIG_DIR = Path.home() / ".config" / "btop"
 BTOP_THEME_PATH = BTOP_CONFIG_DIR / "themes" / "gallery.theme"
@@ -677,9 +678,9 @@ def render_iterm_profile(tokens: dict, name: str, font_normal: str | None) -> st
         # The same glass as the themed console, so a floating TUI reads like
         # the tiles behind it -- Omarchy applies one opacity rule to every
         # window, floating or tiled.
-        "Transparency": CONSOLE_TRANSPARENCY,
-        "Blur": True,
-        "Blur Radius": CONSOLE_BLUR_RADIUS,
+        "Transparency": glass_prefs()[0],
+        "Blur": glass_prefs()[1] > 0,
+        "Blur Radius": glass_prefs()[1],
     }
     for i in range(16):
         profile[f"Ansi {i} Color"] = iterm_color_dict(tokens[f"color{i}"])
@@ -695,9 +696,59 @@ def render_iterm_profile(tokens: dict, name: str, font_normal: str | None) -> st
 
 
 # iTerm2 "Transparency" is 0.0 (solid) .. 1.0 (invisible); "Blur Radius" is
-# the frosted-glass radius iTerm applies behind a transparent window.
+# the frosted-glass radius iTerm applies behind a transparent window. These two
+# are the DEFAULTS; `gallery glass set` records the user's own in
+# GLASS_STATE_PATH (read by glass_prefs below, which every renderer uses).
 CONSOLE_TRANSPARENCY = 0.12
 CONSOLE_BLUR_RADIUS = 9.0
+GLASS_MAX_TRANSPARENCY = 0.9   # 1.0 would be an invisible window
+GLASS_MAX_BLUR = 64.0
+
+_glass_cache: tuple[float, float] | None = None
+
+
+def read_glass_prefs() -> tuple[float, float]:
+    """(transparency, blur radius) from GLASS_STATE_PATH, {"transparency":
+    0.0-0.9, "blur": 0-64}. A missing file or key means the defaults above,
+    silently. A file that is not a JSON object, or a value that is not a
+    number, warns on stderr and falls back to the default for it (a render
+    must never fail over a hand-edited pref); numbers outside the range are
+    clamped."""
+    transparency, blur = CONSOLE_TRANSPARENCY, CONSOLE_BLUR_RADIUS
+    try:
+        text = GLASS_STATE_PATH.read_text()
+    except OSError:
+        return transparency, blur
+    try:
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("not a JSON object")
+    except ValueError as exc:
+        print(f"render-theme: ignoring {GLASS_STATE_PATH}: {exc}; using the default glass", file=sys.stderr)
+        return transparency, blur
+
+    def number(key: str, default: float, hi: float) -> float:
+        if key not in data:
+            return default
+        v = data[key]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            print(f"render-theme: {GLASS_STATE_PATH}: {key} must be a number; using {default:g}", file=sys.stderr)
+            return default
+        return float(max(0.0, min(hi, v)))
+
+    return (
+        round(number("transparency", transparency, GLASS_MAX_TRANSPARENCY), 2),
+        number("blur", blur, GLASS_MAX_BLUR),
+    )
+
+
+def glass_prefs() -> tuple[float, float]:
+    """read_glass_prefs once per process, so a bad file warns once, not once
+    per output file."""
+    global _glass_cache
+    if _glass_cache is None:
+        _glass_cache = read_glass_prefs()
+    return _glass_cache
 
 
 def render_iterm_console_profile(
@@ -740,9 +791,9 @@ def render_iterm_console_profile(
         # Window glass, stated here rather than inherited: the user's Default
         # profile carries ~20% transparency + blur, which read too light over
         # a bright wallpaper. Keep the blur, darken the tint (less see-through).
-        profile["Transparency"] = CONSOLE_TRANSPARENCY
-        profile["Blur"] = True
-        profile["Blur Radius"] = CONSOLE_BLUR_RADIUS
+        profile["Transparency"] = glass_prefs()[0]
+        profile["Blur"] = glass_prefs()[1] > 0
+        profile["Blur Radius"] = glass_prefs()[1]
         profile["Background Color"] = iterm_color_dict(tokens["background"])
         profile["Foreground Color"] = iterm_color_dict(tokens["foreground"])
         profile["Bold Color"] = iterm_color_dict(tokens["foreground"])
@@ -766,8 +817,8 @@ def render_iterm_console_profile(
 # whatever terminal is configured (they are cheap, and `gallery terminal set`
 # can then switch without a render of its own order). Each maps the same
 # Gallery tokens: the 16 ANSI colours, background/foreground, cursor, the
-# selection pair, the shared glass (CONSOLE_TRANSPARENCY inverted into an
-# opacity, CONSOLE_BLUR_RADIUS) and -- only while `gallery font set` holds a
+# selection pair, the shared glass (the transparency from glass_prefs inverted
+# into an opacity, plus its blur radius) and -- only while `gallery font set` holds a
 # preference -- the font family and size. bin/gallery-term reads two more
 # outputs: gallery-osc.sh (the palette as OSC escapes, for a float window on a
 # terminal with no per-window config) and glass.env (the glass values, for
@@ -779,7 +830,7 @@ TERMINALS_DIR = STATE_DIR / "terminals"
 def glass_opacity() -> float:
     """The window opacity every terminal gets: iTerm2's Transparency is
     0.0 (solid) .. 1.0 (invisible), the other terminals take the opposite."""
-    return round(1.0 - CONSOLE_TRANSPARENCY, 2)
+    return round(1.0 - glass_prefs()[0], 2)
 
 
 def render_ghostty_conf(tokens: dict, name: str, font_prefs: dict | None) -> str:
@@ -799,7 +850,7 @@ def render_ghostty_conf(tokens: dict, name: str, font_prefs: dict | None) -> str
         f"selection-background = {tokens['selection_background']}",
         f"selection-foreground = {tokens['selection_foreground']}",
         f"background-opacity = {glass_opacity():g}",
-        f"background-blur = {int(CONSOLE_BLUR_RADIUS)}",
+        f"background-blur = {int(glass_prefs()[1])}",
     ]
     if font_prefs:
         lines.append(f'font-family = "{font_prefs["family"]}"')
@@ -825,7 +876,7 @@ def render_kitty_conf(tokens: dict, name: str, font_prefs: dict | None) -> str:
         lines.append(f"color{i} {tokens[f'color{i}']}")
     lines += [
         f"background_opacity {glass_opacity():g}",
-        f"background_blur {int(CONSOLE_BLUR_RADIUS)}",
+        f"background_blur {int(glass_prefs()[1])}",
     ]
     if font_prefs:
         lines.append(f"font_family {font_prefs['family']}")
@@ -874,7 +925,7 @@ def render_wezterm_lua(
         f"    brights = {brights},",
         "  },",
         f"  window_background_opacity = {glass_opacity():g},",
-        f"  macos_window_background_blur = {int(CONSOLE_BLUR_RADIUS)},",
+        f"  macos_window_background_blur = {int(glass_prefs()[1])},",
         # One tab, no tab bar: a Gallery window reads like the other terminals'.
         "  hide_tab_bar_if_only_one_tab = true,",
     ]
@@ -911,7 +962,7 @@ def render_osc_script(tokens: dict, name: str) -> str:
 
 
 def render_glass_env() -> str:
-    return f"opacity={glass_opacity():g}\nblur={int(CONSOLE_BLUR_RADIUS)}\n"
+    return f"opacity={glass_opacity():g}\nblur={int(glass_prefs()[1])}\n"
 
 
 def find_gallery_term() -> str | None:

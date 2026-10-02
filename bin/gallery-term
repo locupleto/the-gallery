@@ -208,7 +208,9 @@ cold_start() {
   sleep 1
 }
 
-# glass_value KEY DEFAULT -- from state/terminals/glass.env (render-theme.py).
+# glass_value KEY DEFAULT -- from state/terminals/glass.env (render-theme.py, which
+# applies the user's `gallery glass` setting). DEFAULT is only for a machine that
+# has not rendered yet: keep it equal to the renderer's default glass (0.12 -> 0.88, 9).
 glass_value() {
   local v=""
   [ -f "${TERMINALS_DIR}/glass.env" ] \
