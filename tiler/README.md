@@ -81,9 +81,9 @@ tile swaps.
 
 On the Swedish layout the Option key types `@` (⌥2), `|` (⌥7), `[` `]` (⌥8/9)
 and `{` `}` (⌥⇧8/9). Only the **left** Option is bound here, so type those
-symbols with the **right** Option — exactly like AltGr on Linux. Because of
-that, the author's voice assistant's push-to-talk is the **right
-Command** key (`PTT_KEY=cmd_r` in its LaunchAgent), no longer right Option.
+symbols with the **right** Option — exactly like AltGr on Linux. Anything
+else that wants a hold-to-talk or similar modifier key should use right
+Command, not right Option.
 
 
 ## Tree repair (automatic)
@@ -161,14 +161,14 @@ Enter renders the chosen one with glow, `q` or Esc closes. Three doors:
   built by `tiler/learn install` (first launch: allow "Learn wants to control iTerm2").
 
 One source per sheet: the notes are plain markdown files read in place from
-one folder, never copied, and an evicted iCloud note is fetched first.
-Obsidian is optional. The folder is `LEARN_SHEETS` if set, else
-`Cheat-Sheets` inside `OBSIDIAN_VAULT`, else inside the default iCloud vault
-(`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault`) when
-that exists, else `~/.config/gallery/sheets`, which `learn install` creates.
-To use any folder of `.md` files, `export LEARN_SHEETS=~/my-sheets` (also in
-the environment skhd runs under). With no sheets of your own the menu lists
-just the generated `Tiler-Keys`. The only generated sheet is
+one folder, never copied, and a note iCloud has evicted is fetched first.
+The folder is `~/.config/gallery/sheets`, which `learn install` creates;
+`LEARN_SHEETS` (any folder of `.md` files) or `OBSIDIAN_VAULT` (its
+`Cheat-Sheets` folder) override it, set in the environment skhd runs under.
+To keep the sheets in an Obsidian vault without setting either, make the
+default folder a symlink to the vault's folder:
+`ln -s "<vault>/Cheat-Sheets" ~/.config/gallery/sheets`. With no sheets of
+your own the menu lists just the generated `Tiler-Keys`. The only generated sheet is
 `Tiler-Keys.md`, written from the `## description` lines above each binding
 in `skhdrc` — so keep those lines current; `tiler/install.sh` regenerates the
 note and the app every run. Dependencies: `fzf`, `glow` (Homebrew, installed
@@ -177,8 +177,8 @@ by the script).
 ## Configuration
 
 - `yabairc` → `~/.config/yabai/yabairc`: bsp layout, 8 px gaps, even splits
-  (`split_ratio 0.5`; the 7:5 house grid is applied only when asked for a
-  "column" by voice), new windows on the
+  (`split_ratio 0.5`; a 7:5 grid is applied only on request), new windows on
+  the
   display under the pointer, and `manage=off` rules for System Settings,
   utilities, Finder dialogs and any non-standard window. Two signals
   (`window_destroyed`, `application_terminated`) refocus the window under the
@@ -196,8 +196,8 @@ by the script).
 - `skhdrc` → `~/.config/skhd/skhdrc`: the table above.
 
 Edit here, re-run `tiler/install.sh` (copies + reloads). The files are copied,
-not symlinked: launchd-started yabai cannot read the external volume this repo
-lives on.
+not symlinked: launchd-started yabai cannot read an external volume, and
+this repo may live on one.
 
 ## Upgrade / disable
 
@@ -216,16 +216,10 @@ what notices.
 
 ## Consumers
 
-The one consumer outside this repo is the voice assistant (`ai_voice_assistant`),
-and super+b is the one key that depends on it: the binding runs its
-`desktop.py` from `~/.ai_voice_assistant` when that holds a venv python (the
-author's synced runtime), else from the repo checkout under
-`~/Developer/projects/git` (a machine that also has a bare
-`~/.ai_voice_assistant` state folder, hence the test for the python and not
-the directory). `gallery doctor` reports which runtime it resolves.
-Its `desktop.py` detects yabai at runtime (`DESKTOP_TILER=auto`) and routes
-window-placement verbs through yabai while it is running, falling back to
-System Events the moment yabai stops (`DESKTOP_TILER=off` forces that
-fallback even while yabai runs). Its fast brain reads the generated
-`~/.config/skhd/Tiler-Keys.md` key sheet, so voice verbs never drift out of
-sync with the Learn menu. That is the only link between the two projects.
+Nothing outside this repo is required. One binding reaches outside it:
+super+b ("new window in the default browser") hands the request to an
+external desktop helper, the author's own voice assistant, which is not
+public; without it the key does nothing (`gallery doctor` says so), so rebind
+it in `skhdrc` to your own browser command. Other tools can read the
+generated `~/.config/skhd/Tiler-Keys.md` key sheet to stay in sync with the
+bindings, which is how that helper does it.

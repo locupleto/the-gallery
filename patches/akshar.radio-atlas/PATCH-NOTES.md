@@ -17,19 +17,15 @@ brew install bash mpv socat jq
   that one script's shebang points at `/opt/homebrew/bin/bash` instead of
   `/usr/bin/env bash`. Every other helper only needs bash 3.2 and keeps
   the upstream `#!/usr/bin/env bash` shebang unchanged.
-- `mpv` -- the actual player; wasn't installed on this Mac. Installing it
-  pulled in a large dependency tree, including an **upgrade of the
-  Homebrew `python@3.14` keg** (3.14.6 -> 3.14.7) because that keg was
-  `brew pin`ned. Two long-lived venvs on this Mac (`~/.tts-voice-studio`,
-  `~/.ai_voice_assistant`) point at Homebrew's python; both venvs'
-  `bin/python3.14` are symlinks through `/opt/homebrew/opt/python@3.14`
-  (the "current version" symlink Homebrew repoints on upgrade), not a
-  pinned Cellar path, and a same-minor-version patch bump (3.14.6 ->
-  3.14.7) preserves stdlib/C-extension ABI, so both venvs were verified
-  working after the upgrade (`numpy` still imports in the tts-voice-
-  studio venv). `python@3.14` was re-pinned afterward to restore the
-  standing guard against a future *unintended* bump. Nothing else on this
-  Mac needed to change.
+- `mpv` -- the actual player; not installed by default. Installing it
+  pulls in a large dependency tree, which can include an **upgrade of the
+  Homebrew `python@3.14` keg** (here 3.14.6 -> 3.14.7) even when that keg
+  is `brew pin`ned. Venvs built on Homebrew's python survive this when
+  their `bin/python3.14` is a symlink through `/opt/homebrew/opt/python@3.14`
+  (the "current version" symlink Homebrew repoints on upgrade) rather than
+  a pinned Cellar path: a same-minor-version patch bump preserves the
+  stdlib/C-extension ABI. Re-pin `python@3.14` afterwards if you rely on
+  the pin as a guard against an *unintended* bump.
 - `socat` and `jq` -- were already installed; the plugin's own bridge
   (`radio-sandbox`) and every JSON-shelling helper use them respectively.
 - `flock` and `shuf` -- also already present via Homebrew's `flock`

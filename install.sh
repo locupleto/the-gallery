@@ -423,11 +423,11 @@ if [ -d "${SKHD_DIR}" ]; then
       [ "${reload_tries}" -lt 10 ] && echo "[gallery] skhd reloaded"
     fi
   fi
-  # The tiler's key sheet (vault Cheat-Sheets/Tiler-Keys.md, plus the copy the
-  # voice assistant reads) is generated from the "## " lines of skhdrc and its
-  # includes -- this file among them -- so regenerate it here too, or a changed
-  # Gallery binding stays unknown to Learn and to Jarvis until the tiler is
-  # next installed.
+  # The tiler's key sheet (Tiler-Keys.md in the Learn sheets folder, plus the
+  # copy in ~/.config/skhd that other tools read) is generated from the "## "
+  # lines of skhdrc and its includes -- this file among them -- so regenerate
+  # it here too, or a changed Gallery binding stays unknown to Learn until the
+  # tiler is next installed.
   if [ -x "${SKHD_DIR}/learn" ]; then
     if [ "${DRY_RUN}" -eq 1 ]; then echo "[dry] learn install (key sheet)"; else "${SKHD_DIR}/learn" install && echo "[gallery] key sheet regenerated"; fi
   fi

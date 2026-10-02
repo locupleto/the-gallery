@@ -64,7 +64,7 @@ top to bottom: keys go in at the top, pixels come out at the bottom.
  │ ① TILING          tiler/   │  │ Learn            │  │ ③ PLUGINS      bin/gallery (CLI)   │
  │                            │  │                  │  │                                    │
  │ yabai       bsp tiles,     │  │ cheat sheets:    │  │ a plugin is a directory with a     │
- │             gaps, rules    │  │ Obsidian notes   │  │ manifest.json naming its kinds:    │
+ │             gaps, rules    │  │ markdown notes   │  │ manifest.json naming its kinds:    │
  │ JankyBorders focus outline │  │ rendered by glow │  │                                    │
  │ focus-dir   Hyprland-style │  │ in a floating,   │  │ tui, menu   floating iTerm2 +      │
  │             neighbour pick │  │ centred iTerm2   │  │             fzf/glow/btop, put     │
@@ -367,8 +367,8 @@ unsaved-changes sheet still protects you; an app that declines is left
 alone) and reopened. Apps in `NO_RELAUNCH` (terminals, VM hosts, calls) are
 never restarted unasked, because the restart is the damage; those, and an
 app that refused to quit, get one silent notification banner -- the only
-two cases that need a human (`ANNOUNCE` 0 never, 1 banner, 2 banner and the
-estate voice). The opposite failure is caught too: an "orphan" is a window
+two cases that need a human (`ANNOUNCE` 0 never, 1 banner, 2 banner and a
+spoken line through an optional `~/bin/tts-say`). The opposite failure is caught too: an "orphan" is a window
 yabai sees but that has lost its node in the Space's tree (it reports
 `split-type` none while its neighbours report a split) and sits unmanaged on
 top of another tile; the watcher re-inserts it by toggling float twice.
@@ -381,5 +381,6 @@ list.
 
 ## Documentation
 
-The author keeps fuller design notes in a private Obsidian vault; this README
-stays short on purpose.
+This README stays short on purpose. `tiler/README.md` covers the tiling layer
+and Learn, `qml/README.md` the QML host and its Quickshell shim, and
+`patches/README.md` the macOS overrides for imported plugins.

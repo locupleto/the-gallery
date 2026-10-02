@@ -169,9 +169,9 @@ ctrl + lalt - o : open "$HOME/Desktop"
 
 # --- learn (cheat sheets, Omarchy's "Learn" menu) --------------------------------
 # tiler/learn opens a floating iTerm window (yabairc floats titles starting with
-# "Learn") listing the vault's Cheat-Sheets, rendered with glow. Spotlight has the
+# "Learn") listing the cheat sheets (see tiler/README.md), rendered with glow. Spotlight has the
 # same menu as "Learn" (~/Applications/Learn.app, built by tiler/learn install).
-## Learn menu: choose a cheat sheet (vault Cheat-Sheets folder)
+## Learn menu: choose a cheat sheet
 lalt - space : "$HOME/.config/skhd/learn" open menu
 ## the tiler key sheet, generated from this file
 shift + lalt - space : "$HOME/.config/skhd/learn" open show Tiler-Keys

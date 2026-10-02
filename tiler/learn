@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Cheat sheets on a key — Omarchy's "Learn" menu for this desk.
 #
-# The sheets are markdown notes in one folder (an Obsidian vault's
-# Cheat-Sheets by default, or $LEARN_SHEETS; one source, read in place, never
-# copied). The only generated one is Tiler-Keys.md, built from the
+# The sheets are markdown notes in one folder (~/.config/gallery/sheets by
+# default, or $LEARN_SHEETS / $OBSIDIAN_VAULT/Cheat-Sheets; one source, read in
+# place, never copied). The only generated one is Tiler-Keys.md, built from the
 # "## description" lines in tiler/skhdrc so the sheet can never drift from the
 # bindings. Sheets render in a floating, centred iTerm window (glow rendering,
 # paged by fzf; q or Esc closes it). Doors: super+space (menu),
@@ -24,12 +24,10 @@ set -euo pipefail
 # iTerm starts our window's command with a bare PATH: make Homebrew tools visible.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-VAULT="${OBSIDIAN_VAULT:-$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault}"
-SHEETS="${LEARN_SHEETS:-$VAULT/Cheat-Sheets}"
-# No vault anywhere (Obsidian is optional): keep the sheets in our own folder.
-if [ -z "${LEARN_SHEETS:-}" ] && [ -z "${OBSIDIAN_VAULT:-}" ] && [ ! -d "$VAULT" ]; then
-    SHEETS="$HOME/.config/gallery/sheets"
-fi
+# The Gallery's own folder unless told otherwise; a vault's folder can be
+# symlinked in its place (see tiler/README.md).
+SHEETS="${LEARN_SHEETS:-${OBSIDIAN_VAULT:+$OBSIDIAN_VAULT/Cheat-Sheets}}"
+SHEETS="${SHEETS:-$HOME/.config/gallery/sheets}"
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 APP="$HOME/Applications/Learn.app"
 TITLE_PREFIX="Learn"       # yabairc floats iTerm windows whose title starts with this
@@ -43,7 +41,7 @@ list_sheets() {
     [ -d "$SHEETS" ] || die "no cheat-sheet folder at $SHEETS"
     # Tiler-Keys first, then the rest alphabetically; iCloud placeholders included.
     { [ -e "$(sheet_path Tiler-Keys)" ] && echo Tiler-Keys; } || true
-    find "$SHEETS" -maxdepth 1 \( -name '*.md' -o -name '.*.md.icloud' \) -print0 \
+    find -H "$SHEETS" -maxdepth 1 \( -name '*.md' -o -name '.*.md.icloud' \) -print0 \
         | xargs -0 -n1 basename \
         | sed -E 's/^\.(.*)\.md\.icloud$/\1/; s/\.md$//' \
         | grep -vx 'Tiler-Keys' | sort -f
@@ -213,8 +211,7 @@ tags:
 # Tiler keys
 
 Left Option is **super**; the right Option types \`@ | [ ] { }\`. Space
-switching rides on the Mission Control Ctrl+N shortcuts. Push-to-talk for
-the voice assistant is the right Command key.
+switching rides on the Mission Control Ctrl+N shortcuts.
 
 > Generated from \`tiler/skhdrc\` by \`tiler/learn install\` — edit the
 > description lines there, not this note.
