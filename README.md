@@ -235,6 +235,15 @@ on its own). The Homebrew formulae stay. Details are in
 [docs/INSTALL.md](docs/INSTALL.md) is the full walkthrough: flags, the order
 of the permission grants, verification and troubleshooting.
 
+### Make it yours
+
+Your own keys go in `~/.config/skhd/local.skhd`, your own yabai settings in
+`~/.config/yabai/yabairc.local`, and your own themes, plugins, hooks and
+Learn sheets under `~/.config/gallery/`; updates never overwrite those.
+[docs/CUSTOMIZING.md](docs/CUSTOMIZING.md) says what is yours and what an
+update replaces, and has recipes for keys, tiling, themes, wallpapers, fonts,
+plugins, the coding agent and sheets.
+
 ## Tiling and hotkeys
 
 `install.sh` installs the tiler first (yabai, skhd, JankyBorders, Learn) via
@@ -451,6 +460,9 @@ list.
 - [docs/INSTALL.md](docs/INSTALL.md): step-by-step setup on a new Mac,
   installer flags, permissions in order, verification, updating and
   uninstalling, troubleshooting.
+- [docs/CUSTOMIZING.md](docs/CUSTOMIZING.md): making it yours: what an update
+  overwrites and what it keeps, your own keys, tiling settings, themes,
+  wallpapers, fonts, plugins, the coding agent and Learn sheets.
 - [docs/PLUGINS.md](docs/PLUGINS.md): writing a plugin: manifest fields, the
   kinds, the `window.gallery` bridge, enabled state, Spoon IPC, importing
   Omarchy plugins.
