@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Derived from omarchy-radio-atlas, Copyright (c) 2026 Akshar Patel, MIT
+# licence (see THIRD_PARTY_NOTICES.md at the repository root).
 # Gallery macOS patch for akshar.radio-atlas 0.1.9: route_is_local() below
 # shelled out to Linux's `ip -j route get <ip>` (iproute2, JSON output) to
 # catch a "globally routable per ipaddress" address that this host's own

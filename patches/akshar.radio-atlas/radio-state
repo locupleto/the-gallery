@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Derived from omarchy-radio-atlas, Copyright (c) 2026 Akshar Patel, MIT
+# licence (see THIRD_PARTY_NOTICES.md at the repository root).
 # Gallery macOS patch for akshar.radio-atlas 0.1.9: `stat -c '%s'` (GNU
 # coreutils) does not exist on macOS's stock BSD `stat`; `stat -f '%z'`
 # is the equivalent file-size query. No other change -- macOS's stock

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Derived from omarchy-radio-atlas, Copyright (c) 2026 Akshar Patel, MIT
+# licence (see THIRD_PARTY_NOTICES.md at the repository root).
 # Gallery macOS patch for akshar.radio-atlas 0.1.9: upstream radio-window
 # uses `hyprctl eval` to install a Hyprland Lua window rule (float, center,
 # fixed size) for the plugin's panel window. Hyprland does not exist on

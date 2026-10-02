@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Derived from omarchy-radio-atlas, Copyright (c) 2026 Akshar Patel, MIT
+# licence (see THIRD_PARTY_NOTICES.md at the repository root).
 # Gallery macOS patch for akshar.radio-atlas 0.1.9: upstream prefixes the
 # socat bridge with `setpriv --pdeathsig TERM`, which util-linux ships and
 # macOS does not -- there is no direct BSD equivalent (macOS has no

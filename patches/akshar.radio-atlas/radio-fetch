@@ -1,4 +1,6 @@
 #!/opt/homebrew/bin/bash
+# Derived from omarchy-radio-atlas, Copyright (c) 2026 Akshar Patel, MIT
+# licence (see THIRD_PARTY_NOTICES.md at the repository root).
 # Gallery macOS patch for akshar.radio-atlas 0.1.9:
 #  - shebang -> Homebrew bash (`brew install bash`): this script's
 #    load_bases() uses `mapfile`, a bash-4+ builtin macOS's shipped

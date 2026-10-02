@@ -397,3 +397,9 @@ list.
 - [tiler/README.md](tiler/README.md): the tiling layer, key table and Learn.
 - [qml/README.md](qml/README.md): the QML host and its Quickshell shim.
 - [patches/README.md](patches/README.md): macOS overrides for imported plugins.
+
+## Licence
+
+MIT; see `LICENSE`. The Omarchy theme colours and QML components, the Radio
+Atlas helper scripts under `patches/` and the Meteocons weather icons are MIT
+licensed by their authors; their notices are in `THIRD_PARTY_NOTICES.md`.
