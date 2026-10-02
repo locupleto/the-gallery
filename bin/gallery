@@ -207,6 +207,10 @@ commands:
   agent set <name> --command "<command line>"
                                    use any other agent CLI, run as typed (single quotes only)
   agent dir [<path>|--clear]      show, record or forget the agent's start directory
+  off                             switch the Gallery off for now: plain macOS
+                                  windows and keys (tiling stops, the focus
+                                  outline goes, left Option types again)
+  on                              switch it back on (re-tiles every window)
   reload                          request a Hammerspoon config reload
   log                             tail the Gallery log
   doctor                          check the local Gallery install
@@ -3725,6 +3729,69 @@ cmd_theme() {
   esac
 }
 
+# --- off / on --------------------------------------------------------------
+# A way to try the Omarchy way of working and step back out of it at will.
+# "Off" stops yabai (windows stay exactly where they are, as plain macOS
+# windows), stops the JankyBorders outline and puts skhd into its "paused"
+# mode, in which every key but one passes straight through: left Option types
+# characters again. That one key, shift+ctrl+super+escape, toggles between the
+# two (the mode declarations at the top of tiler.skhd run `gallery _pause` and
+# `gallery _resume` as skhd enters each mode). Themes, wallpaper and terminal
+# colours are left as they are. The state is a file, so `gallery off|on` from a
+# shell are idempotent; skhd forgets its mode whenever it reloads its config
+# (an edit, a keyboard layout switch), and `gallery on` puts both right again.
+PAUSED_FILE="${CONFIG_DIR}/state/paused"
+PAUSE_KEY="shift + ctrl + lalt - escape"
+
+desktop_note() {
+  # A short on-screen note when Hammerspoon is there to show it; quiet otherwise.
+  if [ -x "${HOME}/bin/gallery-hs" ] && pgrep -xq Hammerspoon; then
+    "${HOME}/bin/gallery-hs" -t 3 "hs.alert.show([[$1]], 2); return 1" >/dev/null 2>&1 || true
+  fi
+}
+
+cmd__pause() {
+  mkdir -p "$(dirname "${PAUSED_FILE}")"
+  date '+%Y-%m-%d %H:%M:%S' > "${PAUSED_FILE}"
+  command -v yabai >/dev/null 2>&1 && yabai --stop-service >/dev/null 2>&1 || true
+  pkill -x borders 2>/dev/null || true
+  desktop_note "Gallery off: plain macOS. shift+ctrl+super+esc (or: gallery on) brings it back."
+  echo "Gallery off: tiling, focus outline and keys paused (gallery on, or shift+ctrl+super+escape, to resume)"
+}
+
+cmd__resume() {
+  rm -f "${PAUSED_FILE}"
+  # yabai's own rc starts the borders again.
+  command -v yabai >/dev/null 2>&1 && yabai --start-service >/dev/null 2>&1 || true
+  desktop_note "Gallery on"
+  echo "Gallery on: tiling, focus outline and keys are back"
+}
+
+cmd_off() {
+  if [ -f "${PAUSED_FILE}" ]; then
+    echo "Gallery is already off (since $(cat "${PAUSED_FILE}")); gallery on resumes it"
+    return 0
+  fi
+  if pgrep -xq skhd; then
+    # Pressing the key (synthesised) switches skhd's mode, and entering the
+    # paused mode runs `gallery _pause` -- one path for the key and the CLI.
+    skhd -k "${PAUSE_KEY}"
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do [ -f "${PAUSED_FILE}" ] && break; sleep 0.3; done
+    if [ -f "${PAUSED_FILE}" ]; then
+      echo "Gallery off: tiling, focus outline and keys paused (gallery on, or shift+ctrl+super+escape, to resume)"
+      return 0
+    fi
+  fi
+  cmd__pause
+}
+
+cmd_on() {
+  cmd__resume
+  # A config reload puts skhd back in its default mode, whatever it was in.
+  pgrep -xq skhd && skhd --reload >/dev/null 2>&1 || true
+}
+
 cmd_reload() {
   require_hs
   # Reload via the init.lua pathwatcher (debounced in init.lua); asking over IPC
@@ -3739,6 +3806,10 @@ cmd_log() {
 
 cmd_doctor() {
   local ok=1
+
+  if [ -f "${PAUSED_FILE}" ]; then
+    echo "NOTE    the Gallery is off (gallery off, since $(cat "${PAUSED_FILE}")): yabai and borders are stopped on purpose; gallery on resumes"
+  fi
 
   if [ -d "/Applications/Hammerspoon.app" ]; then
     echo "OK      Hammerspoon.app present"
@@ -4156,6 +4227,18 @@ case "${command}" in
     ;;
   agent)
     cmd_agent "$@"
+    ;;
+  off)
+    cmd_off
+    ;;
+  on)
+    cmd_on
+    ;;
+  _pause)
+    cmd__pause
+    ;;
+  _resume)
+    cmd__resume
     ;;
   reload)
     cmd_reload

@@ -1,18 +1,40 @@
 # The Gallery
 
-An Omarchy-style desktop for macOS. Three parts, in the order they matter
-day to day:
+**An Omarchy-style tiled desktop for macOS.**
 
-1. **Tiling.** yabai + skhd with left Option as "super", Omarchy's key
-   bindings, a JankyBorders outline on the focused window, and a Learn menu
-   of cheat sheets (`tiler/`).
-2. **Themes.** Omarchy's colour themes rendered onto everything at once:
-   your terminal (iTerm2, Ghostty, kitty or WezTerm), the focus outline,
-   the wallpaper, the font.
-3. **Plugins.** A Hammerspoon Spoon that hosts manifest-driven plugins
-   (floating TUIs, services, unmodified Omarchy QML plugins), modelled on
-   Omarchy 4's plugin system: each plugin is a directory with a
-   `manifest.json`, so plugins come and go without touching Gallery itself.
+[Omarchy](https://omarchy.org) is David Heinemeier Hansson's take on what a
+desktop should be: Arch Linux and Hyprland, set up so that windows tile
+themselves, the keyboard does the work, and everything looks good together
+from the first boot. The Gallery brings that way of working to the Mac, in
+the same spirit: good defaults, and the freedom to change every one of them
+(see [Making it yours](docs/CUSTOMIZING.md)). It is not a port, and it does
+not replace macOS. It borrows Omarchy's key bindings, themes, wallpapers and
+plugin model, and even runs Omarchy's own QML plugins unmodified, on top of
+the Mac you already have.
+
+- **Tiling, the Omarchy way.** New windows tile themselves (yabai). Left
+  Option is "super", the keys are Omarchy's (skhd), and the focused window
+  wears an outline in the theme's accent colour (JankyBorders). Can't
+  remember a key? super + space opens the Learn menu, a set of cheat sheets
+  that includes one generated from the live key bindings.
+- **One theme, everywhere.** Pick one of Omarchy's themes and it is applied
+  to everything at once: your terminal (iTerm2, Ghostty, kitty or WezTerm),
+  the focus outline, the wallpaper, btop, superfile and the font.
+- **Omarchy plugins on a Mac.** A small plugin host, modelled on Omarchy 4's
+  plugin system, runs floating terminal tools, background services and
+  unmodified Omarchy QML plugins such as Radio Atlas.
+
+**Try it without committing.** Press shift + ctrl + super + escape (or run
+`gallery off`) and you are back to plain macOS: the tiling stops, the
+outline goes, left Option types characters again. Press it again (or run
+`gallery on`) and the tiles return. If it is not for you,
+`./install.sh --uninstall` puts back every file it changed.
+
+Credit where it is due: the ideas, the key bindings, the themes, the
+wallpapers and the plugin model are Omarchy's. The theme colours and QML
+components are used under Omarchy's MIT licence (see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). The Gallery is an
+independent project and is not affiliated with the Omarchy project.
 
 ![A tiled desktop in the osaka-jade theme: nvim, superfile, btop and fastfetch, with the accent outline on the focused window](assets/screenshots/tiling.jpg)
 
@@ -312,12 +334,13 @@ has one small adapter per terminal, and Alacritty's can be added the same way.
 ## Usage
 
 ```sh
+gallery off | on |
 gallery status | list [--json] | open <id> | close <id> | toggle <id> |
 gallery enable <id> | disable <id> | validate <dir> |
 gallery add <git-url> [--enable] [--yes] | update [id] | remove <id> [--yes] |
 gallery clone <id> <new-id> |
 gallery theme list | current | set <name> | render | next |
-gallery bg list | current | set <file> | next | prev | apply |
+gallery bg list | current | set <file> | next | prev | apply | restore |
 gallery console status | theme | native | toggle |
 gallery terminal [status] | list | set <iterm2|ghostty|kitty|wezterm> |
 gallery font status | set <family> [size] [weight] | native | list |

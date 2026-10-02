@@ -246,8 +246,8 @@ EOF
             next
         }
         /^## / { flush(); desc = substr($0, 4); next }
-        /^[a-z]/ && / : / {
-            k = $0; sub(/ *:.*$/, "", k)
+        /^[a-z]/ && (/ : / || / ; [a-z]+ *$/) && !/ < / {
+            k = $0; sub(/ *[:;].*$/, "", k)
             # skhd keeps the first definition of a hotkey and drops later ones,
             # so a key local.skhd overrides is listed once, as the user binds it.
             raw = k; gsub(/ /, "", raw)

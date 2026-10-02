@@ -637,6 +637,11 @@ else
   # Expanded with the ${arr[@]+"${arr[@]}"} idiom: under `set -u`, the stock
   # macOS bash 3.2 (/bin/bash, what a Mac without Homebrew's bash runs this
   # with) treats an EMPTY array expansion as an unbound variable.
+  # The tiler step starts yabai and skhd, which ends a `gallery off`.
+  if [ -f "${CONFIG_DIR}/state/paused" ]; then
+    echo "[gallery] the Gallery was off (gallery off); installing switches it back on"
+    run rm -f "${CONFIG_DIR}/state/paused"
+  fi
   tiler_args=()
   [ "${DRY_RUN}" -eq 1 ] && tiler_args+=(--dry-run)
   [ "${RESTART_TILER}" -eq 1 ] && tiler_args+=(--restart)

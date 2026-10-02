@@ -4,6 +4,14 @@ Short answers, with links to the full ones. "super" is the left Option key.
 
 ## Keys
 
+### Can I switch it off for a while?
+
+Yes: shift + ctrl + super + escape, or `gallery off`, gives you plain macOS
+(no tiling, no outline, left Option types again); the same key or
+`gallery on` brings it back. Your windows stay where they are while it is
+off and are tiled again when it comes back. See
+[Switching it off for a while](GETTING-STARTED.md#switching-it-off-for-a-while).
+
 ### Nothing happens when I press a key
 
 Work down this list:
