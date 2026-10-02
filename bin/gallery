@@ -32,6 +32,7 @@
 #   gallery bg next [theme]
 #   gallery bg prev [theme]
 #   gallery bg apply [theme]
+#   gallery bg restore
 #   gallery console status
 #   gallery console theme
 #   gallery console native
@@ -162,6 +163,7 @@ commands:
   bg next [theme]                 cycle to the next background, and apply it
   bg prev [theme]                 cycle to the previous background, and apply it
   bg apply [theme]                re-apply the active background
+  bg restore                      put back the wallpaper settings saved before the first background
   console status                  show whether the terminal console follows the theme
   console theme                   make the terminal console follow the active theme
   console native                  restore the terminal console to its own colours
@@ -1692,6 +1694,23 @@ cmd_bg_apply() {
   echo "background: ${active} (${theme})"
 }
 
+# cmd_bg_restore -- put the wallpaper store back as it was before the first
+# background was applied (tools/hooks/30-wallpaper.sh saves it once), and
+# restart WallpaperAgent, which only reads the store on launch.
+cmd_bg_restore() {
+  local snapshot="${CONFIG_DIR}/state/wallpaper-original.plist"
+  local store="${HOME}/Library/Application Support/com.apple.wallpaper/Store/Index.plist"
+  if [ ! -f "${snapshot}" ]; then
+    echo "gallery: no saved wallpaper settings (${snapshot}); nothing to restore" >&2
+    echo "gallery: they are saved the first time a Gallery background is applied" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "${store}")"
+  cp -p "${snapshot}" "${store}"
+  killall WallpaperAgent 2>/dev/null || true
+  echo "background: restored ${store} from ${snapshot}; WallpaperAgent restarted"
+}
+
 cmd_bg() {
   local sub="${1:-}"
   [ $# -gt 0 ] && shift
@@ -1714,8 +1733,11 @@ cmd_bg() {
     apply)
       cmd_bg_apply "${1:-}"
       ;;
+    restore)
+      cmd_bg_restore
+      ;;
     "")
-      echo "usage: gallery bg <list|current|set|next|prev|apply>" >&2
+      echo "usage: gallery bg <list|current|set|next|prev|apply|restore>" >&2
       exit 1
       ;;
     *)

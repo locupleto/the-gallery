@@ -2,11 +2,11 @@
 # create that file empty if it is absent) and uncomment what you want. The
 # installers never overwrite it, so it survives updates.
 #
-# Rules, from skhd's source (see the end of tiler/skhdrc):
-#   - local.skhd is loaded BEFORE gallery.skhd. A hotkey defined twice is not an
-#     error: the FIRST definition wins silently. So a line here replaces the same
-#     key in gallery.skhd, but cannot replace a binding in the shipped skhdrc.
-#   - skhd has no "unbind". To switch a Gallery key off, bind it to a no-op.
+# Rules, from skhd's source (see tiler/skhdrc):
+#   - local.skhd is loaded BEFORE tiler.skhd and gallery.skhd. A hotkey defined
+#     twice is not an error: the FIRST definition wins silently. So a line here
+#     replaces the same key in either shipped file.
+#   - skhd has no "unbind". To switch a shipped key off, bind it to a no-op.
 #   - skhd hotloads this file, but only if it existed when skhd started; after
 #     creating it by hand run `skhd --reload` once.
 #   - Lines starting with "## " describe the binding below them and appear in the
@@ -18,7 +18,7 @@
 
 # --- apps (Omarchy's app slots: uncomment and point at your apps) ---------------
 # Omarchy puts an app on each letter: a ChatGPT, shift+a Grok, c Calendar (bound
-# in skhdrc), e Email, y YouTube, x X, g messaging. Web apps saved from Safari
+# in tiler.skhd), e Email, y YouTube, x X, g messaging. Web apps saved from Safari
 # live in ~/Applications; `open -a` activates the window they have.
 ## AI assistant
 #lalt - a : open -a "/Applications/Claude.app"
@@ -39,7 +39,7 @@
 ## open a project folder in the editor
 #lalt - p : open -a "Visual Studio Code" "$HOME/projects"
 
-# --- switch a Gallery binding off ----------------------------------------------
-# Same key as in gallery.skhd, bound to a no-op, so the Gallery's line is the
-# duplicate and is dropped. (Does not work for keys defined in skhdrc itself.)
+# --- switch a shipped binding off ----------------------------------------------
+# Same key as in tiler.skhd or gallery.skhd, bound to a no-op, so the shipped
+# line is the duplicate and is dropped.
 #lalt + ctrl - 0 : true

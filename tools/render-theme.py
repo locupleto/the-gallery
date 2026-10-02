@@ -20,7 +20,8 @@ read_borders_prefs), and writes:
   ~/.config/gallery/state/terminals/{ghostty.conf,kitty.conf,wezterm.lua,
     gallery-osc.sh,glass.env} (see "Ghostty, kitty, WezTerm" below)
   ~/.config/btop/themes/gallery.theme
-  ~/.config/btop/btop.conf (color_theme key only, rewritten in place)
+  ~/.config/btop/btop.conf (color_theme key only, rewritten in place; only
+    when btop is installed or its config dir exists)
   ~/Library/Application Support/superfile/theme/gallery.toml
   ~/Library/Application Support/superfile/config.toml (theme and
     transparent_background keys only, rewritten in place)
@@ -96,6 +97,17 @@ BTOP_CONF_PATH = BTOP_CONFIG_DIR / "btop.conf"
 SUPERFILE_CONFIG_DIR = Path.home() / "Library" / "Application Support" / "superfile"
 SUPERFILE_THEME_PATH = SUPERFILE_CONFIG_DIR / "theme" / "gallery.toml"
 SUPERFILE_CONF_PATH = SUPERFILE_CONFIG_DIR / "config.toml"
+# {abs path of a config file: {key: its original line, or null if absent}},
+# written the first time the renderer changes a key and never overwritten, so
+# `--restore-confs` (run by the uninstaller) can put the user's values back.
+CONF_ORIGINALS_PATH = STATE_DIR / "conf-originals.json"
+# What the renderer writes for each key it owns, to tell on restore whether
+# the app (or the user) has changed it since.
+CONF_WRITTEN = {
+    "color_theme": '"gallery"',
+    "theme": '"gallery"',
+    "transparent_background": "true",
+}
 
 ANSI_NAMES = [
     "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
@@ -1157,6 +1169,39 @@ def render_btop_theme(tokens: dict, name: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _read_originals() -> dict:
+    try:
+        data = json.loads(CONF_ORIGINALS_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_conf_originals(path: Path, lines: list[str], keys: list[str]) -> None:
+    """Remember each key's current line (or null if absent) the first time the
+    renderer is about to change it. An existing record is never overwritten:
+    later renders see the Gallery's own values, not the user's."""
+    data = _read_originals()
+    entry = data.get(str(path))
+    if not isinstance(entry, dict):
+        entry = {}
+    end = next((i for i, l in enumerate(lines) if l.lstrip().startswith("[")), len(lines))
+    changed = False
+    for key in keys:
+        if key in entry:
+            continue
+        found = next(
+            (l for l in lines[:end] if "=" in l and l.split("=", 1)[0].strip() == key),
+            None,
+        )
+        entry[key] = found.rstrip("\n") if found is not None else None
+        changed = True
+    if changed:
+        data[str(path)] = entry
+        CONF_ORIGINALS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONF_ORIGINALS_PATH.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
 def set_conf_keys(path: Path, values: dict[str, str]) -> None:
     """Idempotently set each `key = value` line in a flat config file,
     leaving every other line untouched (the owning app may rewrite the file
@@ -1165,9 +1210,11 @@ def set_conf_keys(path: Path, values: dict[str, str]) -> None:
     an `[open_with]` table, so matching stops at the first table header and
     missing keys are inserted just above it (or appended when there is
     none). A missing file is created with just these keys, which both btop
-    and superfile fill out with their own defaults on the next start."""
+    and superfile fill out with their own defaults on the next start. The
+    original line of each key is recorded first (record_conf_originals)."""
     pending = dict(values)
     lines = path.read_text().splitlines(keepends=True) if path.is_file() else []
+    record_conf_originals(path, lines, list(values))
     if lines and not lines[-1].endswith("\n"):
         lines[-1] += "\n"
     end = next((i for i, l in enumerate(lines) if l.lstrip().startswith("[")), len(lines))
@@ -1178,6 +1225,62 @@ def set_conf_keys(path: Path, values: dict[str, str]) -> None:
     lines[end:end] = [f"{key} = {value}\n" for key, value in pending.items()]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(lines))
+
+
+def restore_conf_keys() -> int:
+    """Put back every key set_conf_keys changed: the recorded original line,
+    or no line at all if the key was absent. A key whose value is no longer
+    the one the renderer wrote is left alone (the app or the user has chosen
+    since). Also removes the rendered btop and superfile themes, empties that
+    would remain, and finally the record itself."""
+    data = _read_originals()
+    if not data:
+        print("restore-confs: nothing recorded, no btop/superfile keys to restore")
+    for name, entry in data.items():
+        path = Path(name)
+        if not path.is_file() or not isinstance(entry, dict):
+            print(f"restore-confs: {name}: gone, skipping")
+            continue
+        lines = path.read_text().splitlines(keepends=True)
+        end = next((i for i, l in enumerate(lines) if l.lstrip().startswith("[")), len(lines))
+        for key, orig in entry.items():
+            idx = next(
+                (i for i in range(end) if "=" in lines[i] and lines[i].split("=", 1)[0].strip() == key),
+                None,
+            )
+            if idx is None:
+                continue
+            current = lines[idx].split("=", 1)[1].strip()
+            if current != CONF_WRITTEN.get(key, current):
+                print(f"restore-confs: {name}: {key} changed since the Gallery set it, left as {current}")
+                continue
+            if orig is None:
+                del lines[idx]
+                end -= 1
+                print(f"restore-confs: {name}: removed {key} (it was not set before)")
+            else:
+                lines[idx] = orig + "\n"
+                print(f"restore-confs: {name}: {key} restored to: {orig.strip()}")
+        if "".join(lines).strip():
+            path.write_text("".join(lines))
+        else:
+            path.unlink()
+            print(f"restore-confs: {name}: removed (the Gallery created it)")
+    for theme in (BTOP_THEME_PATH, SUPERFILE_THEME_PATH):
+        if theme.is_file():
+            theme.unlink()
+            print(f"restore-confs: removed {theme}")
+    for d in (
+        BTOP_THEME_PATH.parent, BTOP_CONFIG_DIR,
+        SUPERFILE_THEME_PATH.parent, SUPERFILE_CONFIG_DIR,
+    ):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+    if CONF_ORIGINALS_PATH.is_file():
+        CONF_ORIGINALS_PATH.unlink()
+    return 0
 
 
 def update_btop_conf(theme_name: str) -> None:
@@ -1278,7 +1381,22 @@ def write_file(path: Path, content: str) -> None:
     path.write_text(content)
 
 
+def btop_present() -> bool:
+    """btop is installed, or has a config dir the user already made."""
+    import shutil
+
+    return shutil.which("btop") is not None or BTOP_CONFIG_DIR.is_dir()
+
+
+def superfile_present() -> bool:
+    import shutil
+
+    return shutil.which("spf") is not None or SUPERFILE_CONFIG_DIR.is_dir()
+
+
 def main(argv: list[str]) -> int:
+    if "--restore-confs" in argv:
+        return restore_conf_keys()
     print_only = "--print" in argv
 
     theme_dir = resolve_current_theme_dir()
@@ -1335,10 +1453,16 @@ def main(argv: list[str]) -> int:
     )
     write_file(TERMINALS_DIR / "gallery-osc.sh", render_osc_script(tokens, name))
     write_file(TERMINALS_DIR / "glass.env", render_glass_env())
-    write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
-    update_btop_conf("gallery")
-    write_file(SUPERFILE_THEME_PATH, render_superfile_theme(tokens, name, light))
-    update_superfile_conf("gallery")
+    # Companion apps are only touched when installed (binary on PATH, or a
+    # config dir already there): nothing is created for an app that is absent.
+    with_btop = btop_present()
+    with_superfile = superfile_present()
+    if with_btop:
+        write_file(BTOP_THEME_PATH, render_btop_theme(tokens, name))
+        update_btop_conf("gallery")
+    if with_superfile:
+        write_file(SUPERFILE_THEME_PATH, render_superfile_theme(tokens, name, light))
+        update_superfile_conf("gallery")
 
     border_summary = (
         f"borders: width {border_tokens['border_width']}, "
@@ -1353,10 +1477,16 @@ def main(argv: list[str]) -> int:
     print(f"  {ITERM_CONSOLE_PROFILE_PATH} (console: {console_mode})")
     for terminal_file in ("ghostty.conf", "kitty.conf", "wezterm.lua", "gallery-osc.sh", "glass.env"):
         print(f"  {TERMINALS_DIR / terminal_file}")
-    print(f"  {BTOP_THEME_PATH}")
-    print(f"  {BTOP_CONF_PATH} (color_theme = gallery)")
-    print(f"  {SUPERFILE_THEME_PATH}")
-    print(f"  {SUPERFILE_CONF_PATH} (theme = gallery, transparent_background = true)")
+    if with_btop:
+        print(f"  {BTOP_THEME_PATH}")
+        print(f"  {BTOP_CONF_PATH} (color_theme = gallery)")
+    else:
+        print("  btop: not installed, skipped")
+    if with_superfile:
+        print(f"  {SUPERFILE_THEME_PATH}")
+        print(f"  {SUPERFILE_CONF_PATH} (theme = gallery, transparent_background = true)")
+    else:
+        print("  superfile: not installed, skipped")
     if font_normal:
         font_summary = f"font: {font_prefs['family']} {font_prefs['size']} {font_prefs['weight']}"
     elif font_prefs:

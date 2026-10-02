@@ -9,6 +9,13 @@
 # copy is required. Re-run this script after editing the Spoon or plugins
 # to push changes across.
 #
+# Nothing of yours is lost. A file the installer replaces is first moved to
+# <name>.gallery-bak (or, if you edited a Gallery file, copied to
+# <name>.gallery-edited.<timestamp>); files it edits in place (init.lua, the
+# terminal configs, btop and superfile settings) are backed up once; every file
+# it writes is listed in ~/.config/gallery/state/install-manifest.tsv. --uninstall
+# reverses all of it. The helpers live in tools/install-lib.sh.
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,19 +56,28 @@ PATCHES_DEST="${CONFIG_DIR}/patches"
 OMARCHY_THEME_LINK="${HOME_DIR}/.config/omarchy/current/theme"
 OMARCHY_STATE_THEME_LINK="${HOME_DIR}/.local/state/omarchy/current/theme"
 OMARCHY_THEME_TARGET="${CONFIG_DIR}/themes/current"
+OMARCHY_LINKS_RECORD="${CONFIG_DIR}/state/omarchy-links.tsv"
 HS_INIT="${HOME_DIR}/.hammerspoon/init.lua"
+HAMMERSPOON_APP="${GALLERY_HAMMERSPOON_APP:-/Applications/Hammerspoon.app}"
 
 DRY_RUN=0
 UNINSTALL=0
 SKIP_TILER=0
 RESTART_TILER=0
 MINIMAL=0
+PURGE=0
+KEEP_WALLPAPER=0
 
 usage() {
   cat <<'USAGE' >&2
-usage: install.sh [--dry-run] [--uninstall] [--skip-tiler] [--restart-tiler] [--minimal]
-  --dry-run        print what would happen, change nothing
-  --uninstall      remove the Gallery (and, unless --skip-tiler, the tiler)
+usage: install.sh [--dry-run] [--uninstall [--purge] [--keep-wallpaper]] [--skip-tiler] [--restart-tiler] [--minimal]
+  --dry-run        print what would happen (including each file it would back
+                   up or restore), change nothing
+  --uninstall      remove the Gallery (and, unless --skip-tiler, the tiler) and
+                   put back every file of yours it replaced or edited; keeps
+                   ~/.config/gallery (your state) and the Homebrew formulae
+  --purge          with --uninstall: also delete ~/.config/gallery
+  --keep-wallpaper with --uninstall: do not restore the saved wallpaper settings
   --skip-tiler     do not run tiler/install.sh (yabai/skhd/borders/Learn)
   --restart-tiler  pass --restart through to tiler/install.sh, forcing a
                    yabai/skhd restart even if their config did not change
@@ -86,6 +102,12 @@ for arg in "$@"; do
     --minimal)
       MINIMAL=1
       ;;
+    --purge)
+      PURGE=1
+      ;;
+    --keep-wallpaper)
+      KEEP_WALLPAPER=1
+      ;;
     --help|-h)
       usage
       exit 0
@@ -98,6 +120,17 @@ for arg in "$@"; do
   esac
 done
 
+if [ "${UNINSTALL}" -eq 0 ] && [ "$((PURGE + KEEP_WALLPAPER))" -gt 0 ]; then
+  echo "[gallery] --purge and --keep-wallpaper only apply to --uninstall" >&2
+  usage
+  exit 1
+fi
+
+GL_DRY="${DRY_RUN}"
+GL_TAG="[gallery]"
+# shellcheck source=tools/install-lib.sh
+. "${SCRIPT_DIR}/tools/install-lib.sh"
+
 run() {
   if [ "${DRY_RUN}" -eq 1 ]; then
     echo "[gallery] (dry-run) $*"
@@ -108,8 +141,8 @@ run() {
 }
 
 require_hammerspoon() {
-  if [ ! -d "/Applications/Hammerspoon.app" ]; then
-    echo "[gallery] Hammerspoon.app not found in /Applications" >&2
+  if [ ! -d "${HAMMERSPOON_APP}" ]; then
+    echo "[gallery] Hammerspoon.app not found at ${HAMMERSPOON_APP}" >&2
     echo "[gallery] install it with: brew install --cask hammerspoon" >&2
     exit 1
   fi
@@ -164,7 +197,114 @@ advise_optional_tools() {
   done
 }
 
+# --- uninstall ---------------------------------------------------------------------
+
+# unwire_include <file> <line> -- drop the one line the Gallery added to a
+# terminal config, then put the backup back (or delete the file if the Gallery
+# created it and nothing else is in it).
+unwire_include() {
+  local file="$1" line="$2"
+  [ -f "${file}" ] && grep -Fxq -- "${line}" "${file}" || return 0
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    echo "[gallery] (dry-run) would remove the Gallery include line from ${file}"
+    return 0
+  fi
+  gl_line_remove "${file}" "${line}"
+  gl_finish_edit "${file}" 1
+}
+
+# The ~/.wezterm.lua `gallery console theme` writes when the user has no
+# wezterm config at all (bin/gallery, console_config_apply). Reproduced here
+# byte for byte so only an untouched one is deleted.
+gl_wezterm_generated() {
+  local rel="${CONFIG_DIR}/state/terminals/wezterm.lua" expr
+  case "${rel}" in
+    "${HOME_DIR}"/*) expr="wezterm.home_dir .. '/${rel#"${HOME_DIR}"/}'" ;;
+    *)               expr="'${rel}'" ;;
+  esac
+  printf '%s\n' \
+    "local wezterm = require 'wezterm'" \
+    "local config = wezterm.config_builder()" \
+    "local ok, gallery = pcall(dofile, ${expr})" \
+    "if ok then for k, v in pairs(gallery) do config[k] = v end end" \
+    "return config"
+}
+
+uninstall_terminal_wiring() {
+  local gh_line="config-file = ?${CONFIG_DIR}/state/terminals/ghostty.conf"
+  local kitty_line="include ${CONFIG_DIR}/state/terminals/kitty.conf"
+  local wz="${HOME_DIR}/.wezterm.lua" generated
+  unwire_include "${HOME_DIR}/.config/ghostty/config" "${gh_line}"
+  unwire_include "${HOME_DIR}/.config/ghostty/config.ghostty" "${gh_line}"
+  unwire_include "${HOME_DIR}/.config/kitty/kitty.conf" "${kitty_line}"
+  gl_rmdir_empty "${HOME_DIR}/.config/ghostty" "${HOME_DIR}/.config/kitty"
+
+  if [ -f "${wz}" ]; then
+    generated="$(mktemp "${TMPDIR:-/tmp}/gallery-wezterm.XXXXXX")"
+    gl_wezterm_generated > "${generated}"
+    if cmp -s "${wz}" "${generated}"; then
+      run rm -f "${wz}"
+      gl_note removed "${wz} (created by the Gallery)"
+    elif grep -Fq -- "state/terminals/wezterm.lua" "${wz}"; then
+      echo "[gallery] ${wz} loads the Gallery's wezterm module; the two lines are harmless without it (pcall) -- remove them when convenient"
+      gl_note kept "${wz} (two Gallery lines remain; harmless)"
+    fi
+    rm -f "${generated}"
+  fi
+}
+
+uninstall_iterm_profiles() {
+  local dir="${HOME_DIR}/Library/Application Support/iTerm2/DynamicProfiles"
+  local default_guid
+  if [ -e "${dir}/gallery-theme.json" ]; then
+    run rm -f "${dir}/gallery-theme.json"
+    gl_note removed "${dir}/gallery-theme.json"
+  fi
+  if [ -e "${dir}/gallery-console.json" ]; then
+    default_guid="$(defaults read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)"
+    if [ "${default_guid}" = "gallery-console" ]; then
+      echo "[gallery] iTerm2's default profile is still Console; keeping ${dir}/gallery-console.json"
+      echo "[gallery] set your own profile as the default (iTerm2: Settings > Profiles > pick one > Other Actions > Set as Default), then delete that file"
+      gl_note kept "${dir}/gallery-console.json (iTerm2 default profile is Console)"
+    else
+      run rm -f "${dir}/gallery-console.json"
+      gl_note removed "${dir}/gallery-console.json"
+    fi
+  fi
+  gl_rmdir_empty "${dir}" "$(dirname "${dir}")"
+}
+
+# The Omarchy compatibility links: removed only if they point into the
+# Gallery's config; a link of the user's own that the installer replaced is put
+# back from state/omarchy-links.tsv.
+uninstall_omarchy_links() {
+  local link target
+  for link in "${OMARCHY_THEME_LINK}" "${OMARCHY_STATE_THEME_LINK}"; do
+    if [ -L "${link}" ]; then
+      target="$(readlink "${link}")"
+      case "${target}" in
+        "${CONFIG_DIR}"/*)
+          run rm -f "${link}"
+          gl_note removed "${link}"
+          target="$(awk -F'\t' -v l="${link}" '$1 == l { print $2; exit }' "${OMARCHY_LINKS_RECORD}" 2>/dev/null || true)"
+          if [ -n "${target}" ]; then
+            run ln -s "${target}" "${link}"
+            gl_note restored "${link} -> ${target}"
+          fi
+          ;;
+        *)
+          gl_note kept "${link} (points to ${target}, not ours)"
+          ;;
+      esac
+    fi
+  done
+  rm -f "${OMARCHY_LINKS_RECORD}" 2>/dev/null || true
+  gl_rmdir_empty "$(dirname "${OMARCHY_THEME_LINK}")" "$(dirname "$(dirname "${OMARCHY_THEME_LINK}")")" \
+    "$(dirname "${OMARCHY_STATE_THEME_LINK}")" "$(dirname "$(dirname "${OMARCHY_STATE_THEME_LINK}")")"
+}
+
 do_uninstall() {
+  local path init_created=0 had_confs=0
   echo "[gallery] uninstalling"
 
   if [ "${SKIP_TILER}" -eq 1 ]; then
@@ -176,31 +316,86 @@ do_uninstall() {
     "${SCRIPT_DIR}/tiler/install.sh" "${tiler_args[@]}"
   fi
 
+  # init.lua first: with the Spoon gone below, a surviving load block would
+  # make Hammerspoon report an error at every reload.
+  [ -e "${CONFIG_DIR}/state/init-lua-created" ] && init_created=1
+  if gl_block_has "${HS_INIT}"; then
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      echo "[gallery] (dry-run) would remove the Gallery block from ${HS_INIT}"
+    else
+      gl_block_strip "${HS_INIT}"
+      gl_finish_edit "${HS_INIT}" "${init_created}"
+      rm -f "${CONFIG_DIR}/state/init-lua-created"
+    fi
+  fi
+
   if [ -d "${SPOON_DEST}" ]; then
     run rm -rf "${SPOON_DEST}"
+    gl_note removed "${SPOON_DEST}"
   else
     echo "[gallery] no Spoon installed at ${SPOON_DEST}"
   fi
+  gl_rmdir_empty "${HOME_DIR}/.hammerspoon/Spoons" "${HOME_DIR}/.hammerspoon"
 
-  if [ -e "${BIN_DEST}" ]; then
-    run rm -f "${BIN_DEST}"
-  else
-    echo "[gallery] no CLI installed at ${BIN_DEST}"
+  # Every file install_file wrote: removed if still ours, restored from its
+  # backup if it replaced one of yours. With --skip-tiler the tiler's own files
+  # (yabai and skhd directories) stay, except gallery.skhd, which is ours.
+  while IFS= read -r path; do
+    [ -n "${path}" ] || continue
+    if [ "${SKIP_TILER}" -eq 1 ]; then
+      case "${path}" in
+        "${HOME_DIR}/.config/skhd/gallery.skhd") ;;
+        "${HOME_DIR}/.config/yabai/"*|"${HOME_DIR}/.config/skhd/"*) continue ;;
+      esac
+    fi
+    gl_uninstall_file "${path}"
+  done <<EOF
+$(gl_manifest_paths)
+EOF
+  gl_rmdir_empty "${HOME_DIR}/bin" "${HOME_DIR}/.config/skhd" "${HOME_DIR}/.config/yabai"
+
+  uninstall_terminal_wiring
+  uninstall_iterm_profiles
+
+  # btop / superfile settings back to what they were (and their rendered
+  # themes removed), from the checkout's renderer so it works without an
+  # installed copy.
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    echo "[gallery] (dry-run) would restore btop/superfile settings from ${CONFIG_DIR}/state/conf-originals.json"
+  elif command -v python3 >/dev/null 2>&1; then
+    [ -e "${CONFIG_DIR}/state/conf-originals.json" ] && had_confs=1
+    python3 "${RENDER_TOOL_SRC}" --restore-confs | sed 's/^/[gallery] /'
+    [ "${had_confs}" -eq 1 ] && gl_note restored "btop / superfile settings the Gallery had changed"
   fi
 
-  if [ -e "${HS_BIN_DEST}" ]; then
-    run rm -f "${HS_BIN_DEST}"
-  else
-    echo "[gallery] no CLI installed at ${HS_BIN_DEST}"
-  fi
-  run rm -f "${TUI_BIN_DEST}" "${TERM_BIN_DEST}" "${MENU_BIN_DEST}" "${QML_BIN_DEST}" "${BORDERS_BIN_DEST}" "${AGENT_BIN_DEST}"
+  uninstall_omarchy_links
 
-  echo "[gallery] leaving ${CONFIG_DIR} in place"
-  echo "[gallery] leaving ${HS_INIT} in place -- Gallery load block was not removed automatically."
-  echo "[gallery] to finish by hand, remove the block delimited by:"
-  echo "[gallery]   -- gallery:begin"
-  echo "[gallery]   -- gallery:end"
-  echo "[gallery] from ${HS_INIT}"
+  if [ -f "${CONFIG_DIR}/state/wallpaper-original.plist" ]; then
+    if [ "${KEEP_WALLPAPER}" -eq 1 ]; then
+      echo "[gallery] --keep-wallpaper: leaving the wallpaper as it is (saved original: ${CONFIG_DIR}/state/wallpaper-original.plist)"
+      gl_note kept "the current wallpaper settings"
+    elif [ "${DRY_RUN}" -eq 1 ]; then
+      echo "[gallery] (dry-run) would restore the saved wallpaper store and restart WallpaperAgent (gallery bg restore)"
+    else
+      if "${BIN_SRC}" bg restore; then
+        gl_note restored "the wallpaper settings"
+      else
+        gl_note kept "the wallpaper settings (restore failed; run: gallery bg restore)"
+      fi
+    fi
+  fi
+
+  if [ "${PURGE}" -eq 1 ]; then
+    run rm -rf "${CONFIG_DIR}"
+    run rm -f "${HOME_DIR}/Library/Logs/gallery.log"
+    gl_note removed "${CONFIG_DIR} (--purge)"
+  else
+    gl_note kept "${CONFIG_DIR} (your state; --purge deletes it)"
+  fi
+  gl_note kept "the Homebrew formulae installed for the Gallery (yabai, skhd, borders, fzf, glow, btop, superfile): brew uninstall them if you want"
+
+  echo "[gallery] uninstall complete"
+  gl_summary
   exit 0
 }
 
@@ -215,7 +410,7 @@ advise_optional_tools
 
 echo "[gallery] installing Spoon to ${SPOON_DEST}"
 run mkdir -p "$(dirname "${SPOON_DEST}")"
-run rsync -a --delete "${SPOON_SRC}/" "${SPOON_DEST}/"
+gl_rsync_delete "${SPOON_SRC}/" "${SPOON_DEST}/"
 
 echo "[gallery] installing plugins to ${PLUGINS_DEST}"
 run mkdir -p "${PLUGINS_DEST}"
@@ -223,7 +418,7 @@ run mkdir -p "${PLUGINS_DEST}"
 # say) do not linger; third-party plugins living beside ours are untouched.
 for plugin_dir in "${PLUGINS_SRC}"/*/; do
   [ -d "${plugin_dir}" ] || continue
-  run rsync -a --delete "${plugin_dir}" "${PLUGINS_DEST}/$(basename "${plugin_dir}")/"
+  gl_rsync_delete "${plugin_dir}" "${PLUGINS_DEST}/$(basename "${plugin_dir}")/"
 done
 
 echo "[gallery] ensuring config directories exist"
@@ -237,22 +432,21 @@ run rsync -a --exclude 'current' "${THEMES_SRC}/" "${THEMES_DEST}/"
 
 echo "[gallery] installing theme renderer to ${RENDER_TOOL_DEST}"
 run mkdir -p "$(dirname "${RENDER_TOOL_DEST}")"
-run cp "${RENDER_TOOL_SRC}" "${RENDER_TOOL_DEST}"
-run chmod +x "${RENDER_TOOL_DEST}"
+gl_install_file "${RENDER_TOOL_SRC}" "${RENDER_TOOL_DEST}" 755
 
 echo "[gallery] installing theme-set hook examples to ${THEME_HOOKS_DEST}"
 run mkdir -p "${THEME_HOOKS_DEST}"
 if [ -d "${THEME_HOOKS_SRC}" ]; then
   for hook in "${THEME_HOOKS_SRC}"/*; do
     [ -f "${hook}" ] || continue
-    run install -m 755 "${hook}" "${THEME_HOOKS_DEST}/$(basename "${hook}")"
+    gl_install_file "${hook}" "${THEME_HOOKS_DEST}/$(basename "${hook}")" 755
   done
 fi
 
 echo "[gallery] installing qml shim tree to ${QML_DEST}"
 run mkdir -p "${QML_DEST}"
 if [ -d "${QML_SRC}" ]; then
-  run rsync -a --delete "${QML_SRC}/" "${QML_DEST}/"
+  gl_rsync_delete "${QML_SRC}/" "${QML_DEST}/"
 else
   echo "[gallery] no qml/ directory in this checkout yet -- skipping (a qml-kind plugin will not run until it is added)"
 fi
@@ -260,7 +454,7 @@ fi
 echo "[gallery] installing patches to ${PATCHES_DEST}"
 run mkdir -p "${PATCHES_DEST}"
 if [ -d "${PATCHES_SRC}" ]; then
-  run rsync -a --delete "${PATCHES_SRC}/" "${PATCHES_DEST}/"
+  gl_rsync_delete "${PATCHES_SRC}/" "${PATCHES_DEST}/"
 fi
 
 if [ ! -e "${THEMES_DEST}/current" ]; then
@@ -274,26 +468,21 @@ fi
 
 echo "[gallery] installing CLI to ${BIN_DEST}"
 run mkdir -p "${HOME_DIR}/bin"
-run cp "${BIN_SRC}" "${BIN_DEST}"
-run chmod +x "${BIN_DEST}"
+gl_install_file "${BIN_SRC}" "${BIN_DEST}" 755
 
 echo "[gallery] installing hs watchdog CLI to ${HS_BIN_DEST}"
-run cp "${HS_BIN_SRC}" "${HS_BIN_DEST}"
-run chmod +x "${HS_BIN_DEST}"
+gl_install_file "${HS_BIN_SRC}" "${HS_BIN_DEST}" 755
 
 echo "[gallery] installing terminal-window helpers to ${TUI_BIN_DEST}, ${TERM_BIN_DEST}, ${MENU_BIN_DEST}"
-run cp "${TUI_BIN_SRC}" "${TUI_BIN_DEST}"
-run cp "${TERM_BIN_SRC}" "${TERM_BIN_DEST}"
-run cp "${MENU_BIN_SRC}" "${MENU_BIN_DEST}"
-run chmod +x "${TUI_BIN_DEST}" "${TERM_BIN_DEST}" "${MENU_BIN_DEST}"
+gl_install_file "${TUI_BIN_SRC}" "${TUI_BIN_DEST}" 755
+gl_install_file "${TERM_BIN_SRC}" "${TERM_BIN_DEST}" 755
+gl_install_file "${MENU_BIN_SRC}" "${MENU_BIN_DEST}" 755
 
 echo "[gallery] installing theme-aware borders helper to ${BORDERS_BIN_DEST}"
-run cp "${BORDERS_BIN_SRC}" "${BORDERS_BIN_DEST}"
-run chmod +x "${BORDERS_BIN_DEST}"
+gl_install_file "${BORDERS_BIN_SRC}" "${BORDERS_BIN_DEST}" 755
 
 echo "[gallery] installing coding-agent launcher to ${AGENT_BIN_DEST}"
-run cp "${AGENT_BIN_SRC}" "${AGENT_BIN_DEST}"
-run chmod +x "${AGENT_BIN_DEST}"
+gl_install_file "${AGENT_BIN_SRC}" "${AGENT_BIN_DEST}" 755
 # The agent shipped briefly (2026-09-22) as a tui-kind plugin, which opened it
 # in a floating window; it is a plain bin script now, so an installation that
 # saw that version still has the plugin -- and `gallery open gallery.agent`
@@ -305,8 +494,7 @@ fi
 
 if [ -f "${QML_BIN_SRC}" ]; then
   echo "[gallery] installing qml host launcher to ${QML_BIN_DEST}"
-  run cp "${QML_BIN_SRC}" "${QML_BIN_DEST}"
-  run chmod +x "${QML_BIN_DEST}"
+  gl_install_file "${QML_BIN_SRC}" "${QML_BIN_DEST}" 755
   # The qml-venv (PySide6 etc.) is deliberately NOT created here -- it is
   # built on first run (gallery-qml itself, or `gallery-qml --setup`) so
   # install.sh stays fast and does not need network access every time.
@@ -316,7 +504,7 @@ if [ -f "${QML_BIN_SRC}" ]; then
   # "python3.12" + a blank document). The bundle itself is assembled lazily
   # by gallery-qml once the venv exists.
   if [ -f "${SCRIPT_DIR}/assets/Gallery.icns" ]; then
-    run cp "${SCRIPT_DIR}/assets/Gallery.icns" "${CONFIG_DIR}/Gallery.icns"
+    gl_install_file "${SCRIPT_DIR}/assets/Gallery.icns" "${CONFIG_DIR}/Gallery.icns" 644
   fi
 else
   echo "[gallery] no bin/gallery-qml in this checkout yet -- skipping (a qml-kind plugin will not run until it is added)"
@@ -352,26 +540,43 @@ do
 end
 -- gallery:end'
 
-if [ ! -e "${HS_INIT}" ]; then
+# init.lua belongs to the user: the load block is appended once (after a backup
+# of the file), refreshed in place when it is out of date, and left alone
+# otherwise. Detected by its begin marker, not by the word "Gallery".
+if ! gl_exists "${HS_INIT}"; then
   echo "[gallery] writing new ${HS_INIT}"
   if [ "${DRY_RUN}" -eq 1 ]; then
     echo "[gallery] (dry-run) create ${HS_INIT} with Gallery load block"
   else
     run mkdir -p "$(dirname "${HS_INIT}")"
     printf '%s\n' "${GALLERY_BLOCK}" > "${HS_INIT}"
+    mkdir -p "${CONFIG_DIR}/state"
+    : > "${CONFIG_DIR}/state/init-lua-created"
   fi
-elif ! grep -q "Gallery" "${HS_INIT}"; then
-  echo "[gallery] appending Gallery block to existing ${HS_INIT}"
-  if [ "${DRY_RUN}" -eq 1 ]; then
-    echo "[gallery] (dry-run) append Gallery block to ${HS_INIT}"
+elif gl_block_has "${HS_INIT}"; then
+  current_block="$(awk '/^-- gallery:begin$/ { p = 1 } p { print } /^-- gallery:end$/ { p = 0 }' "${HS_INIT}")"
+  if [ "${current_block}" = "${GALLERY_BLOCK}" ]; then
+    echo "[gallery] ${HS_INIT} already has the current Gallery block"
+  elif [ "${DRY_RUN}" -eq 1 ]; then
+    echo "[gallery] (dry-run) would back up ${HS_INIT} and refresh its Gallery block"
   else
+    echo "[gallery] refreshing the Gallery block in ${HS_INIT}"
+    gl_backup_once "${HS_INIT}"
+    gl_block_replace "${HS_INIT}" "${GALLERY_BLOCK}"
+  fi
+elif grep -q -- '-- gallery:begin' "${HS_INIT}"; then
+  echo "[gallery] ${HS_INIT} has a Gallery begin marker without its end marker; leaving it alone -- fix it by hand" >&2
+else
+  echo "[gallery] appending Gallery block to existing ${HS_INIT} (exists, user file)"
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    echo "[gallery] (dry-run) would back up ${HS_INIT} to ${HS_INIT}.gallery-bak, then append the Gallery block"
+  else
+    gl_backup_once "${HS_INIT}"
     {
       printf '\n'
       printf '%s\n' "${GALLERY_BLOCK}"
     } >> "${HS_INIT}"
   fi
-else
-  echo "[gallery] ${HS_INIT} already references Gallery, leaving it untouched"
 fi
 
 # --- skhd bindings, first copy ------------------------------------------------------
@@ -381,7 +586,7 @@ fi
 # down covers the case where only this file changed.
 SKHD_DIR="${HOME_DIR}/.config/skhd"
 run mkdir -p "${SKHD_DIR}"
-run install -m 644 "${SCRIPT_DIR}/skhd/gallery.skhd" "${SKHD_DIR}/gallery.skhd"
+gl_install_file "${SCRIPT_DIR}/skhd/gallery.skhd" "${SKHD_DIR}/gallery.skhd" 644
 # local.skhd (the user's own bindings, loaded by skhdrc): seeded once, never overwritten.
 [ -e "${SKHD_DIR}/local.skhd" ] || run install -m 644 "${SCRIPT_DIR}/tiler/local.skhd.example" "${SKHD_DIR}/local.skhd"
 
@@ -450,7 +655,9 @@ fi
 # at Gallery's own `current` theme symlink so such a plugin sees the right
 # colours without any plugin-side patch. A link is only replaced when it is
 # itself a symlink (or absent) -- a real directory there is left alone (a
-# genuine Omarchy install sharing this Mac) and reported, never clobbered.
+# genuine Omarchy install sharing this Mac) and reported, never clobbered. The
+# target of a symlink of the user's own that gets replaced is recorded in
+# state/omarchy-links.tsv, and --uninstall points it back there.
 link_omarchy_theme() {
   local link="$1"
   echo "[gallery] linking Omarchy theme compatibility symlink ${link} -> ${OMARCHY_THEME_TARGET}"
@@ -458,7 +665,18 @@ link_omarchy_theme() {
   if [ "${DRY_RUN}" -eq 1 ]; then
     echo "[dry] would link ${link} -> ${OMARCHY_THEME_TARGET} unless a real directory is already there"
   elif [ -L "${link}" ] || [ ! -e "${link}" ]; then
-    local tmp_link
+    local tmp_link old_target
+    old_target="$(readlink "${link}" 2>/dev/null || true)"
+    case "${old_target}" in
+      ""|"${CONFIG_DIR}"/*) ;;
+      *)
+        if ! awk -F'\t' -v l="${link}" '$1 == l { f = 1 } END { exit !f }' "${OMARCHY_LINKS_RECORD}" 2>/dev/null; then
+          mkdir -p "${CONFIG_DIR}/state"
+          printf '%s\t%s\n' "${link}" "${old_target}" >> "${OMARCHY_LINKS_RECORD}"
+          echo "[gallery] ${link} pointed to ${old_target}; recorded so uninstall can point it back"
+        fi
+        ;;
+    esac
     tmp_link="$(mktemp -u "$(dirname "${link}")/.theme.XXXXXXXX")"
     ln -s "${OMARCHY_THEME_TARGET}" "${tmp_link}"
     mv -fh "${tmp_link}" "${link}"

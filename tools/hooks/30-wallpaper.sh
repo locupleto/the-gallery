@@ -42,6 +42,10 @@
 # (the visible Space is still correct). Set GALLERY_WALLPAPER_ALL_SPACES=0
 # to keep the plain System Events behaviour.
 #
+# The first time it runs, the store is copied to
+# ~/.config/gallery/state/wallpaper-original.plist (never overwritten);
+# `gallery bg restore` puts it back.
+#
 # Set GALLERY_WALLPAPER_DRY_RUN=1 to print the chosen path and the
 # osascript this hook would run, without applying anything or touching the
 # log file.
@@ -55,6 +59,7 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/gallery"
 BG_DIR="${CONFIG_DIR}/themes/${THEME}/backgrounds"
 STATE_FILE="${CONFIG_DIR}/state/backgrounds.json"
 STORE_FILE="${HOME}/Library/Application Support/com.apple.wallpaper/Store/Index.plist"
+ORIGINAL_STORE="${CONFIG_DIR}/state/wallpaper-original.plist"
 
 mkdir -p "$(dirname "${LOG_FILE}")"
 
@@ -239,6 +244,17 @@ if [ "${GALLERY_WALLPAPER_DRY_RUN:-0}" = "1" ]; then
   fi
   exit 0
 fi
+
+# snapshot_store -- before the FIRST apply, keep a copy of the wallpaper store
+# as the user left it, for `gallery bg restore` and the uninstaller. Never
+# overwritten afterwards (later copies would already hold our changes).
+snapshot_store() {
+  [ -f "${STORE_FILE}" ] || return 0
+  [ -e "${ORIGINAL_STORE}" ] && return 0
+  mkdir -p "$(dirname "${ORIGINAL_STORE}")"
+  cp -p "${STORE_FILE}" "${ORIGINAL_STORE}" && log "saved the original wallpaper store to ${ORIGINAL_STORE}"
+}
+snapshot_store || true
 
 if apply_visible; then
   log "applied ${CHOSEN} for ${THEME}"
