@@ -130,7 +130,9 @@ scan() {
   # Third source: orphans -- tileable windows on a visible bsp Space that have
   # no node in its tree (split "none" while the Space holds two or more
   # tileable windows). Layer "orphan"; the fix is retile_window, not a relaunch.
-  bsp_spaces=$(${GHOSTS_YABAI:-yabai} -m query --spaces 2>/dev/null | jq -c '[.[] | select(.type == "bsp" and .["is-visible"]) | .index]')
+  # While the screen is locked yabai can answer --spaces with a bare "[" (seen on
+  # macOS 12): no Spaces then, rather than a jq error every run.
+  bsp_spaces=$(${GHOSTS_YABAI:-yabai} -m query --spaces 2>/dev/null | jq -c '[.[] | select(.type == "bsp" and .["is-visible"]) | .index]' 2>/dev/null || true)
   ${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r --arg us "$US" --argjson spaces "${bsp_spaces:-[]}" '
     map(select(.["has-ax-reference"] and .subrole == "AXStandardWindow" and .["is-visible"]
                and (.["is-floating"] | not) and (.["is-minimized"] | not) and (.["is-hidden"] | not)
