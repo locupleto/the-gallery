@@ -30,11 +30,22 @@ Notes:
 
 - The stock `/bin/bash` 3.2 and the system `python3` are enough. `git`, `rsync`
   and `python3` are expected on `PATH`.
-- Homebrew is expected at `/opt/homebrew` (Apple silicon). A few paths are
-  fixed to it: `bin/gallery-tui` and `bin/gallery-qml` prepend it to `PATH`,
-  the `spaces` feed in `Gallery.spoon/lib/bridge.lua` runs
-  `/opt/homebrew/bin/yabai`, and the System Monitor plugin runs
-  `/opt/homebrew/bin/btop`.
+- Homebrew can be at `/opt/homebrew` (Apple silicon) or `/usr/local`
+  (Intel); the scripts look in both.
+- **Older Macs.** The Gallery runs on macOS 12 Monterey and later, Intel
+  included, with these differences:
+  - Hammerspoon 1.1 and later need macOS 13. On macOS 12, install
+    [Hammerspoon 1.0.0](https://github.com/Hammerspoon/hammerspoon/releases/tag/1.0.0)
+    by hand.
+  - Homebrew's iTerm2 cask needs macOS 13, but iTerm2 3.6.x runs on 12.4 and
+    later: download it from [iterm2.com](https://iterm2.com/downloads.html).
+    Ghostty needs macOS 13.
+  - JankyBorders needs macOS 14, so there is no focus outline before Sonoma;
+    the installer skips it and says so.
+  - Homebrew no longer has prebuilt packages for macOS 12 and builds from
+    source. That is quick for yabai and skhd and takes a few minutes for fzf
+    and glow (Go), but btop pulls in LLVM, which takes hours on an old Mac:
+    run `./install.sh --minimal` to leave btop and superfile out.
 - Put `~/bin` on your shell `PATH`; the installer copies the `gallery*`
   commands there. The skhd key bindings call `$HOME/bin/gallery` by full path,
   so they work either way, but typing `gallery` in a terminal needs it.
