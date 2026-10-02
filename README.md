@@ -8,7 +8,7 @@ day to day:
    of cheat sheets (`tiler/`).
 2. **Themes.** Omarchy's colour themes rendered onto everything at once:
    your terminal (iTerm2, Ghostty, kitty or WezTerm), the focus outline,
-   the wallpaper, Übersicht widgets, the font.
+   the wallpaper, the font.
 3. **Plugins.** A Hammerspoon Spoon that hosts manifest-driven plugins
    (floating TUIs, services, unmodified Omarchy QML plugins), modelled on
    Omarchy 4's plugin system: each plugin is a directory with a
@@ -121,7 +121,6 @@ plugin) is the one command that touches everything. It fans out like this:
           ├─▶ state/theme.css ─────────────────▶ any consumer that wants a stylesheet
           ├─▶ state/theme.json ────────────────▶ Gallery.spoon (panel / overlay variables)
           ├─▶ state/theme.sh ──────────────────▶ gallery-borders, tui plugins, your scripts
-          ├─▶ state/crystal.css ───────────────▶ Übersicht crystal widgets      (opt-in: gallery widgets)
           ├─▶ iTerm2 …/gallery-theme.json ─────▶ every floating Gallery window
           ├─▶ iTerm2 …/gallery-console.json ───▶ your everyday terminal         (opt-in: gallery console)
           ├─▶ state/terminals/* ───────────────▶ the same for Ghostty, kitty, WezTerm (gallery terminal)
@@ -351,20 +350,9 @@ Nerd Fonts. The QML plugin host (`qml/host.py`) reads the same file and,
 when a family is set and installed, puts it first in the "monospace" alias
 fallback list it already resolves Omarchy's icon font from.
 
-`widgets ...` does the same for an Übersicht widget set, the crystal
-widgets, that is not published. Without it `gallery widgets
-available` exits 1, the picker's widgets line is hidden, and `widgets theme`
-only records the mode. It is just as optional as the rest: `native` (the
-default) leaves them on their own shipped colours, `theme` swaps their
-static white for the theme's lightest foreground and their CPU/mem/swap bar
-fill for the accent. The renderer writes `~/.config/gallery/state/crystal.css`
-(CSS custom properties, empty in native mode) which the widgets'
-`crystal-theme.widget` injects into the widget document every couple of
-seconds, and adds `CRYSTAL_BAR_COLOR` to `theme.sh` in theme mode only. The
-mode lives in `~/.config/gallery/state/widgets.json`. The theme picker shows
-a "Widgets: ..." line and binds `ctrl-u` to toggle it, but only while
-Übersicht is running with those widgets on this Mac (`gallery widgets
-available`); elsewhere the picker never mentions them.
+`widgets ...` themes an Übersicht widget set through
+`~/.config/gallery/state/crystal.css`; without such a set it does nothing.
+See [docs/THEMES.md](docs/THEMES.md).
 
 `borders ...` controls the focused-window frame JankyBorders draws
 (`bin/gallery-borders`). The active colour follows Omarchy's own rule: a
