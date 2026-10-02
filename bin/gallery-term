@@ -347,16 +347,31 @@ open_ghostty() {
   if [ -n "${CWD}" ]; then
     record="${record}${record:+, }initial working directory:\"$(as_escape "${CWD}")\""
   fi
+  local cold=0
   if ! term_running ghostty; then
     cold_start ghostty
+    cold=1
     # A plain tile window: the startup window Ghostty opens is the window.
     [ -n "${record}" ] || return 0
   fi
   if [ -n "${record}" ]; then
+    # A cold Ghostty has opened its own startup window by now; close it once
+    # ours exists, so one keypress leaves one window.
     act osascript \
       -e 'tell application id "com.mitchellh.ghostty"' \
+      -e "set coldWindows to {}" \
+      -e "if ${cold} is 1 then" \
+      -e 'repeat 50 times' \
+      -e 'if (count of windows) > 0 then exit repeat' \
+      -e 'delay 0.1' \
+      -e 'end repeat' \
+      -e 'set coldWindows to id of every window' \
+      -e 'end if' \
       -e 'activate' \
       -e "new window with configuration {${record}}" \
+      -e 'repeat with i in coldWindows' \
+      -e 'close window (first window whose id is (contents of i))' \
+      -e 'end repeat' \
       -e 'end tell'
   else
     act osascript \
@@ -385,6 +400,9 @@ term_binary() {
 # first and the rendered Gallery theme after it (later wins).
 open_kitty() {
   local args=(--single-instance) user_conf="" c
+  # A single instance applies --config only when it starts, so floating windows
+  # get an instance group of their own that always starts with the Gallery theme.
+  [ "${ROLE}" = float ] && args+=(--instance-group gallery-float)
   [ -n "${TITLE}" ] && args+=(--title "${TITLE}")
   [ -n "${CWD}" ] && args+=(--directory "${CWD}")
   if [ "${ROLE}" = float ]; then
@@ -406,7 +424,8 @@ open_wezterm() {
   local args=()
   if [ "${ROLE}" = float ]; then
     args+=(--config "window_background_opacity=$(glass_value opacity 0.88)"
-           --config "macos_window_background_blur=$(glass_value blur 9)")
+           --config "macos_window_background_blur=$(glass_value blur 9)"
+           --config "hide_tab_bar_if_only_one_tab=true")
   fi
   args+=(start)
   [ "${ROLE}" = float ] && args+=(--always-new-process)

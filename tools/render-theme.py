@@ -875,6 +875,8 @@ def render_wezterm_lua(
         "  },",
         f"  window_background_opacity = {glass_opacity():g},",
         f"  macos_window_background_blur = {int(CONSOLE_BLUR_RADIUS)},",
+        # One tab, no tab bar: a Gallery window reads like the other terminals'.
+        "  hide_tab_bar_if_only_one_tab = true,",
     ]
     if font_prefs:
         lines.append(f"  font = wezterm.font({lua_string(font_prefs['family'])}),")

@@ -134,7 +134,7 @@ say "gallery-term ghostty: float / tile, cold / running"
 
 # kitty
 out="$(open_dry kitty float 1 --title "Gallery: Foo" -- /x/gallery-tui run Foo)"
-assert_contains "${out}" "kitty --single-instance --title 'Gallery: Foo'" "kitty title option"
+assert_contains "${out}" "kitty --single-instance --instance-group gallery-float --title 'Gallery: Foo'" "kitty title option"
 assert_contains "${out}" "--config ${TERMDIR}/kitty.conf" "kitty float themes the window"
 assert_contains "${out}" "/x/gallery-tui run Foo &" "kitty runs detached"
 assert_lacks "${out}" "gallery-term wrap" "kitty needs no wrapper"
@@ -153,7 +153,7 @@ say "gallery-term kitty: float / tile, cold = running"
 
 # WezTerm
 out="$(open_dry wezterm float 1 --title "Gallery: Foo" -- /x/gallery-tui run Foo)"
-assert_contains "${out}" "wezterm --config window_background_opacity=0.88 --config macos_window_background_blur=9 start --always-new-process" "wezterm float glass in its own process"
+assert_contains "${out}" "wezterm --config window_background_opacity=0.88 --config macos_window_background_blur=9 --config hide_tab_bar_if_only_one_tab=true start --always-new-process" "wezterm float glass in its own process"
 assert_contains "${out}" "gallery-term wrap 'Gallery: Foo' ${TERMDIR}/gallery-osc.sh /x/gallery-tui run Foo &" "wezterm wrapper"
 out="$(open_dry wezterm tile 0)"
 assert_contains "${out}" "wezterm start &" "wezterm tile, no command"
