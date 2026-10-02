@@ -369,8 +369,9 @@ open_ghostty() {
   if ! term_running ghostty; then
     cold_start ghostty
     cold=1
-    # A plain tile window: the startup window Ghostty opens is the window.
-    [ -n "${record}" ] || return 0
+    # A plain tile window: the startup window Ghostty opens (in the home
+    # folder) is the window.
+    [ "${#RUN[@]}" -gt 0 ] || return 0
   fi
   if [ -n "${record}" ]; then
     # A cold Ghostty has opened its own startup window by now; close it once
@@ -472,6 +473,12 @@ cmd_open() {
   [ $# -eq 0 ] || CMD=("$@")
   if [ "${ROLE}" = float ] && [ "${#CMD[@]}" -eq 0 ]; then
     die "a float window needs a command: gallery-term open --role float -- CMD"
+  fi
+  # A plain shell window starts in the home folder, as a new terminal window
+  # does when opened by hand. Launched from a key, the caller's directory is
+  # skhd's, which is /.
+  if [ -z "${CWD}" ] && [ "${#CMD[@]}" -eq 0 ]; then
+    CWD="${HOME}"
   fi
 
   case "$(current_terminal)" in
