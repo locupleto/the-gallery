@@ -53,15 +53,17 @@ DRY_RUN=0
 UNINSTALL=0
 SKIP_TILER=0
 RESTART_TILER=0
+MINIMAL=0
 
 usage() {
   cat <<'USAGE' >&2
-usage: install.sh [--dry-run] [--uninstall] [--skip-tiler] [--restart-tiler]
+usage: install.sh [--dry-run] [--uninstall] [--skip-tiler] [--restart-tiler] [--minimal]
   --dry-run        print what would happen, change nothing
   --uninstall      remove the Gallery (and, unless --skip-tiler, the tiler)
   --skip-tiler     do not run tiler/install.sh (yabai/skhd/borders/Learn)
   --restart-tiler  pass --restart through to tiler/install.sh, forcing a
                    yabai/skhd restart even if their config did not change
+  --minimal        do not brew install the companion apps (btop, superfile)
 USAGE
 }
 
@@ -78,6 +80,9 @@ for arg in "$@"; do
       ;;
     --restart-tiler)
       RESTART_TILER=1
+      ;;
+    --minimal)
+      MINIMAL=1
       ;;
     --help|-h)
       usage
@@ -106,6 +111,27 @@ require_hammerspoon() {
     echo "[gallery] install it with: brew install --cask hammerspoon" >&2
     exit 1
   fi
+}
+
+# Companion apps the theme renderer colours to match: btop (the System
+# Monitor plugin) and superfile (the `spf` file manager). Installed by
+# default so a new Mac comes out complete; --minimal skips them. A failed
+# brew install only warns -- nothing else in the Gallery depends on them.
+# --uninstall leaves them in place, like any other Homebrew formula.
+install_companion_apps() {
+  local formula
+  if [ "${MINIMAL}" -eq 1 ]; then
+    echo "[gallery] --minimal: not installing btop or superfile"
+    return 0
+  fi
+  for formula in btop superfile; do
+    if brew list --formula "${formula}" >/dev/null 2>&1; then
+      echo "[gallery] ${formula} already installed ($(brew list --versions "${formula}"))"
+    else
+      run brew install "${formula}" \
+        || echo "[gallery] brew install ${formula} failed -- carrying on without it" >&2
+    fi
+  done
 }
 
 # Optional tools used by individual tui plugins. Missing ones only degrade
@@ -167,6 +193,7 @@ if [ "${UNINSTALL}" -eq 1 ]; then
 fi
 
 require_hammerspoon
+install_companion_apps
 advise_optional_tools
 
 echo "[gallery] installing Spoon to ${SPOON_DEST}"

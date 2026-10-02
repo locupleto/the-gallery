@@ -161,9 +161,10 @@ On a new Mac, before running it: Homebrew, a GitHub SSH key, iTerm2 and
 Hammerspoon (`brew install --cask iterm2 hammerspoon`; the installer refuses
 to run without Hammerspoon.app), and the Obsidian vault synced (the Learn
 menu reads its sheets from it). Optional but wanted for the full experience:
-`brew install chafa btop uv superfile` (picker previews, sysmon, the `qml`
-kind, a themed `spf` file manager). The
-script itself installs yabai, skhd, JankyBorders, fzf and glow, copies
+`brew install chafa uv` (picker previews, the `qml` kind). The
+script itself installs yabai, skhd, JankyBorders, fzf and glow, plus the
+companion apps btop (the System Monitor plugin) and superfile (a themed
+`spf` file manager) unless run with `--minimal`, copies
 everything it needs onto the boot volume, renders the current theme, and
 starts Hammerspoon; the stock `/bin/bash` 3.2 is enough. macOS then asks for
 Accessibility (Hammerspoon, yabai, skhd) and a few Automation grants by
