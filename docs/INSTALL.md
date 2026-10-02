@@ -33,20 +33,31 @@ Notes:
   and `python3` are expected on `PATH`.
 - Homebrew can be at `/opt/homebrew` (Apple silicon) or `/usr/local`
   (Intel); the scripts look in both.
-- **Older Macs.** The Gallery runs on macOS 12 Monterey and later, Intel
-  included, with these differences:
+- **Intel Macs** on a current macOS need nothing special: Homebrew lives in
+  `/usr/local` there and every script looks for it in both places. The
+  differences below come from an older macOS, not from Intel as such.
+- **Older Macs.** The Gallery runs on macOS 12 Monterey and later, with these
+  differences:
   - Hammerspoon 1.1 and later need macOS 13. On macOS 12, install
     [Hammerspoon 1.0.0](https://github.com/Hammerspoon/hammerspoon/releases/tag/1.0.0)
     by hand.
   - Homebrew's iTerm2 cask needs macOS 13, but iTerm2 3.6.x runs on 12.4 and
     later: download it from [iterm2.com](https://iterm2.com/downloads.html).
-    Ghostty needs macOS 13.
+    Ghostty needs macOS 13. kitty still supports macOS 12 (0.49 does) and is
+    the best of the supported terminals there: `gallery terminal set kitty`,
+    then `gallery console theme` for its colours.
   - JankyBorders needs macOS 14, so there is no focus outline before Sonoma;
     the installer skips it and says so.
   - Homebrew no longer has prebuilt packages for macOS 12 and builds from
     source. That is quick for yabai and skhd and takes a few minutes for fzf
     and glow (Go), but btop pulls in LLVM, which takes hours on an old Mac:
     run `./install.sh --minimal` to leave btop and superfile out.
+  - The macOS Python 3 (3.9 on Monterey) is enough for the theme renderer;
+    nothing else needs installing for it.
+  - On a Homebrew that has never installed an app (a cask), the first one asks
+    for your password, because Homebrew must create `/usr/local/Caskroom`;
+    run it in a terminal on that Mac, for example
+    `brew install --cask claude-code`.
 - Put `~/bin` on your shell `PATH`; the installer copies the `gallery*`
   commands there. The skhd key bindings call `$HOME/bin/gallery` by full path,
   so they work either way, but typing `gallery` in a terminal needs it.
@@ -429,6 +440,18 @@ check the block, run `gallery reload`, and retry. Never wrap `hs` in
 links the `hs` tool into Homebrew's `bin` each time Hammerspoon loads it. If
 it is still missing, run `hs.ipc.cliInstall("/opt/homebrew")` in the
 Hammerspoon console (`"/usr/local"` on an Intel Mac).
+
+**Installing over SSH.** The installer itself runs fine over SSH, but the
+permission prompts appear on that Mac's own screen. Anything that talks to
+System Events, `gallery doctor` among them, waits until someone answers the
+prompt there, so it seems to hang. Give the Accessibility grants and answer
+the first prompts at the Mac.
+
+**The first window after a permission prompt opens blank and tiled.** A
+terminal that is still starting when its first window is created can reach
+yabai without its title, so the rule that floats Learn and the pickers does not
+match. Close it and press the key again; once the terminal is running it does
+not recur.
 
 **Key bindings do nothing.** Check that skhd is running with the Accessibility
 grant (`gallery doctor`), that your terminal's Secure Keyboard Entry is off, and
