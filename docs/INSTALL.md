@@ -287,8 +287,8 @@ or not executable prints an error in its own window and holds it for 3 seconds.
 **yabai does not tile new windows.** `gallery doctor` reports
 `FAIL yabai is blind` when no window has an accessibility reference. Dismiss any
 pending Accessibility prompt and restart the service, for example
-`launchctl kickstart -k gui/$(id -u)/com.asmvik.yabai` (the doctor message
-hard-codes uid 501). Windows created while the screen is locked never get a
+`launchctl kickstart -k gui/$(id -u)/com.asmvik.yabai`, as the doctor message
+says. Windows created while the screen is locked never get a
 reference; `gallery ghosts` lists them.
 
 **The theme changes but the desktop picture does not.** No backgrounds are

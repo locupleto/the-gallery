@@ -3510,7 +3510,7 @@ else:
             echo "OK      yabai has accessibility references"
             ;;
           blind)
-            echo "FAIL    yabai is blind (no accessibility references) -- dismiss any pending accessibility prompt, then: launchctl kickstart -k gui/501/com.asmvik.yabai"
+            echo "FAIL    yabai is blind (no accessibility references) -- dismiss any pending accessibility prompt, then: launchctl kickstart -k gui/$(id -u)/com.asmvik.yabai"
             ok=0
             ;;
           no-windows)
