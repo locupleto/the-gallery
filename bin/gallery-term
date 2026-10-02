@@ -421,7 +421,9 @@ open_kitty() {
   local args=(--single-instance) user_conf="" c
   # A single instance applies --config only when it starts, so floating windows
   # get an instance group of their own that always starts with the Gallery theme.
-  [ "${ROLE}" = float ] && args+=(--instance-group gallery-float)
+  # Its windows are Gallery pickers that the Gallery closes itself (a toggle
+  # key, gallery close): no "It is running: fzf" confirmation for those.
+  [ "${ROLE}" = float ] && args+=(--instance-group gallery-float -o confirm_os_window_close=0)
   [ -n "${TITLE}" ] && args+=(--title "${TITLE}")
   [ -n "${CWD}" ] && args+=(--directory "${CWD}")
   if [ "${ROLE}" = float ]; then

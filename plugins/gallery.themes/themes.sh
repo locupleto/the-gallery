@@ -467,6 +467,10 @@ render_preview() {
     img_rows="$rows"
   fi
 
+  # kitty keeps images on a layer of their own that fzf's preview refresh
+  # does not touch, so each new image landed on top of the last one: delete
+  # them first (iTerm2's inline images live in the text cells and go with them).
+  [[ -n "${KITTY_WINDOW_ID:-}" || "${TERM:-}" == "xterm-kitty" ]] && printf '\033_Ga=d,d=A\033\\'
   chafa -s "${cols}x${img_rows}" "$bg_path" 2>/dev/null
 }
 

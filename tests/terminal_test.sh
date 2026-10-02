@@ -139,7 +139,7 @@ say "gallery-term ghostty: float / tile, cold / running"
 
 # kitty
 out="$(open_dry kitty float 1 --title "Gallery: Foo" -- /x/gallery-tui run Foo)"
-assert_contains "${out}" "kitty --single-instance --instance-group gallery-float --title 'Gallery: Foo'" "kitty title option"
+assert_contains "${out}" "kitty --single-instance --instance-group gallery-float -o confirm_os_window_close=0 --title 'Gallery: Foo'" "kitty title option"
 assert_contains "${out}" "--config ${TERMDIR}/kitty.conf" "kitty float themes the window"
 assert_contains "${out}" "/x/gallery-tui run Foo &" "kitty runs detached"
 assert_lacks "${out}" "gallery-term wrap" "kitty needs no wrapper"
