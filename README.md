@@ -61,7 +61,7 @@ top to bottom: keys go in at the top, pixels come out at the bottom.
                                            │  every hotkey on the Mac goes through here
                                            ▼
             ┌───────────────────────────── skhd ──────────────────────────────┐
-            │           tiler/skhdrc  ──.load──▶  skhd/gallery.skhd           │
+            │    skhdrc ──.load──▶  local.skhd · tiler.skhd · gallery.skhd    │
             └───┬──────────────────────────┬──────────────────────────────┬───┘
           super+h/j/k/l               super+space              shift+ctrl+lalt+space,
       super+1..9, f, t ...                                        lalt+shift+0, ...
@@ -96,8 +96,8 @@ Two rules keep the picture this simple:
 
 - **skhd is the only hotkey grabber.** The Gallery never registers keys of
   its own; its bindings are one file, `skhd/gallery.skhd`, that the tiler's
-  `skhdrc` includes. Every key on the map above is a line in one of those
-  two files.
+  `skhdrc` loads after the tiler's own `tiler.skhd` and your `local.skhd`.
+  Every key on the map above is a line in one of those files.
 - **Hammerspoon is optional for most of it.** `tui` and `menu` plugins are
   pure shell + a terminal + yabai (`bin/gallery-tui`, `bin/gallery-menu`), so
   the Themes picker, System Monitor and Learn all work with the Spoon
@@ -151,7 +151,7 @@ running system is always a copy:
 
 | In the repo | Installed to | Job |
 |---|---|---|
-| `tiler/yabairc`, `tiler/skhdrc`, `tiler/learn`, `tiler/focus-dir`, `tiler/yabai-layout` | `~/.config/yabai/`, `~/.config/skhd/` | tiling, hotkeys, Learn |
+| `tiler/yabairc`, `tiler/skhdrc`, `tiler/tiler.skhd`, `tiler/learn`, `tiler/focus-dir`, `tiler/yabai-layout` | `~/.config/yabai/`, `~/.config/skhd/` | tiling, hotkeys, Learn |
 | `skhd/gallery.skhd` | `~/.config/skhd/gallery.skhd` | the Gallery's own key bindings |
 | `Gallery.spoon/` (`init.lua` + `lib/*.lua`) | `~/.hammerspoon/Spoons/Gallery.spoon` | plugin host: manifests, panel/overlay/service/bar-widget kinds, IPC |
 | `plugins/*/manifest.json` | `~/.config/gallery/plugins/` | bundled plugins; `gallery add <git-url>` puts third-party ones beside them |
@@ -240,7 +240,8 @@ of the permission grants, verification and troubleshooting.
 `install.sh` installs the tiler first (yabai, skhd, JankyBorders, Learn) via
 `tiler/install.sh`, then copies the Gallery's own key bindings into place.
 skhd is the only hotkey grabber on the system: Gallery bindings live in
-`skhd/gallery.skhd`, included by `tiler/skhdrc` with `.load "gallery.skhd"`,
+`skhd/gallery.skhd`, loaded by `tiler/skhdrc` (after your `local.skhd` and the
+tiler's `tiler.skhd`),
 so the Gallery never registers its own hotkeys. Pass `--skip-tiler` to
 `install.sh` to skip the tiler step (e.g. on a machine that should run only
 the plugin host and theming). See `tiler/README.md` for the full key table,

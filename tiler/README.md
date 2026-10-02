@@ -78,7 +78,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + c | Calendar |
 | super + a / shift + a, e, y, x, g / shift + g | Omarchy's other app slots: not bound out of the box (they are personal); examples in `local.skhd.example` |
 | super + space | Learn menu: pick a cheat sheet (first press: allow "skhd wants to control iTerm2") |
-| super + shift + space | the tiler key sheet, generated from `skhdrc` |
+| super + shift + space | the key sheet, generated from `local.skhd`, `tiler.skhd` and `gallery.skhd` |
 
 Mouse: Option-drag moves a window, Option-right-drag resizes, dropping onto a
 tile swaps.
@@ -184,7 +184,7 @@ default folder a symlink to the vault's folder:
 `ln -s "<vault>/Cheat-Sheets" ~/.config/gallery/sheets`. With no sheets of
 your own the menu lists just the generated `Tiler-Keys`. The only generated sheet is
 `Tiler-Keys.md`, written from the `## description` lines above each binding
-in `skhdrc` — so keep those lines current; `tiler/install.sh` regenerates the
+in `local.skhd`, `tiler.skhd` and `gallery.skhd` — so keep those lines current; `tiler/install.sh` regenerates the
 note and the app every run. Dependencies: `fzf`, `glow` (Homebrew, installed
 by the script).
 
@@ -207,17 +207,18 @@ by the script).
   rule --apply`. `gallery home save` generates this file from the current
   layout (snapshot the windows you have arranged instead of hand-writing the
   map) and `gallery home apply` re-sources it live the same way.
-- `skhdrc` → `~/.config/skhd/skhdrc`: the table above.
-- `~/.config/skhd/local.skhd` (your own keys; never overwritten): loaded by
-  `skhdrc` before `gallery.skhd`. The installers create it once, from
-  `local.skhd.example` (all commented out: the app slots above, a custom key,
-  and how to switch a Gallery key off). Its `## ` description lines appear in
-  the Learn key sheet. skhd keeps the FIRST definition of a duplicate hotkey
-  and drops the later one without a warning, and parses a file's own bindings
-  before its `.load`s: so `local.skhd` can replace a key from `gallery.skhd`
-  and add new ones, but cannot replace a binding written in `skhdrc` itself.
-  skhd has no "unbind"; rebind a key to `: true` to silence it. A missing
-  `.load` file is only a warning in skhd's error log.
+- `skhdrc` → `~/.config/skhd/skhdrc`: binds nothing; it loads `local.skhd`,
+  `tiler.skhd` and `gallery.skhd`, in that order.
+- `tiler.skhd` → `~/.config/skhd/tiler.skhd`: the table above.
+- `~/.config/skhd/local.skhd` (your own keys; never overwritten): loaded
+  first. The installers create it once, from `local.skhd.example` (all
+  commented out: the app slots above, a custom key, and how to switch a
+  shipped key off). Its `## ` description lines appear in the Learn key sheet,
+  under "Your keys". skhd keeps the FIRST definition of a duplicate hotkey and
+  drops the later one without a warning, so a key in `local.skhd` replaces the
+  same key in `tiler.skhd` or `gallery.skhd`. skhd has no "unbind"; rebind a
+  key to `: true` to silence it. A missing `.load` file is only a warning in
+  skhd's error log.
 - `~/.config/yabai/yabairc.local` (optional, not created by the installer):
   plain `sh` sourced by `yabairc` after its own `yabai -m config` lines and
   rules and before `rule --apply`, so any setting there (gaps, layout, mouse

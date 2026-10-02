@@ -277,6 +277,8 @@ assert_file "${H}/.config/yabai/yabairc" "B yabairc"
 assert_file "${H}/.hammerspoon/init.lua" "B init.lua"
 assert_file "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json" "B iTerm profile"
 [ ! -e "${H}/.config/yabai/yabairc.gallery-bak" ] || fail "B: backed up a file that did not exist"
+assert_same "${H}/.config/skhd/local.skhd" "${REPO_ROOT}/tiler/local.skhd.example" "B seeds local.skhd"
+assert_file "${H}/.config/skhd/tiler.skhd" "B tiler.skhd"
 # brew services shows borders registered: it must be left running.
 : > "${STUB_LOG}"
 STUB_RUNNING="borders" STUB_BREW_SERVICES="borders started" STUB_ITERM_GUID="gallery-console" \
@@ -285,6 +287,17 @@ assert_lacks "$(cat "${STUB_LOG}")" "killall borders" "B leaves a brew-managed b
 [ -f "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ] || fail "B: Console profile removed while it is iTerm2's default"
 assert_contains "$(cat "${WORK_DIR}/B.uninstall.out")" "set your own profile as the default" "B tells how to release the Console profile"
 assert_gone "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json" "B gallery-theme.json"
+assert_gone "${H}/.config/skhd/local.skhd" "B removes the unedited local.skhd seed"
+assert_gone "${H}/.config/skhd/tiler.skhd" "B tiler.skhd"
+rm -rf "${H}/Library/Application Support/iTerm2"
+# An edited local.skhd is the user's and survives uninstall.
+"${INSTALL}" --minimal >/dev/null 2>&1 || fail "B: second install failed"
+echo 'lalt - p : echo mine' >> "${H}/.config/skhd/local.skhd"
+"${INSTALL}" --minimal >/dev/null 2>&1 || fail "B: third install failed"
+assert_contains "$(cat "${H}/.config/skhd/local.skhd")" "echo mine" "B reinstall keeps an edited local.skhd"
+"${INSTALL}" --uninstall >/dev/null 2>&1 || fail "B: second uninstall failed"
+assert_contains "$(cat "${H}/.config/skhd/local.skhd")" "echo mine" "B uninstall keeps an edited local.skhd"
+rm -f "${H}/.config/skhd/local.skhd"; rmdir "${H}/.config/skhd" 2>/dev/null || true
 rm -rf "${H}/Library/Application Support/iTerm2"
 "${INSTALL}" --uninstall --purge >/dev/null 2>&1 || fail "B: uninstall --purge failed"
 listing "${H}" > "${WORK_DIR}/B.after"
