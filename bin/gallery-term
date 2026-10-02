@@ -183,10 +183,26 @@ act_bg() {
   ( "$@" >/dev/null 2>&1 </dev/null & )
 }
 
-# quote_cmd ARGS... -- one shell-quoted command line (what iTerm and Ghostty
-# take as a single string).
+# quote_cmd ARGS... -- one quoted command line (what iTerm and Ghostty take as
+# a single string). Single quotes, not printf %q: iTerm splits the string with
+# its own parser, not a shell, and does not undo %q's backslash escapes -- the
+# agent's `zsh -l -c 'exec "$0" launch'` arrived as `exec \"\$0\" launch`
+# and failed with "command not found: $0". Plain single quotes mean the same
+# to iTerm and to the shell Ghostty runs. A word that itself contains a single
+# quote is double-quoted instead, with \ " $ ` escaped.
 quote_cmd() {
-  printf '%q ' "$@"
+  local a out=""
+  for a in "$@"; do
+    case "${a}" in
+      *[!A-Za-z0-9_@%+=:,./-]*|"")
+        case "${a}" in
+          *"'"*) a="\"$(printf '%s' "${a}" | sed -e 's/[\\"$`]/\\&/g')\"" ;;
+          *) a="'${a}'" ;;
+        esac ;;
+    esac
+    out="${out}${a} "
+  done
+  printf '%s' "${out}"
 }
 
 # as_escape STRING -- for an AppleScript string literal: backslashes first,
