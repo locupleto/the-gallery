@@ -14,8 +14,18 @@ Omarchy's cheat-sheet menu, rebuilt on this desk -- see "Learn" below.
 ```bash
 tiler/install.sh              # brew install yabai + skhd, copy the rc files, start services
 tiler/install.sh --dry-run    # show what it would do
-tiler/install.sh --uninstall  # stop both, remove the rc files (formulas stay)
+tiler/install.sh --uninstall  # stop and unregister both, put back what it replaced (formulas stay)
 ```
+
+An existing `yabairc`, `skhdrc` or helper of yours is moved to
+`<name>.gallery-bak` before the Gallery's copy goes in, and `--uninstall` moves
+it back; a Gallery file you edited is copied to
+`<name>.gallery-edited.<timestamp>` before it is overwritten. Everything
+installed is listed in `~/.config/gallery/state/install-manifest.tsv`.
+`~/.yabairc` and `~/.skhdrc` are never modified, but yabai and skhd read the
+`~/.config` copies first, so the installer warns when one exists.
+`--uninstall` also unregisters the launchd services (so they do not start at
+the next login) and stops JankyBorders unless it is a `brew services` entry.
 
 `./install.sh` at the Gallery root runs this as its first step (unless given
 `--skip-tiler`), so on a fresh machine one command installs tiling, hotkeys,

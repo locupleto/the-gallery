@@ -216,6 +216,22 @@ Hammerspoon. macOS then asks for Accessibility (Hammerspoon, yabai, skhd)
 and a few Automation grants by hand; `gallery doctor` lists what is still
 missing. Updating later is `git pull` followed by the same `./install.sh`.
 
+The installer does not overwrite anything of yours without keeping it: a file
+it replaces is moved to `<name>.gallery-bak` first, a file it edits in place
+(such as `init.lua`) is copied there once before the first edit, and
+everything it writes is listed in `~/.config/gallery/state/install-manifest.tsv`.
+`./install.sh --dry-run` says what it would back up. To remove the Gallery and
+put the Mac back as it was:
+
+```sh
+./install.sh --uninstall          # restores backups, removes what it installed
+./install.sh --uninstall --purge  # ... and deletes ~/.config/gallery too
+```
+
+`--keep-wallpaper` skips the wallpaper restore (`gallery bg restore` does it
+on its own). The Homebrew formulae stay. Details are in
+[docs/INSTALL.md](docs/INSTALL.md#uninstalling).
+
 [docs/INSTALL.md](docs/INSTALL.md) is the full walkthrough: flags, the order
 of the permission grants, verification and troubleshooting.
 
