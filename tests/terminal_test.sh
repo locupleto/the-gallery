@@ -234,6 +234,37 @@ grep -q 'palette = 0=' "${TERMDIR}/ghostty.conf" || fail "ghostty.conf is writte
 [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ] || fail "iTerm Console profile missing"
 say "rendered theme files for ghostty, kitty, wezterm (and the iTerm profiles still)"
 
+# --- 4a. console close: ask (default) adds nothing, never adds each no-prompt key
+ITERM_CONSOLE_JSON="${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"
+printf '{"mode": "theme"}\n' > "${CFG}/state/console.json"
+python3 "${RENDER}" >/dev/null 2>&1
+for f in ghostty.conf kitty.conf wezterm.lua; do
+  if grep -qi 'confirm' "${TERMDIR}/${f}"; then fail "${f} carries a close setting with close=ask"; fi
+done
+python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["Profiles"][0]; assert "Prompt Before Closing 2" not in p' "${ITERM_CONSOLE_JSON}" \
+  || fail "iTerm Console profile carries a close setting with close=ask"
+printf '{"mode": "theme", "close": "never"}\n' > "${CFG}/state/console.json"
+python3 "${RENDER}" >/dev/null 2>&1
+assert_contains "$(cat "${TERMDIR}/ghostty.conf")" "confirm-close-surface = false" "close never (ghostty)"
+assert_contains "$(cat "${TERMDIR}/kitty.conf")" "confirm_os_window_close 0" "close never (kitty)"
+assert_contains "$(cat "${TERMDIR}/wezterm.lua")" 'window_close_confirmation = "NeverPrompt"' "close never (wezterm)"
+python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["Profiles"][0]; assert p["Prompt Before Closing 2"] == 0' "${ITERM_CONSOLE_JSON}" \
+  || fail "iTerm Console profile should not prompt with close=never"
+# the CLI keeps mode and close side by side
+assert_contains "$("${GALLERY}" console close)" "close: never" "console close shows the setting"
+"${GALLERY}" console close ask >/dev/null
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d == {"mode": "theme", "close": "ask"}, d' "${CFG}/state/console.json" \
+  || fail "console close ask should keep the mode"
+"${GALLERY}" console close never >/dev/null
+"${GALLERY}" console native >/dev/null 2>&1 || true
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d == {"mode": "native", "close": "never"}, d' "${CFG}/state/console.json" \
+  || fail "console native should keep the close setting"
+assert_contains "$("${GALLERY}" console status)" "takes effect only while the console follows the theme" "close never in native mode is flagged"
+"${GALLERY}" console close sometimes >/dev/null 2>&1 && fail "console close sometimes should be rejected"
+"${GALLERY}" console close ask >/dev/null
+printf '{"mode": "native"}\n' > "${CFG}/state/console.json"
+say "console close ask|never: rendered per terminal, kept alongside the mode"
+
 # --- 4b. glass: state/glass.json overrides the defaults, bad input never fails ---
 ITERM_CONSOLE="${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"
 printf '{"mode": "theme"}\n' > "${CFG}/state/console.json"

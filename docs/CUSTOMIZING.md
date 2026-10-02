@@ -641,6 +641,53 @@ include line the Gallery adds for you). They are described in
 [Terminals](../README.md#terminals) section. In the theme picker, `ctrl-t`
 toggles the console.
 
+### Which settings win
+
+The Gallery never rewrites your terminal's own settings. It renders its own
+file for each terminal (colours, the font from `gallery font`, the glass) and
+places it next to yours:
+
+| Window | What it reads |
+|---|---|
+| The Gallery's floating windows (pickers, Learn, plugins) | your config, then the Gallery's file on top |
+| Your everyday windows, with `console theme` | your config, with one line at its end that includes the Gallery's file |
+| Your everyday windows, with `console native` | your config only |
+
+So while the console follows the theme, the Gallery's file overrides your own
+setting for anything both set. To keep one of your own:
+
+- **kitty** reads an `include` where it stands and a later line wins: put your
+  setting after the include line.
+- **Ghostty** loads a `config-file` only after the rest of your config, wherever
+  the line is, so the Gallery's file always wins there. Leave the key to the
+  Gallery (`gallery font`, `gallery glass`), or use `console native`.
+- **WezTerm** merges the Gallery's table where you put the two lines; set your
+  key after them.
+- **iTerm2** has no config file: the Gallery's "Console" profile inherits from
+  your Default profile and sets only what the Gallery manages.
+
+The Gallery's files live in `~/.config/gallery/state/terminals/` and are
+rewritten on every theme change; do not edit them.
+
+### Closing windows without asking
+
+iTerm2, Ghostty, kitty and WezTerm ask before closing a window that runs
+something other than the shell (an agent, ssh, a build). Omarchy turns that off
+in all its terminals, so super + w closes at once. The Gallery's own floating
+windows never ask. For your everyday windows the default is to keep asking,
+because a stray super + w on an agent window ends the session:
+
+```sh
+gallery console close           # ask or never
+gallery console close never     # close without asking, as in Omarchy
+gallery console close ask       # back to the terminal's own setting (the default)
+```
+
+`never` is written into the Gallery's file for each terminal (and the iTerm2
+Console profile), so it works only while the console follows the theme.
+`gallery console native` or uninstalling removes it with the rest. `ask` adds
+nothing at all, and your terminal's own setting decides.
+
 ## Plugins
 
 A plugin is a directory with a `manifest.json`; the full format is in

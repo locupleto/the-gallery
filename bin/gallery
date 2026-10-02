@@ -37,6 +37,7 @@
 #   gallery console theme
 #   gallery console native
 #   gallery console toggle
+#   gallery console close [ask|never]
 #   gallery terminal [status]
 #   gallery terminal list
 #   gallery terminal set <iterm2|ghostty|kitty|wezterm>
@@ -168,6 +169,7 @@ commands:
   console theme                   make the terminal console follow the active theme
   console native                  restore the terminal console to its own colours
   console toggle                  flip between theme and native
+  console close [ask|never]       whether terminal windows ask before closing (default ask)
   terminal [status]               show which terminal the Gallery opens windows in
   terminal list                   the supported terminals (iterm2, ghostty, kitty, wezterm)
   terminal set <name>             choose the terminal and re-render the theme for it
@@ -1802,24 +1804,54 @@ sys.stdout.write(mode)
 # CONSOLE_STATE_FILE (temp file + os.replace, same pattern as
 # bg_write_choice above).
 console_write_mode() {
-  local mode="$1"
+  console_write_key mode "$1"
+}
+
+# console_read_close -- prints "ask" or "never" (default "ask"): whether the
+# console's terminal asks before closing a window that runs something.
+console_read_close() {
+  [ -f "${CONSOLE_STATE_FILE}" ] || { printf 'ask'; return 0; }
+  python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        data = json.load(fh)
+    sys.stdout.write("never" if isinstance(data, dict) and data.get("close") == "never" else "ask")
+except Exception:
+    sys.stdout.write("ask")
+' "${CONSOLE_STATE_FILE}"
+}
+
+# console_write_key <key> <value> -- sets one key of CONSOLE_STATE_FILE,
+# keeping the others (mode and close live side by side).
+console_write_key() {
+  local key="$1" value="$2"
   mkdir -p "$(dirname "${CONSOLE_STATE_FILE}")"
   python3 -c '
 import json, os, sys, tempfile
 
-path, mode = sys.argv[1], sys.argv[2]
+path, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+data = {}
+try:
+    with open(path, encoding="utf-8") as fh:
+        loaded = json.load(fh)
+    if isinstance(loaded, dict):
+        data = loaded
+except Exception:
+    pass
+data[key] = value
 
 d = os.path.dirname(path) or "."
 fd, tmp = tempfile.mkstemp(prefix=".console.", suffix=".json", dir=d)
 try:
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump({"mode": mode}, fh, indent=2, sort_keys=True)
+        json.dump(data, fh, indent=2, sort_keys=True)
         fh.write("\n")
     os.replace(tmp, path)
 except Exception:
     os.unlink(tmp)
     raise
-' "${CONSOLE_STATE_FILE}" "${mode}"
+' "${CONSOLE_STATE_FILE}" "${key}" "${value}"
 }
 
 # --- terminal-specific console wiring ------------------------------------------
@@ -2062,6 +2094,16 @@ cmd_console_status() {
     echo "console: native (${term} own config)"
   fi
 
+  local close
+  close="$(console_read_close)"
+  if [ "${close}" = "never" ] && [ "${mode}" != "theme" ]; then
+    echo "close: never -- takes effect only while the console follows the theme (gallery console theme)"
+  elif [ "${close}" = "never" ]; then
+    echo "close: never (windows close without asking)"
+  else
+    echo "close: ask (the terminal's own setting decides)"
+  fi
+
   if [ "${term}" != "iterm2" ]; then
     console_config_status "${term}"
     return 0
@@ -2123,6 +2165,38 @@ cmd_console_native() {
   console_set_mode native
 }
 
+# cmd_console_close [ask|never] -- show or set whether everyday terminal
+# windows ask before closing while something runs in them. "never" is
+# written into the Gallery's rendered terminal files (and the iTerm2 Console
+# profile), so it applies wherever the console follows the theme; "ask" adds
+# nothing and leaves the terminal's own setting in charge.
+cmd_console_close() {
+  local want="${1:-}"
+  case "${want}" in
+    "")
+      echo "close: $(console_read_close)"
+      return 0
+      ;;
+    ask|never) ;;
+    *)
+      echo "usage: gallery console close [ask|never]" >&2
+      exit 1
+      ;;
+  esac
+  console_write_key close "${want}"
+  if [ -n "$(theme_current_name)" ]; then
+    run_theme_render >/dev/null || { echo "gallery: close setting recorded but render failed" >&2; return 1; }
+  fi
+  if [ "${want}" = "never" ]; then
+    echo "close: never -- terminal windows close without asking"
+    if [ "$(console_read_mode)" != "theme" ]; then
+      echo "note: takes effect once the console follows the theme (gallery console theme)"
+    fi
+  else
+    echo "close: ask -- the terminal's own setting decides"
+  fi
+}
+
 cmd_console_toggle() {
   local mode
   mode="$(console_read_mode)"
@@ -2149,8 +2223,11 @@ cmd_console() {
     toggle)
       cmd_console_toggle
       ;;
+    close)
+      cmd_console_close "$@"
+      ;;
     "")
-      echo "usage: gallery console <status|theme|native|toggle>" >&2
+      echo "usage: gallery console <status|theme|native|toggle|close [ask|never]>" >&2
       exit 1
       ;;
     *)

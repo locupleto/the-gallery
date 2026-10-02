@@ -128,6 +128,14 @@ use it, and all four take the theme. To make your everyday terminal follow
 the theme too, `gallery console theme`, which needs a one-time step per
 terminal ([Terminals](CUSTOMIZING.md#terminals)).
 
+### super + w asks before closing a terminal window
+
+That is the terminal's own prompt for a window running something other than
+the shell. Omarchy switches it off; the Gallery keeps it for your everyday
+windows unless you choose otherwise: `gallery console close never` (it needs
+`gallery console theme`). The Gallery's own floating windows never ask
+([Closing windows without asking](CUSTOMIZING.md#closing-windows-without-asking)).
+
 ### The terminal is too transparent, or not transparent enough
 
 `gallery glass` shows the setting. `gallery glass set 0` makes it solid,
