@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Cheat sheets on a key — Omarchy's "Learn" menu for this desk.
 #
-# The sheets are Obsidian notes in the vault's Cheat-Sheets folder (one source,
-# read in place, never copied). The only generated one is Tiler-Keys.md, built
+# The sheets are markdown notes in one folder (an Obsidian vault's Cheat-Sheets
+# by default, or $LEARN_SHEETS; one source, read in place, never copied). The only generated one is Tiler-Keys.md, built
 # from the "## description" lines in tiler/skhdrc so the sheet can never drift
 # from the bindings. Sheets render in a floating, centred iTerm window (glow
 # rendering, paged by fzf; q or Esc closes it). Doors: super+space (menu), super+shift+space (tiler
@@ -24,6 +24,10 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 VAULT="${OBSIDIAN_VAULT:-$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault}"
 SHEETS="${LEARN_SHEETS:-$VAULT/Cheat-Sheets}"
+# No vault anywhere (Obsidian is optional): keep the sheets in our own folder.
+if [ -z "${LEARN_SHEETS:-}" ] && [ -z "${OBSIDIAN_VAULT:-}" ] && [ ! -d "$VAULT" ]; then
+    SHEETS="$HOME/.config/gallery/sheets"
+fi
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 APP="$HOME/Applications/Learn.app"
 TITLE_PREFIX="Learn"       # yabairc floats iTerm windows whose title starts with this
@@ -290,7 +294,7 @@ load_includes() {
 
 install_all() {
     local rc="${1:-$(dirname "$SELF")/skhdrc}"
-    [ -d "$SHEETS" ] || die "no cheat-sheet folder at $SHEETS (is the vault on this Mac?)"
+    mkdir -p "$SHEETS"
     keys_md "$rc" > "$(sheet_path Tiler-Keys)"
     echo "[learn] wrote $(sheet_path Tiler-Keys)"
 

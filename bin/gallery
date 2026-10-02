@@ -2049,8 +2049,8 @@ cmd_font() {
 
 # --- Übersicht crystal widgets mode ------------------------------------------
 #
-# The crystal widgets (locupleto/crystal-widgets-v2, an Übersicht desktop
-# widget set) can either follow the active Gallery theme -- their static
+# The crystal widgets (the author's separate, optional, not-public Übersicht
+# desktop widget set; without it this mode is a no-op) can either follow the active Gallery theme -- their static
 # white becomes the theme's lightest foreground, their bar fill the accent --
 # or keep their own shipped colours. Recorded in WIDGETS_STATE_FILE as
 # {"mode": "theme"} or {"mode": "native"}; missing/invalid means native, the

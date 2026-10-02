@@ -27,13 +27,12 @@
 #
 # THE START DIRECTORY. Omarchy cds to $HOME/Work before launching, because an
 # agent will not remember a trust decision for $HOME and would re-ask on every
-# session. The estate has no ~/Work; its equivalent is the git root, where
-# every repo already lives, so one trust approval covers all of them. That is
-# the default below and it applies however the agent is launched (Urban's
-# ruling 2026-09-22, chosen over Omarchy's "only when PWD is $HOME" rule);
-# GALLERY_AGENT_DIR overrides it, and a directory that has gone missing -- the
-# git root lives on an external volume -- falls back to $HOME with a warning
-# rather than failing to launch.
+# session. The default below is $HOME, and it applies however the agent is
+# launched (chosen over Omarchy's "only when PWD is $HOME" rule). Point
+# GALLERY_AGENT_DIR at the directory holding your repos and one trust
+# approval covers all of them; a directory that has gone missing -- e.g. on
+# an external volume -- falls back to $HOME with a warning rather than
+# failing to launch.
 #
 # PERMISSIONS. Each agent is started with its own spelling of "do not stop to
 # ask", exactly as omarchy-agent does: a keypress-launched agent that sits
@@ -44,7 +43,7 @@ set -euo pipefail
 
 CONFIG_DIR="${GALLERY_CONFIG_DIR:-${HOME}/.config/gallery}"
 STATE_FILE="${CONFIG_DIR}/state/agent.json"
-DEFAULT_DIR="${GALLERY_AGENT_DIR:-/Volumes/Work/development/projects/git}"
+DEFAULT_DIR="${GALLERY_AGENT_DIR:-${HOME}}"
 DEFAULT_AGENT="claude"
 
 # This script's own absolute path: the window opened below runs it again with
