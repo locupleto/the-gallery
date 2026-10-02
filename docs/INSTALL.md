@@ -314,6 +314,17 @@ and blank lines) changed, because a yabai restart rebuilds every window tree;
 the tiler saves and restores the layout around it. Pass `--restart-tiler` to
 force it, or `--skip-tiler` to leave the tiler alone.
 
+Updating from a release older than 2026-10-02 (before the install manifest):
+
+- The first run cannot yet tell its own files from yours, so it keeps a copy
+  of each earlier Gallery file it replaces as `<name>.gallery-edited.<time>`.
+  If you never edited those files, delete the copies; if you did, move the
+  change into `local.skhd`, `yabairc.local` or a hook (see
+  [CUSTOMIZING.md](CUSTOMIZING.md)).
+- The app keys on super + a, e, y, x and g are no longer bound by the shipped
+  key file. Copy the ones you used from `tiler/local.skhd.example` into
+  `~/.config/skhd/local.skhd` before you update, and they carry on working.
+
 Plugins added with `gallery add` update separately: `gallery update [id]`
 fast-forwards git-managed plugins and re-applies any macOS patches from
 `patches/`.
