@@ -332,7 +332,7 @@ exec "$HOME/.config/skhd/learn" open menu
 SH
     chmod 755 "$exe"
     codesign --force --sign - "$APP" >/dev/null 2>&1 || true
-    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
+    "${GALLERY_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}" -f "$APP" >/dev/null 2>&1 || true
     mdimport "$APP" >/dev/null 2>&1 || true   # Spotlight lists it right away
     echo "[learn] built $APP (Spotlight: \"Learn\")"
 }
