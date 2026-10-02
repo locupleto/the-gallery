@@ -167,6 +167,14 @@ Obsidian: no. Learn reads plain markdown files from
 `gallery widgets` commands use it, and they do nothing without the widget set
 ([INSTALL.md](INSTALL.md#optional-extras)).
 
+### Does it run on an Intel Mac, or an older macOS?
+
+Yes. On an Intel Mac with a current macOS nothing is different. macOS 12
+Monterey and 13 Ventura work too, with older Hammerspoon and iTerm2 builds,
+kitty as the best terminal, no focus outline before macOS 14, and
+`./install.sh --minimal` to avoid hours of compiling. The details are under
+"Older Macs" in [INSTALL.md](INSTALL.md#prerequisites).
+
 ### How do I update?
 
 ```sh
