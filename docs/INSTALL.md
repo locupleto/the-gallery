@@ -19,7 +19,8 @@ The same table as the README's "Prerequisites" section, in brief:
 | Prerequisite | How | Why |
 |---|---|---|
 | Homebrew | [brew.sh](https://brew.sh) | the installer brews everything else; it stops up front if `brew` is missing |
-| iTerm2 and Hammerspoon | `brew install --cask iterm2 hammerspoon` | every floating TUI window; the plugin host (the installer refuses to run without `/Applications/Hammerspoon.app`) |
+| A terminal: iTerm2, Ghostty, kitty or WezTerm | `brew install --cask iterm2` (or `ghostty`, `kitty`, `wezterm`) | every floating TUI window, Learn, `super+return` and the agent window; one is enough, see [Choosing the terminal](#choosing-the-terminal) |
+| Hammerspoon | `brew install --cask hammerspoon` | the plugin host (the installer refuses to run without `/Applications/Hammerspoon.app`) |
 | Optional: chafa, uv | `brew install chafa uv` | picker previews; the venv for the `qml` kind |
 | Optional: librsvg | `brew install librsvg` | transparent weather icon (`rsvg-convert`); without it the weather panel falls back to chafa or a glyph |
 | Optional: a folder of markdown sheets | none | the Learn menu reads them; Obsidian is not required |
@@ -132,15 +133,18 @@ the later steps assume the earlier ones.
    Shortcuts, Mission Control: enable *Switch to Desktop N* for every Desktop
    you use. `super+N` and `super+shift+N` are built on these Ctrl+N shortcuts,
    because yabai cannot switch Spaces without the scripting addition.
-4. **iTerm2: Secure Keyboard Entry off** (iTerm2 menu, Secure Keyboard Entry).
-   While it is on, skhd does not see keys while iTerm is frontmost.
+4. **Secure Keyboard Entry off** in your terminal (iTerm2, Ghostty and kitty
+   have it in their menus). While it is on, skhd does not see keys while that
+   terminal is frontmost.
 5. **Automation prompts**, raised the first time each binding is used. Allow
    each once:
    - "skhd wants to control iTerm2" (`super+return`, and every floating TUI
-     such as the theme picker or System Monitor, which `bin/gallery-tui`
-     opens through AppleScript);
+     such as the theme picker or System Monitor, which `bin/gallery-term`
+     opens through AppleScript). The same prompt names Ghostty if that is your
+     terminal; kitty and WezTerm are started as plain processes and raise none;
    - "skhd wants to control System Events" (`super+b`);
-   - "Learn wants to control iTerm2" (launching Learn from Spotlight).
+   - "Learn wants to control iTerm2" (launching Learn from Spotlight; again
+     Ghostty on a Ghostty setup).
 6. **iTerm2: default profile (only for `gallery console`).** The renderer
    writes two iTerm2 dynamic profiles. "Gallery" is used by the floating
    windows and needs no setup. "Console" is a child of your own "Default"
@@ -152,6 +156,41 @@ the later steps assume the earlier ones.
    (`native`, the default, leaves it identical to Default), and
    `gallery console status` prints `default profile: Console (ok)` once the
    setting has taken.
+
+### Choosing the terminal
+
+`gallery terminal` shows which terminal the Gallery opens windows in. With
+nothing recorded it is iTerm2 if installed, otherwise the first installed of
+Ghostty, kitty and WezTerm. `gallery terminal list` shows the supported ones
+and which are installed; `gallery terminal set <name>` records the choice in
+`~/.config/gallery/state/terminal.json` and re-renders the theme.
+
+Per terminal, beyond the install:
+
+- **iTerm2.** Steps 4 to 6 above.
+- **Ghostty.** Nothing for floating windows. For `gallery console theme`, the
+  Gallery adds `config-file = ?~/.config/gallery/state/terminals/ghostty.conf`
+  to `~/.config/ghostty/config`; a running Ghostty is told to reload on every
+  render. Set `initial-window = false` if a cold start opened by a keybinding
+  should not leave Ghostty's own startup window behind.
+- **kitty.** Nothing for floating windows. `gallery console theme` adds an
+  `include` line for `state/terminals/kitty.conf` to
+  `~/.config/kitty/kitty.conf`. For colours to change in running windows, enable
+  remote control there: `allow_remote_control socket-only` and
+  `listen_on unix:/tmp/kitty`.
+- **WezTerm.** Nothing for floating windows. For `gallery console theme`,
+  the Gallery prints two lines for your `wezterm.lua`
+  (and writes `~/.wezterm.lua` with them if you have no config):
+
+  ```lua
+  local ok, gallery = pcall(dofile, wezterm.home_dir .. '/.config/gallery/state/terminals/wezterm.lua')
+  if ok then for k, v in pairs(gallery) do config[k] = v end end
+  ```
+
+  The module puts itself on wezterm's reload watch list, so a theme change
+  reloads running windows.
+
+Alacritty is not supported yet.
 
 ## Verify
 
@@ -247,8 +286,9 @@ the `gallery*` commands from `~/bin/`. It leaves in place:
 - `~/.config/gallery/` (plugins, themes, state, preferences);
 - `~/.config/skhd/gallery.skhd`;
 - the Homebrew formulae, including btop and superfile;
-- the iTerm2 dynamic profile files and the btop and superfile theme files the
-  renderer wrote;
+- the iTerm2 dynamic profile files, the `state/terminals/` files, the include
+  line `gallery console theme` added to a Ghostty or kitty config, and the btop
+  and superfile theme files the renderer wrote;
 - `~/.hammerspoon/init.lua`. Remove the block between `-- gallery:begin` and
   `-- gallery:end` by hand.
 
@@ -274,14 +314,16 @@ check the block, run `gallery reload`, and retry. Never wrap `hs` in
 the Hammerspoon console run `hs.ipc.cliInstall("/opt/homebrew")`.
 
 **Key bindings do nothing.** Check that skhd is running with the Accessibility
-grant (`gallery doctor`), that iTerm2's Secure Keyboard Entry is off, and watch
-the keys with `skhd --observe`. Test a binding from a cold state too, with iTerm2
-not running: `gallery-tui` addresses iTerm2 by bundle id and activates it when it
-is cold.
+grant (`gallery doctor`), that your terminal's Secure Keyboard Entry is off, and
+watch the keys with `skhd --observe`. Test a binding from a cold state too, with
+the terminal not running: `gallery-term` addresses iTerm2 by bundle id and
+activates it when it is cold, launches and waits for Ghostty, and starts kitty
+and WezTerm as processes.
 
 **A floating TUI does not appear.** Run `gallery open <id>` from a terminal to
 see the error. The usual cause is a missing Automation grant for skhd (or for
-the terminal you ran it from) to control iTerm2. A `tui` command that is missing
+the terminal you ran it from) to control iTerm2 or Ghostty. `gallery-term open
+--dry-run --role float -- true` prints what would be run. A `tui` command that is missing
 or not executable prints an error in its own window and holds it for 3 seconds.
 
 **yabai does not tile new windows.** `gallery doctor` reports

@@ -168,8 +168,8 @@ cat <<'MSG'
   2. System Settings > Keyboard > Keyboard Shortcuts... > Mission Control: enable
      "Switch to Desktop N" for every Desktop you use (super+N and super+shift+N
      ride on these Ctrl+N shortcuts).
-  3. iTerm > Secure Keyboard Entry must be OFF, or skhd stops seeing keys while
-     iTerm is frontmost.
+  3. Secure Keyboard Entry must be OFF in your terminal, or skhd stops seeing keys
+     while it is frontmost (iTerm2, Ghostty and kitty have it in their menus).
   4. Try: left Option+h/j/k/l (focus), left Option+2 (Space 2), right Option+2 (@),
      left Option+space (Learn menu; first press: allow "skhd wants to control iTerm2"),
      Cmd+space "Learn" (first launch: allow "Learn wants to control iTerm2").

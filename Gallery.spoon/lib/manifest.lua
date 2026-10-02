@@ -175,7 +175,7 @@ function M.validate(manifest, dir)
   end
 
   -- A tui-kind plugin has no entry point file (it runs a shell command in
-  -- an iTerm2 window instead -- see bin/gallery-tui); what it must declare
+  -- a terminal window instead -- see bin/gallery-tui); what it must declare
   -- is manifest.gallery.tui.command.
   if kindsOk and tableContains(kinds, "tui") then
     local tuiCfg = manifest.gallery and manifest.gallery.tui

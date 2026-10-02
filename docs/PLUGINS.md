@@ -89,14 +89,17 @@ open; `close` on a closed plugin prints `not open: <id>`.
 
 ## tui
 
-A floating, centred terminal. Implemented by `bin/gallery-tui` with iTerm2 and
-yabai; the Spoon is not involved, so a `tui` plugin works with Hammerspoon
+A floating, centred terminal. Implemented by `bin/gallery-tui` with the
+configured terminal (iTerm2, Ghostty, kitty or WezTerm; `bin/gallery-term`
+opens the window) and yabai; the Spoon is not involved, so a `tui` plugin works with Hammerspoon
 stopped.
 
-- The window is an iTerm2 window using the dynamic profile named in
+- On iTerm2 the window uses the dynamic profile named in
   `~/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json`
-  ("Gallery"), titled `Gallery: <name>`. A yabai rule (`label=gallery-tui`)
-  matches that title prefix on iTerm2 windows, makes them unmanaged (floating)
+  ("Gallery"); on the other terminals it gets the Gallery theme as described
+  in [THEMES.md](THEMES.md#ghostty-kitty-and-wezterm). It is titled
+  `Gallery: <name>`. A yabai rule (`label=gallery-tui`)
+  matches that title prefix on windows of the configured terminal, makes them unmanaged (floating)
   and places them on the `grid`. The window opens on the display that had
   focus.
 - `command` and every `args` entry have a leading `~` and any literal `$HOME`
@@ -107,7 +110,7 @@ stopped.
 - The command runs in the foreground with the window's tty, replaces the
   launching shell, and should exit on its own key. The session closes when
   the command exits (`Close Sessions On End`), without a prompt.
-- The window is started by iTerm2 directly, not by an interactive shell, so
+- The window is started by the terminal directly, not by an interactive shell, so
   `~/.zshrc` is not read. A plugin that needs a secret reads it from a file,
   for example under `~/.config/gallery/` (the weather plugin reads
   `~/.config/gallery/weather.key`).

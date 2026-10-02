@@ -7,7 +7,8 @@ day to day:
    bindings, a JankyBorders outline on the focused window, and a Learn menu
    of cheat sheets (`tiler/`).
 2. **Themes.** Omarchy's colour themes rendered onto everything at once:
-   iTerm2, the focus outline, the wallpaper, Übersicht widgets, the font.
+   your terminal (iTerm2, Ghostty, kitty or WezTerm), the focus outline,
+   the wallpaper, Übersicht widgets, the font.
 3. **Plugins.** A Hammerspoon Spoon that hosts manifest-driven plugins
    (floating TUIs, services, unmodified Omarchy QML plugins), modelled on
    Omarchy 4's plugin system: each plugin is a directory with a
@@ -66,8 +67,8 @@ top to bottom: keys go in at the top, pixels come out at the bottom.
  │ yabai       bsp tiles,     │  │ cheat sheets:    │  │ a plugin is a directory with a     │
  │             gaps, rules    │  │ markdown notes   │  │ manifest.json naming its kinds:    │
  │ JankyBorders focus outline │  │ rendered by glow │  │                                    │
- │ focus-dir   Hyprland-style │  │ in a floating,   │  │ tui, menu   floating iTerm2 +      │
- │             neighbour pick │  │ centred iTerm2   │  │             fzf/glow/btop, put     │
+ │ focus-dir   Hyprland-style │  │ in a floating,   │  │ tui, menu   floating terminal +    │
+ │             neighbour pick │  │ centred terminal │  │             fzf/glow/btop, put     │
  │ rules.local app → Space    │  │ window           │  │             there by a yabai rule  │
  │             ("home")       │  └──────────────────┘  │ panel,      Hammerspoon webview    │
  │ ghosts      relaunch what  │                        │ overlay     (Gallery.spoon)        │
@@ -81,7 +82,7 @@ top to bottom: keys go in at the top, pixels come out at the bottom.
                                            ▼
  ┌───────────────────────────────────────────────────────────────────────────────────────────┐
  │ ② THEMES   one theme, rendered onto everything at once  (the flow below)                  │
- │   iTerm2 windows · focus outline · wallpaper · panel CSS · btop · superfile · widgets     │
+ │   terminal windows · focus outline · wallpaper · panel CSS · btop · superfile · widgets   │
  └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -92,7 +93,7 @@ Two rules keep the picture this simple:
   `skhdrc` includes. Every key on the map above is a line in one of those
   two files.
 - **Hammerspoon is optional for most of it.** `tui` and `menu` plugins are
-  pure shell + iTerm2 + yabai (`bin/gallery-tui`, `bin/gallery-menu`), so
+  pure shell + a terminal + yabai (`bin/gallery-tui`, `bin/gallery-menu`), so
   the Themes picker, System Monitor and Learn all work with the Spoon
   stopped. Only `panel`, `overlay`, `service` and `bar-widget` kinds live
   inside Hammerspoon.
@@ -117,6 +118,7 @@ plugin) is the one command that touches everything. It fans out like this:
           ├─▶ state/crystal.css ───────────────▶ Übersicht crystal widgets      (opt-in: gallery widgets)
           ├─▶ iTerm2 …/gallery-theme.json ─────▶ every floating Gallery window
           ├─▶ iTerm2 …/gallery-console.json ───▶ your everyday terminal         (opt-in: gallery console)
+          ├─▶ state/terminals/* ───────────────▶ the same for Ghostty, kitty, WezTerm (gallery terminal)
           ├─▶ btop theme ──────────────────────▶ System Monitor plugin
           └─▶ superfile theme (transparent) ───▶ the `spf` file manager
           │
@@ -170,7 +172,8 @@ left alone by the installer.
   JankyBorders, and the Learn cheat-sheet menu. See `tiler/README.md`.
 - `themes/` — vendored Omarchy colour themes (see `themes/UPSTREAM.md`) plus
   `tools/render-theme.py`, which renders the active theme into CSS, JSON, an
-  iTerm2 profile, and a shell fragment.
+  iTerm2 profile (plus theme files for Ghostty, kitty and WezTerm), and a
+  shell fragment.
 - `Gallery.spoon` — the Hammerspoon Spoon that loads plugin manifests and
   manages plugin windows.
 - `plugins/` — bundled plugins, each a self-contained directory.
@@ -185,7 +188,8 @@ Have these in place on a new Mac before running the installer:
 | Prerequisite | How | Why |
 |---|---|---|
 | **Homebrew** | [brew.sh](https://brew.sh) | the installer brews everything else; it stops up front if `brew` is missing |
-| iTerm2 + Hammerspoon | `brew install --cask iterm2 hammerspoon` | every floating TUI window; the plugin host (the installer refuses to run without Hammerspoon.app) |
+| A terminal: iTerm2, Ghostty, kitty or WezTerm | `brew install --cask iterm2` (or `ghostty`, `kitty`, `wezterm`) | every floating TUI window, Learn, `super+return` and the agent window; see Terminals |
+| Hammerspoon | `brew install --cask hammerspoon` | the plugin host (the installer refuses to run without Hammerspoon.app) |
 | *Optional:* a folder of markdown sheets | — | the Learn menu reads them; Obsidian is not required (see Learn) |
 | *Optional:* chafa, uv | `brew install chafa uv` | picker previews; the venv for the `qml` kind |
 
@@ -222,6 +226,44 @@ the plugin host and theming). See `tiler/README.md` for the full key table,
 Learn, and the once-per-machine manual steps (Accessibility, Mission Control
 shortcuts, Secure Keyboard Entry).
 
+## Terminals
+
+Every terminal window the Gallery opens (floating TUIs, Learn, `super+return`,
+the coding agent) is opened by one script, `bin/gallery-term`, in whichever of
+iTerm2, Ghostty, kitty or WezTerm is configured. With nothing configured it
+uses iTerm2 if installed, else the first installed of Ghostty, kitty, WezTerm.
+
+```sh
+gallery terminal            # which one, and whether it is installed
+gallery terminal list       # supported terminals: installed? current?
+gallery terminal set kitty  # record it (state/terminal.json) and re-render the theme
+```
+
+Floating Gallery windows always get the Gallery theme; tiled windows
+(`super+return`, the agent) use your own config. How each terminal does it:
+
+| | floating window theme | title (for yabai) | theme change in running windows | `gallery console theme` |
+|---|---|---|---|---|
+| iTerm2 | the "Gallery" dynamic profile | set by the command | dynamic profiles reload themselves | the "Console" profile (set as default once, see below) |
+| Ghostty | palette set by escape sequences in that window (opacity and blur are yours) | set by a wrapper | `reload_config` over AppleScript, if running | one `config-file = ?...` line in `~/.config/ghostty/config` |
+| kitty | `--config` with the rendered `kitty.conf` | `--title` | `kitty @ set-colors`, if remote control is on | one `include ...` line in `~/.config/kitty/kitty.conf` |
+| WezTerm | `--config` glass plus escape-sequence palette | set by a wrapper | automatic (the module is on wezterm's reload watch list) | two Lua lines in your `wezterm.lua` |
+
+The renderer writes `ghostty.conf`, `kitty.conf` and `wezterm.lua` into
+`~/.config/gallery/state/terminals/` on every render, whatever terminal is
+configured. `console theme` adds exactly one marked include line to the config
+of Ghostty or kitty (creating the file if missing, with a `.gallery-bak` copy
+before the first edit of an existing one); `console native` removes it. For
+WezTerm it never edits your Lua: it prints the two lines to add, and writes
+`~/.wezterm.lua` with them only when you have no wezterm config at all. For
+kitty to be updated live, enable remote control in `kitty.conf`
+(`allow_remote_control socket-only` and `listen_on unix:/tmp/kitty`); without
+it, new windows get the theme and running ones keep their colours.
+
+iTerm2 and Ghostty are driven over AppleScript, so the first window raises the
+Automation prompt for the caller. Alacritty is not supported yet: `gallery-term`
+has one small adapter per terminal, and Alacritty's can be added the same way.
+
 ## Usage
 
 ```sh
@@ -232,6 +274,7 @@ gallery clone <id> <new-id> |
 gallery theme list | current | set <name> | render | next |
 gallery bg list | current | set <file> | next | prev | apply |
 gallery console status | theme | native | toggle |
+gallery terminal [status] | list | set <iterm2|ghostty|kitty|wezterm> |
 gallery font status | set <family> [size] [weight] | native | list |
 gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
@@ -247,7 +290,7 @@ fast-forwards git-managed plugins, `remove` disables and deletes (or
 archives) one, and `clone` duplicates an installed plugin under a new id.
 
 `theme set <name>` atomically points `~/.config/gallery/themes/current` at
-the named theme, re-renders it (CSS/JSON/iTerm profile/shell fragment via
+the named theme, re-renders it (CSS/JSON/terminal themes/shell fragment via
 `tools/render-theme.py`), runs every executable in
 `~/.config/gallery/hooks/theme-set.d/` with the theme name as its argument,
 and asks the running Spoon to reload over IPC. `theme next` does the same
@@ -267,8 +310,9 @@ that shadows it, so the hook then copies the new picture into every Space
 entry there and restarts WallpaperAgent. `GALLERY_WALLPAPER_ALL_SPACES=0`
 keeps it to the plain System Events apply.
 
-`console ...` decides whether your everyday iTerm2 terminal follows the
-theme. The renderer writes a second dynamic profile,
+`console ...` decides whether your everyday terminal follows the theme (see
+Terminals for Ghostty, kitty and WezTerm; this paragraph is iTerm2). The
+renderer writes a second dynamic profile,
 `~/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json`
 ("Console"), declared as a child of your own "Default" profile, so it
 inherits font, keys and every other setting. In `native` mode the file
@@ -345,7 +389,7 @@ the agent has full file and shell access, unattended, in that directory.
 `state/agent.json` (`gallery agent list` shows which are installed), and
 `inline` runs it in the current terminal instead of a new window.
 
-The window is an **ordinary iTerm2 window, tiled like any other** — not a
+The window is an **ordinary terminal window, tiled like any other** — not a
 floating Gallery surface. Omarchy's launcher ends in `omarchy-launch-tui
 --app-id=org.omarchy.agent`, and that script is only `xdg-terminal-exec -e
 <command>`: the app-id exists so rules and themes *can* single the agent out,
@@ -355,7 +399,7 @@ window that is worked in for an hour beside an editor. As in Omarchy, every
 press opens another agent rather than focusing the first: one per repo, one
 per task. (It shipped for one day as a floating `tui` plugin; that was the
 house convention applied past the point where it fitted.) The window runs a
-login shell, because iTerm inherits launchd's `PATH`, which has neither
+login shell, because the terminal inherits launchd's `PATH`, which has neither
 Homebrew nor the node prefixes — and therefore no `claude` — on it.
 
 `ghosts ...` deals with windows the tiler cannot see. A window created while

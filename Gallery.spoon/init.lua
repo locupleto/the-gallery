@@ -485,7 +485,7 @@ function obj:listJson()
 end
 
 --- tui-kind plugins are handled entirely by the `gallery` CLI itself
---- (gallery-tui + yabai/iTerm2 -- no Hammerspoon involved; see bin/gallery's
+--- (gallery-tui + yabai + the configured terminal -- no Hammerspoon involved; see bin/gallery's
 --- route_open_close_toggle and bin/gallery-tui). obj:open/close/toggle
 --- only reach this branch when someone calls the Spoon's IPC directly for
 --- a tui plugin (e.g. `hs -c "spoon.Gallery:ipc('open', id, 'tui')"`)
@@ -615,7 +615,7 @@ function obj:toggle(id, kind)
 
   if kind == "tui" then
     -- Hammerspoon has no visibility into a tui plugin's open/closed state
-    -- (that lives in yabai/iTerm2, tracked by gallery-tui); the CLI's own
+    -- (that lives in yabai and the terminal, tracked by gallery-tui); the CLI's own
     -- toggle already does the open-if-not-open-else-close dance itself.
     shellOutTui("toggle", id)
     return "toggled tui: " .. id
