@@ -19,8 +19,8 @@
 # `xdg-terminal-exec --app-id=... -e <command>` -- a plain terminal window.
 # The app-id exists so rules and themes CAN single the agent out; no Omarchy
 # rule floats it (only org.omarchy.about and the screensaver float), so
-# Hyprland tiles it with everything else. This does the same: a new iTerm2
-# window, tiled by yabai. It is deliberately NOT a gallery-tui surface --
+# Hyprland tiles it with everything else. This does the same: a new window of the
+# configured terminal (gallery-term), tiled by yabai. It is deliberately NOT a gallery-tui surface --
 # floating and centred is right for btop and Learn, which are glanced at and
 # dismissed, and wrong for a window that is worked in for an hour beside an
 # editor. As in Omarchy, a second keypress opens a SECOND agent rather than
@@ -105,10 +105,10 @@ start_dir() {
   fi
 }
 
-# A new iTerm2 window running this script's `launch` verb.
+# A new terminal window running this script's `launch` verb.
 #
 # The window's command is a LOGIN shell (`zsh -l`), not the agent binary
-# directly: iTerm inherits launchd's PATH, which has neither Homebrew nor the
+# directly: the terminal inherits launchd's PATH, which has neither Homebrew nor the
 # node prefixes on it, so `claude` would not be found. `-l` is enough -- it
 # sources .zprofile, where brew shellenv sets PATH -- and it is deliberately
 # not `-i`: an interactive shell would also source .zshrc for nothing.
@@ -125,35 +125,16 @@ open_window() {
     printf '%s\n' "${command}"
     return 0
   fi
-  # AppleScript string literal: backslashes first, then double quotes.
-  local as_command
-  as_command="$(printf '%s' "${command}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
-  # A cold iTerm opens its own startup window and is not ready for
-  # AppleScript immediately, so it is launched first and waited for -- the
-  # same lesson as `super + return` in tiler/skhdrc.
-  #
-  # pgrep needs -a: macOS pgrep leaves out its own ancestors by default, so
-  # `gallery agent` typed into an iTerm window could not see the iTerm it was
-  # running in, took this cold-start branch and stalled for ~11 s before
-  # opening the window. The key binding never hit it -- skhd is not a child
-  # of iTerm -- which is why it went unnoticed.
-  if ! pgrep -axq iTerm2; then
-    open -a iTerm
-    local waited=0
-    while ! pgrep -axq iTerm2 && [ "${waited}" -lt 20 ]; do
-      sleep 0.5
-      waited=$((waited + 1))
-    done
-    sleep 1
-  fi
-  local wid
-  wid="$(osascript \
-    -e 'tell application id "com.googlecode.iterm2"' \
-    -e "set w to (create window with default profile command \"${as_command}\")" \
-    -e 'activate' \
-    -e 'select w' \
-    -e 'return id of w' \
-    -e 'end tell')" || return 0
+  # A tiled window of the configured terminal, opened by gallery-term (cold
+  # start included: it launches and waits for iTerm2 and Ghostty first, which
+  # are not ready for AppleScript immediately). On iTerm2 it prints the new
+  # window's id; the other terminals print nothing and go without the
+  # Space check below.
+  local term wid
+  term="${GALLERY_TERM_BIN:-$(dirname "${SELF}")/gallery-term}"
+  [ -x "${term}" ] || term="${HOME}/bin/gallery-term"
+  wid="$("${term}" open --role tile -- /bin/zsh -l -c 'exec "$0" launch' "${script}")" || return 0
+  case "${wid}" in ''|*[!0-9]*) return 0 ;; esac
   keep_on_current_space "${wid}"
 }
 
