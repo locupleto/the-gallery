@@ -1,0 +1,38 @@
+#!/usr/bin/env sh
+# Your own yabai settings. Copy to ~/.config/yabai/yabairc.local (optional; the
+# installer never creates or overwrites it) and uncomment what you want to
+# change. tiler/yabairc sources it after its own `yabai -m config` lines and
+# rules, so a value set here replaces the shipped one. It is plain sh, run each
+# time yabai starts. To try a value at once, run the same `yabai -m config ...`
+# line in a terminal; to make it stick, put it here and restart yabai
+# (shift+super+r), which resets hand-tuned split ratios.
+#
+# Only settings that tiler/yabairc sets are listed; the shipped value is shown.
+# Every other yabai option is available too (`man yabai`).
+
+# --- layout ------------------------------------------------------------------
+#yabai -m config layout                  bsp          # bsp | stack | float
+#yabai -m config window_placement        second_child # first_child | second_child
+#yabai -m config window_origin_display   cursor       # default | focused | cursor
+#yabai -m config split_ratio             0.5
+#yabai -m config split_type              auto         # auto | vertical | horizontal
+#yabai -m config auto_balance            off
+#yabai -m config window_zoom_persist     on
+
+# --- gaps (pixels) -------------------------------------------------------------
+#yabai -m config window_gap              8
+#yabai -m config top_padding             8
+#yabai -m config bottom_padding          8
+#yabai -m config left_padding            8
+#yabai -m config right_padding           8
+
+# --- mouse -----------------------------------------------------------------------
+#yabai -m config mouse_modifier          alt          # alt | cmd | ctrl | shift | fn
+#yabai -m config mouse_action1           move
+#yabai -m config mouse_action2           resize
+#yabai -m config mouse_drop_action       swap         # swap | stack
+#yabai -m config focus_follows_mouse     autofocus    # off | autofocus | autoraise
+#yabai -m config mouse_follows_focus     off
+
+# --- never tile an app of your own --------------------------------------------
+#yabai -m rule --add app="^(Spotify|Zoom)$" manage=off

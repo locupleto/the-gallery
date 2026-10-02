@@ -63,6 +63,16 @@ yabai -m rule --add app="^(iTerm2|Ghostty|kitty|WezTerm)$" title="^Learn: " mana
 # local rule can also override one above; a labelled rule re-added with the
 # same label replaces the earlier one (verified on yabai 7.1.25).
 [ -r "${HOME}/.config/yabai/rules.local" ] && . "${HOME}/.config/yabai/rules.local"
+
+# --- user overrides: ~/.config/yabai/yabairc.local ---------------------------
+# A user-owned, optional file (never installed, never overwritten): any
+# `yabai -m config` line in it replaces the shipped value above (gaps, layout,
+# mouse modifier, ...), since yabai keeps the last value set; it may add rules
+# too. Sourced here, after every shipped config line and rule, so it wins over
+# them, but BEFORE `rule --apply` (its rules get applied) and before the
+# signals and the border below, which are not meant to be tuned from here (the
+# border has `gallery borders`). Template: tiler/yabairc.local.example.
+[ -r "${HOME}/.config/yabai/yabairc.local" ] && . "${HOME}/.config/yabai/yabairc.local"
 yabai -m rule --apply
 
 # --- keep something focused when a window goes away -------------------------
