@@ -120,4 +120,53 @@ grep -qx -- '-m window 4242 --focus' <<<"${moves}" || fail "moved window not foc
 [ -z "$(keep '' 2)" ] || fail "a window yabai never saw was acted on"
 say "misplaced window moved to the Space in view; correct or unseen ones left alone"
 
+# --- 8. a custom agent: any CLI, by command line --------------------------------
+# `set <name> --command "<line>"` records the line next to the name; status and
+# list show it, `inline` runs it (after the cd, through a shell, so single
+# quotes in it work), and `set <built-in>` goes back to the built-in.
+printf '#!/bin/sh\necho "custom-ran in $(pwd) with: $*"\n' > "${WORK_DIR}/bin/my-agent"
+chmod +x "${WORK_DIR}/bin/my-agent"
+run set claude >/dev/null
+run set myagent --command "my-agent --auto-yes --name 'two words'" >/dev/null 2>&1 \
+  || fail "set <name> --command was rejected"
+out="$(run status)"
+grep -q '^agent:   myagent$' <<<"${out}" || fail "custom agent should be the default and installed: ${out}"
+grep -qF "command: my-agent --auto-yes --name 'two words' (custom)" <<<"${out}" || fail "status does not show the custom command: ${out}"
+grep -qF '"command": "my-agent --auto-yes --name '"'two words'"'"' "${WORK_DIR}/config/state/agent.json" || fail "command not in agent.json"
+grep -qF "myagent" <<<"$(run list)" && grep -q '^myagent .*installed (default, custom: my-agent' <<<"$(run list)" \
+  || fail "list does not show the custom agent: $(run list)"
+out="$(run inline)"
+[ "${out}" = "custom-ran in $(cd "${WORK_DIR}/start" && pwd) with: --auto-yes --name two words" ] || fail "inline did not run the custom command in the start dir: ${out}"
+cmd="$(GALLERY_CONFIG_DIR="${WORK_DIR}/config" GALLERY_AGENT_DIR="${WORK_DIR}/start" \
+       PATH="${WORK_DIR}/bin:/usr/bin:/bin" GALLERY_AGENT_PRINT_COMMAND=1 "${AGENT}" open)"
+grep -q -- '/bin/zsh -l -c' <<<"${cmd}" || fail "custom agent window is not a login shell: ${cmd}"
+# the start directory keeps the command, and the other way round
+run dir "${WORK_DIR}/start" >/dev/null
+grep -q '"command"' "${WORK_DIR}/config/state/agent.json" || fail "dir dropped the custom command"
+run set myagent --command "my-agent --second" >/dev/null 2>&1
+grep -q "^starts:  ${WORK_DIR}/start$" <<<"$(run status)" || fail "set --command dropped the start dir"
+run dir --clear >/dev/null
+grep -q '"command"' "${WORK_DIR}/config/state/agent.json" || fail "dir --clear dropped the custom command"
+# a program that is not on PATH is flagged, but still recorded
+run set ghostagent --command "no-such-cli --go" >/dev/null 2>&1 || fail "a custom agent not on PATH should still be recorded"
+grep -q 'NOT INSTALLED' <<<"$(run status)" || fail "status should flag a custom program that is not on PATH"
+if run inline >/dev/null 2>&1; then fail "inline ran an agent that is not installed"; fi
+# refused: no command for an unknown name, quotes, backslashes, newlines, junk
+if run set ghostagent2 >/dev/null 2>&1; then fail "an unknown name without --command was accepted"; fi
+for bad in 'my-agent "x"' 'my-agent \x' "$(printf 'my-agent\nrm')" "   " ""; do
+  if run set bad --command "${bad}" >/dev/null 2>&1; then fail "a bad command was accepted: ${bad}"; fi
+done
+if run set "bad name" --command "my-agent" >/dev/null 2>&1; then fail "a name with a space was accepted"; fi
+if run set myagent --command >/dev/null 2>&1; then fail "--command with no value was accepted"; fi
+grep -q 'ghostagent' "${WORK_DIR}/config/state/agent.json" || fail "a refused set must leave the state file alone"
+# a built-in without --command clears the custom command
+run set gemini >/dev/null
+if grep -q '"command"' "${WORK_DIR}/config/state/agent.json"; then fail "set <built-in> kept the custom command"; fi
+grep -q -- '--yolo' <<<"$(run status)" || fail "gemini should be back on its own command"
+# a built-in can carry its own command line too
+run set claude --command "claude --model opus" >/dev/null 2>&1
+grep -qF 'command: claude --model opus (custom)' <<<"$(run status)" || fail "a built-in with --command should use it"
+run set claude >/dev/null
+say "custom agents: set --command, status/list, inline, dir keeps it, bad input refused, built-in clears it"
+
 say "PASS"
