@@ -171,7 +171,8 @@ cat <<'MSG'
   3. Secure Keyboard Entry must be OFF in your terminal, or skhd stops seeing keys
      while it is frontmost (iTerm2, Ghostty and kitty have it in their menus).
   4. Try: left Option+h/j/k/l (focus), left Option+2 (Space 2), right Option+2 (@),
-     left Option+space (Learn menu; first press: allow "skhd wants to control iTerm2"),
-     Cmd+space "Learn" (first launch: allow "Learn wants to control iTerm2").
+     left Option+space (Learn menu; first press: allow "skhd wants to control" your
+     terminal), Cmd+space "Learn" (first launch: allow "Learn wants to control" it).
+     The prompts name iTerm2 or Ghostty; kitty and WezTerm raise none.
   Verify: `yabai -m query --displays` lists your displays; `skhd --observe` shows keys.
 MSG
