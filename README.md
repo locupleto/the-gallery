@@ -111,9 +111,9 @@ plugin) is the one command that touches everything. It fans out like this:
           ▼
  render-theme.py     reads colors.toml + your prefs in state/{font,console,widgets,borders}.json
           │
-          ├─▶ state/theme.css ─────────────────▶ panel / overlay plugins (webviews)
-          ├─▶ state/theme.json ────────────────▶ Gallery.spoon, gallery-borders
-          ├─▶ state/theme.sh ──────────────────▶ shell scripts, tui plugins, Learn
+          ├─▶ state/theme.css ─────────────────▶ any consumer that wants a stylesheet
+          ├─▶ state/theme.json ────────────────▶ Gallery.spoon (panel / overlay variables)
+          ├─▶ state/theme.sh ──────────────────▶ gallery-borders, tui plugins, your scripts
           ├─▶ state/crystal.css ───────────────▶ Übersicht crystal widgets      (opt-in: gallery widgets)
           ├─▶ iTerm2 …/gallery-theme.json ─────▶ every floating Gallery window
           ├─▶ iTerm2 …/gallery-console.json ───▶ your everyday terminal         (opt-in: gallery console)
@@ -130,9 +130,11 @@ plugin) is the one command that touches everything. It fans out like this:
  Gallery.spoon reloads over IPC — open panels pick up the new colours
 ```
 
-`theme render` re-runs the renderer only (no hooks, no Spoon); everything
-else — `bg`, `console`, `font`, `widgets`, `borders` — just records a
-preference in `state/*.json` and triggers that same render.
+`theme render` re-runs the renderer only (no hooks, no Spoon). `console`,
+`font`, `widgets` and `borders` record a preference in `state/*.json` and
+trigger that same render (`borders` also re-applies the outline); `bg` records
+the wallpaper choice and calls the wallpaper hook directly. See
+[docs/THEMES.md](docs/THEMES.md#what-re-themes-when).
 
 ### Where it all lives
 
@@ -204,6 +206,9 @@ unless run with `--minimal`, renders the current theme, and starts
 Hammerspoon. macOS then asks for Accessibility (Hammerspoon, yabai, skhd)
 and a few Automation grants by hand; `gallery doctor` lists what is still
 missing. Updating later is `git pull` followed by the same `./install.sh`.
+
+[docs/INSTALL.md](docs/INSTALL.md) is the full walkthrough: flags, the order
+of the permission grants, verification and troubleshooting.
 
 ## Tiling and hotkeys
 
@@ -296,8 +301,8 @@ Nerd Fonts. The QML plugin host (`qml/host.py`) reads the same file and,
 when a family is set and installed, puts it first in the "monospace" alias
 fallback list it already resolves Omarchy's icon font from.
 
-`widgets ...` does the same for the author's crystal widgets, a separate,
-optional Übersicht widget set that is not public. Without it `gallery widgets
+`widgets ...` does the same for an Übersicht widget set, the crystal
+widgets, that is not published. Without it `gallery widgets
 available` exits 1, the picker's widgets line is hidden, and `widgets theme`
 only records the mode. It is just as optional as the rest: `native` (the
 default) leaves them on their own shipped colours, `theme` swaps their
@@ -381,6 +386,14 @@ list.
 
 ## Documentation
 
-This README stays short on purpose. `tiler/README.md` covers the tiling layer
-and Learn, `qml/README.md` the QML host and its Quickshell shim, and
-`patches/README.md` the macOS overrides for imported plugins.
+- [docs/INSTALL.md](docs/INSTALL.md): step-by-step setup on a new Mac,
+  installer flags, permissions in order, verification, updating and
+  uninstalling, troubleshooting.
+- [docs/PLUGINS.md](docs/PLUGINS.md): writing a plugin: manifest fields, the
+  kinds, the `window.gallery` bridge, enabled state, Spoon IPC, importing
+  Omarchy plugins.
+- [docs/THEMES.md](docs/THEMES.md): writing a theme, derived tokens, every file
+  the renderer writes, theme-set hooks, wallpapers, what re-themes when.
+- [tiler/README.md](tiler/README.md): the tiling layer, key table and Learn.
+- [qml/README.md](qml/README.md): the QML host and its Quickshell shim.
+- [patches/README.md](patches/README.md): macOS overrides for imported plugins.
