@@ -209,7 +209,7 @@ do
   local errors = Manifest.validate({
     schemaVersion = 1, id = "a", name = "A", version = "0.1",
     kinds = { "tui" }, entryPoints = {},
-    gallery = { tui = { command = "/opt/homebrew/bin/btop" } },
+    gallery = { tui = { command = "btop" } },
   }, TMP_ROOT)
   check("valid: tui kind with gallery.tui.command", #errors == 0, joined(errors))
 end

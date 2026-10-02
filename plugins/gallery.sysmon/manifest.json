@@ -7,7 +7,7 @@
   "entryPoints": {},
   "gallery": {
     "tui": {
-      "command": "/opt/homebrew/bin/btop",
+      "command": "btop",
       "args": [],
       "grid": "6:6:1:1:4:4"
     }

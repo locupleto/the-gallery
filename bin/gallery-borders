@@ -40,7 +40,9 @@
 #
 set -euo pipefail
 
+# Homebrew's prefix: /opt/homebrew on Apple silicon, /usr/local on Intel.
 BORDERS_BIN="/opt/homebrew/bin/borders"
+[ -x "${BORDERS_BIN}" ] || BORDERS_BIN="/usr/local/bin/borders"
 THEME_STATE="${XDG_CONFIG_HOME:-$HOME/.config}/gallery/state/theme.sh"
 DEFAULT_ACCENT="#7aa2f7"
 DEFAULT_WIDTH="5"
@@ -189,7 +191,11 @@ launch_detached() {
 }
 
 cmd_apply() {
-  [ -x "${BORDERS_BIN}" ] || die "borders not found at ${BORDERS_BIN}"
+  # No JankyBorders (it needs macOS 14): no outline, and nothing to fail over.
+  if [ ! -x "${BORDERS_BIN}" ]; then
+    echo "gallery-borders: borders is not installed; no focus outline on this Mac" >&2
+    return 0
+  fi
 
   local active inactive width hex bright pid
   {

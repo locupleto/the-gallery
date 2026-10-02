@@ -126,7 +126,9 @@ if [ -x "${HOME}/bin/gallery-borders" ]; then
     "${HOME}/bin/gallery-borders" apply
 else
     killall borders 2>/dev/null
-    LANG="en_US.UTF-8" /opt/homebrew/bin/borders \
+    # Homebrew's prefix: /opt/homebrew on Apple silicon, /usr/local on Intel.
+    b=/opt/homebrew/bin/borders; [ -x "$b" ] || b=/usr/local/bin/borders
+    [ -x "$b" ] && LANG="en_US.UTF-8" "$b" \
         active_color=0xff7aa2f7 \
         inactive_color=0x00000000 \
         width=5.0 \

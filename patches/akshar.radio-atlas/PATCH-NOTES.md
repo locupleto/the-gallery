@@ -90,7 +90,7 @@ changed; macOS's stock bash 3.2 is fine for this script.
 
 ### `radio-fetch`
 Four independent changes, documented together in this one file's header:
-- Shebang -> `/opt/homebrew/bin/bash` (see "Homebrew formulae" above --
+- Re-execs under Homebrew bash, `/opt/homebrew/bin/bash` or `/usr/local/bin/bash` (see "Homebrew formulae" above --
   `mapfile` needs bash 4).
 - `discover_bases()`: upstream's `getent ahostsv4 all.api.radio-browser
   .info` (resolve every A record) and `getent hosts <ip>` (reverse

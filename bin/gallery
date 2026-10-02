@@ -220,7 +220,8 @@ EOF
 
 require_hs() {
   if ! command -v hs >/dev/null 2>&1; then
-    echo 'hs CLI not installed; run in Hammerspoon console: hs.ipc.cliInstall("/opt/homebrew")' >&2
+    local prefix=/opt/homebrew; [ -d "${prefix}/bin" ] || prefix=/usr/local
+    echo "hs CLI not installed; run in Hammerspoon console: hs.ipc.cliInstall(\"${prefix}\")" >&2
     exit 1
   fi
 }

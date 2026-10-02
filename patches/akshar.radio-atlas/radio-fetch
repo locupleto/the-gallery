@@ -1,10 +1,10 @@
-#!/opt/homebrew/bin/bash
+#!/bin/bash
 # Derived from omarchy-radio-atlas, Copyright (c) 2026 Akshar Patel, MIT
 # licence (see THIRD_PARTY_NOTICES.md at the repository root).
 # Gallery macOS patch for akshar.radio-atlas 0.1.9:
-#  - shebang -> Homebrew bash (`brew install bash`): this script's
-#    load_bases() uses `mapfile`, a bash-4+ builtin macOS's shipped
-#    /bin/bash 3.2 does not have.
+#  - re-exec under Homebrew bash (`brew install bash`; /opt/homebrew on
+#    Apple silicon, /usr/local on Intel): this script's load_bases() uses
+#    `mapfile`, a bash-4+ builtin macOS's shipped /bin/bash 3.2 does not have.
 #  - discover_bases(): replaces `getent ahostsv4`/`getent hosts`
 #    (util-linux/glibc, absent on macOS) with `dig` (Bind, present on
 #    macOS by default) for the same forward-then-reverse mirror lookup.
@@ -15,6 +15,13 @@
 #    PATH that lacks flags this script relies on.
 #  - stat -c '%s' (GNU coreutils) -> stat -f '%z' (BSD stat, macOS's
 #    stock `stat`), same file-size query, three call sites.
+if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+  for b in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    [ -x "$b" ] && exec "$b" "$0" "$@"
+  done
+  echo "radio-fetch: needs bash 4 or later (brew install bash)" >&2
+  exit 1
+fi
 set -euo pipefail
 umask 077
 

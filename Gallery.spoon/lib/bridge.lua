@@ -85,7 +85,9 @@ local DEFAULT_THEME = {
 -- configured by the author's optional, not-public crystal widgets and their
 -- sampler LaunchAgent (HTOP_TEMP_DIR=$HOME/tmp); without them the file is
 -- absent and the metrics subscription simply gets no data.
-local YABAI_PATH = "/opt/homebrew/bin/yabai"
+-- Homebrew's prefix: /opt/homebrew on Apple silicon, /usr/local on Intel.
+local YABAI_PATH = hs.fs.attributes("/opt/homebrew/bin/yabai") and "/opt/homebrew/bin/yabai"
+  or "/usr/local/bin/yabai"
 local METRICS_PATH = os.getenv("HOME") .. "/tmp/metrics.json"
 
 local SPACES_INTERVAL = 2
