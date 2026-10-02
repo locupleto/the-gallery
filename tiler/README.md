@@ -65,12 +65,8 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + w | close window |
 | super + return | new terminal window in the configured terminal (`gallery terminal`; iTerm2 unless set otherwise), launched if it is not running (on iTerm2 and Ghostty, first press: allow "skhd wants to control iTerm2") |
 | super + shift + r | restart yabai, reload skhd |
-| super + a / shift + a | Claude desktop app / ChatGPT app (both in /Applications) |
 | super + c | Calendar |
-| super + e | Gmail web app |
-| super + y | YouTube web app |
-| super + x | X web app |
-| super + g / shift + g | Telegram (Omarchy's messaging slot) / Grok web app |
+| super + a / shift + a, e, y, x, g / shift + g | Omarchy's other app slots: not bound out of the box (they are personal); examples in `local.skhd.example` |
 | super + space | Learn menu: pick a cheat sheet (first press: allow "skhd wants to control iTerm2") |
 | super + shift + space | the tiler key sheet, generated from `skhdrc` |
 
@@ -202,6 +198,21 @@ by the script).
   layout (snapshot the windows you have arranged instead of hand-writing the
   map) and `gallery home apply` re-sources it live the same way.
 - `skhdrc` → `~/.config/skhd/skhdrc`: the table above.
+- `~/.config/skhd/local.skhd` (your own keys; never overwritten): loaded by
+  `skhdrc` before `gallery.skhd`. The installers create it once, from
+  `local.skhd.example` (all commented out: the app slots above, a custom key,
+  and how to switch a Gallery key off). Its `## ` description lines appear in
+  the Learn key sheet. skhd keeps the FIRST definition of a duplicate hotkey
+  and drops the later one without a warning, and parses a file's own bindings
+  before its `.load`s: so `local.skhd` can replace a key from `gallery.skhd`
+  and add new ones, but cannot replace a binding written in `skhdrc` itself.
+  skhd has no "unbind"; rebind a key to `: true` to silence it. A missing
+  `.load` file is only a warning in skhd's error log.
+- `~/.config/yabai/yabairc.local` (optional, not created by the installer):
+  plain `sh` sourced by `yabairc` after its own `yabai -m config` lines and
+  rules and before `rule --apply`, so any setting there (gaps, layout, mouse
+  modifier, extra rules) replaces the shipped one. Template:
+  `yabairc.local.example`.
 
 Edit here, re-run `tiler/install.sh` (copies + reloads). The files are copied,
 not symlinked: launchd-started yabai cannot read an external volume, and

@@ -283,9 +283,10 @@ gallery terminal [status] | list | set <iterm2|ghostty|kitty|wezterm> |
 gallery font status | set <family> [size] [weight] | native | list |
 gallery widgets status | available | theme | native | toggle |
 gallery borders status | width <n> | bright on|off|toggle |
+gallery glass [status] | set <transparency 0-0.9> [<blur 0-64>] | default |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery ghosts [list] | fix [OWNER|ID] | forget |
-gallery agent [open] | inline | status | list | set <name> | dir [<path>|--clear] |
+gallery agent [open] | inline | status | list | set <name> [--command "<line>"] | dir [<path>|--clear] |
 gallery reload | log | doctor | install
 ```
 
@@ -381,7 +382,13 @@ waits for an approval it cannot show is useless. That is a deliberate posture:
 the agent has full file and shell access, unattended, in that directory.
 `gallery agent set <name>` records the default in
 `state/agent.json` (`gallery agent list` shows which are installed), and
-`inline` runs it in the current terminal instead of a new window.
+`inline` runs it in the current terminal instead of a new window. Any other
+agent CLI works with `gallery agent set <name> --command "<command line>"`
+(for example `--command "aider --yes"`): the line is stored in `agent.json` and
+run, from the start directory, as typed, so put the program first and its own
+"do not ask" flag after it. It may not contain double quotes, backslashes or
+newlines (use single quotes inside it); `gallery agent set claude` goes back to
+a built-in.
 
 The window is an **ordinary terminal window, tiled like any other** — not a
 floating Gallery surface. Omarchy's launcher ends in `omarchy-launch-tui
