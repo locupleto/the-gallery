@@ -36,6 +36,7 @@ a terminal first (see [Prerequisites](#prerequisites)):
 git clone https://github.com/locupleto/the-gallery && cd the-gallery
 ./install.sh               # install; macOS then asks for a few permissions
 gallery doctor             # check that everything is in place
+tools/fetch-omarchy-backgrounds.sh --all   # Omarchy's wallpapers, about 50 MB
 gallery agent dir ~/Code   # the folder that holds your repos: your agent starts there
 ```
 
@@ -43,8 +44,9 @@ gallery agent dir ~/Code   # the folder that holds your repos: your agent starts
 prints the one line to add.)
 
 Then press **super + space** (super is left Option) for the Learn menu, or
-**super + shift + space** for every key on one sheet, and open a few windows
-with **super + return**. To take a break from it:
+**super + shift + space** for every key on one sheet, open a few windows
+with **super + return**, and browse the themes with **shift + ctrl + super +
+space**. To take a break from it:
 
 ```sh
 gallery off                # plain macOS again: no tiling, keys back to normal
