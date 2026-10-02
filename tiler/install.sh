@@ -43,11 +43,11 @@ SKHD_RC="$HOME/.config/skhd/skhdrc"
 if [ "$UNINSTALL" = 1 ]; then
     command -v yabai >/dev/null && run yabai --stop-service || true
     command -v skhd  >/dev/null && run skhd  --stop-service || true
-    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn" "$(dirname "$SKHD_RC")/focus-dir" "$(dirname "$YABAI_RC")/yabai-layout" "$(dirname "$YABAI_RC")/tree-guard"
+    run rm -f "$YABAI_RC" "$SKHD_RC" "$(dirname "$SKHD_RC")/learn" "$(dirname "$SKHD_RC")/focus-dir" "$(dirname "$SKHD_RC")/browser-window" "$(dirname "$YABAI_RC")/yabai-layout" "$(dirname "$YABAI_RC")/tree-guard"
     run rm -rf "$HOME/Applications/Learn.app"
     echo "[tiler] services stopped, rc files removed (no restart needed). Note for"
-    echo "        external consumers: the voice assistant detects yabai's absence"
-    echo "        at runtime and falls back to System Events placement on its own."
+    echo "        external consumers: tools that place windows should detect yabai's absence"
+    echo "        at runtime and fall back to System Events placement."
     exit 0
 fi
 
@@ -117,6 +117,8 @@ run install -m 644 skhdrc  "$SKHD_RC"
 run install -m 755 learn "$(dirname "$SKHD_RC")/learn"
 # focus-dir: the directional focus/swap picker skhdrc calls for super+h/j/k/l.
 run install -m 755 focus-dir "$(dirname "$SKHD_RC")/focus-dir"
+# browser-window: super+b's new window in the default browser.
+run install -m 755 browser-window "$(dirname "$SKHD_RC")/browser-window"
 run install -m 644 learn.style.json "$(dirname "$SKHD_RC")/learn.style.json"
 if [ "$DRY" = 1 ]; then echo "[dry] learn install skhdrc"; else "$(dirname "$SKHD_RC")/learn" install "$PWD/skhdrc"; fi
 # yabai-layout: installed next to yabairc (same TCC reasoning) so the save/restore

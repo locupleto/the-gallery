@@ -3465,17 +3465,11 @@ cmd_doctor() {
     ok=0
   fi
 
-  # super+b runs the voice assistant's desktop verb. The binding resolves the
-  # runtime the same way as here: ~/.ai_voice_assistant (the Studio's synced
-  # runtime) when it holds a venv python, else the repo checkout (the laptop).
-  # A laptop has a bare ~/.ai_voice_assistant state folder too, which is why
-  # the test is for the python, not the directory. Optional feature: WARN only.
-  local va_dir="${HOME}/.ai_voice_assistant"
-  [ -x "${va_dir}/venv/bin/python" ] || va_dir="${HOME}/Developer/projects/git/ai_voice_assistant"
-  if [ -x "${va_dir}/venv/bin/python" ] && [ -f "${va_dir}/desktop.py" ]; then
-    echo "OK      super+b browser verb runtime (${va_dir})"
+  # super+b runs the tiler's browser-window helper, installed next to skhdrc.
+  if [ -x "${HOME}/.config/skhd/browser-window" ]; then
+    echo "OK      ${HOME}/.config/skhd/browser-window (super+b) installed"
   else
-    echo "WARN    super+b browser verb runtime: no venv python + desktop.py in ~/.ai_voice_assistant or ~/Developer/projects/git/ai_voice_assistant (key does nothing)"
+    echo "WARN    ${HOME}/.config/skhd/browser-window (super+b) missing (run tiler/install.sh)"
   fi
 
   if pgrep -x skhd >/dev/null 2>&1 \

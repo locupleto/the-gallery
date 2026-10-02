@@ -216,10 +216,7 @@ what notices.
 
 ## Consumers
 
-Nothing outside this repo is required. One binding reaches outside it:
-super+b ("new window in the default browser") hands the request to an
-external desktop helper, the author's own voice assistant, which is not
-public; without it the key does nothing (`gallery doctor` says so), so rebind
-it in `skhdrc` to your own browser command. Other tools can read the
-generated `~/.config/skhd/Tiler-Keys.md` key sheet to stay in sync with the
-bindings, which is how that helper does it.
+Nothing outside this repo is required. Other tools can read the generated
+`~/.config/skhd/Tiler-Keys.md` key sheet to stay in sync with the bindings,
+and anything that places windows should check whether yabai is running and
+fall back to System Events when it is not.

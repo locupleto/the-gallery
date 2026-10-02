@@ -1,0 +1,51 @@
+#!/usr/bin/env sh
+# browser-window — open a new window in the default browser (super+b).
+#
+#   browser-window
+#
+# The default browser is whatever handles https in LaunchServices. If it is not
+# running, launching it is enough (it opens its own first window). If it is,
+# ask it for a new window over AppleScript: Safari's "make new document", the
+# Chromium family's "make new window". Anything else gets Cmd+N via System
+# Events -- after a short pause, because skhd fires while left Option (super)
+# is still held and a synthetic keystroke inherits it (Option+Cmd+N is a
+# different command in most browsers). First use of that fallback asks once
+# for "skhd wants to control System Events".
+#
+# Installed by tiler/install.sh next to skhdrc (launchd cannot read an external
+# volume, and the checkout may live on one).
+
+set -eu
+
+handlers="$HOME/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist"
+bid=$(/usr/bin/plutil -convert json -o - "$handlers" 2>/dev/null \
+  | /usr/bin/python3 -c '
+import json, sys
+for h in json.load(sys.stdin).get("LSHandlers", []):
+    if h.get("LSHandlerURLScheme") == "https":
+        print(h.get("LSHandlerRoleAll") or h.get("LSHandlerRoleViewer") or "")
+        break
+' 2>/dev/null || true)
+bid=${bid:-com.apple.Safari}
+
+running=$(/usr/bin/osascript -e "application id \"$bid\" is running" 2>/dev/null || echo false)
+if [ "$running" != "true" ]; then
+  exec /usr/bin/open -b "$bid"
+fi
+
+case "$(printf '%s' "$bid" | tr '[:upper:]' '[:lower:]')" in
+  com.apple.safari|com.apple.safaritechnologypreview)
+    verb="make new document" ;;
+  com.google.chrome*|com.brave.browser*|com.microsoft.edgemac*|com.vivaldi.vivaldi|org.chromium.chromium|com.operasoftware.opera*)
+    verb="make new window" ;;
+  *)
+    verb="" ;;
+esac
+
+if [ -n "$verb" ]; then
+  /usr/bin/osascript -e "tell application id \"$bid\"" -e "$verb" -e "activate" -e "end tell" >/dev/null
+else
+  /usr/bin/open -b "$bid"
+  sleep 0.4
+  /usr/bin/osascript -e 'tell application "System Events" to keystroke "n" using command down' >/dev/null
+fi
