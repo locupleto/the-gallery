@@ -987,8 +987,8 @@ def find_kitty_binary() -> str | None:
 
 
 def reload_running_terminal(terminal: str | None) -> str | None:
-    """Best-effort live reload of the CONFIGURED terminal, and only if it is
-    already running -- never launches anything and never raises. Returns a
+    """Best-effort live reload of one terminal, only if it is already
+    running -- never launches anything and never raises. Returns a
     one-line report, or None when there was nothing to try. iTerm2 picks its
     dynamic profiles up by itself, and wezterm reloads when the rendered Lua
     module (on its watch list) changes, so neither needs a push."""
@@ -1017,8 +1017,8 @@ def reload_running_terminal(terminal: str | None) -> str | None:
             if done:
                 return f"kitty: colours pushed to {done} instance(s)"
             return (
-                "kitty: no remote-control socket (allow_remote_control + listen_on "
-                "in kitty.conf for live updates; new windows pick the theme up)"
+                "kitty: no remote-control socket; kitty re-reads the changed "
+                "include itself (allow_remote_control + listen_on push it at once)"
             )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -1314,9 +1314,12 @@ def main(argv: list[str]) -> int:
         font_summary = "font: native"
     print(f"  {font_summary}")
     # Last, so a slow or absent terminal can never hold up the files above.
-    reload_report = reload_running_terminal(configured_terminal())
-    if reload_report:
-        print(f"  live reload -- {reload_report}")
+    # Every running terminal, not only the configured one: a Ghostty or kitty
+    # window left open would otherwise keep the old colours.
+    for terminal in ("ghostty", "kitty"):
+        reload_report = reload_running_terminal(terminal)
+        if reload_report:
+            print(f"  live reload -- {reload_report}")
     return 0
 
 
