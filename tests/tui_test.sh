@@ -160,19 +160,25 @@ is_floating_visible() {
   esac
 }
 
+# Only the btop processes this test started count: a btop the user has open
+# elsewhere (or another user's) is noted before the test and left alone.
+BTOP_BEFORE="$(pgrep -u "$(id -u)" -ax btop 2>/dev/null | sort || true)"
+test_btops() {
+  comm -13 <(printf '%s\n' "${BTOP_BEFORE}") <(pgrep -u "$(id -u)" -ax btop 2>/dev/null | sort || true) | grep . || true
+}
 btop_gone() {
-  ! pgrep -x btop >/dev/null 2>&1
+  [ -z "$(test_btops)" ]
 }
 
-# --- cleanup trap: close the window and kill any stray btop on any exit ---
+# --- cleanup trap: close the window and kill the test's own btop on any exit ---
 cleanup() {
-  local rc=$?
+  local rc=$? pid
   if [ "${rc}" -ne 0 ]; then
-    say "cleanup after failure: closing ${PLUGIN_ID} and killing stray btop"
+    say "cleanup after failure: closing ${PLUGIN_ID} and killing the btop it started"
     dump_windows
   fi
   timeout "${CMD_TIMEOUT}" "${GALLERY_BIN}" close "${PLUGIN_ID}" >/dev/null 2>&1 || true
-  pkill -x btop >/dev/null 2>&1 || true
+  for pid in $(test_btops); do kill "${pid}" 2>/dev/null || true; done
   exit "${rc}"
 }
 trap cleanup EXIT
