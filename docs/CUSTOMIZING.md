@@ -827,12 +827,16 @@ every press opens another.
 gallery agent                       # open the default agent in a new window
 gallery agent inline                # run it in this terminal instead
 gallery agent status                # default agent, start directory, command
-gallery agent list                  # the built-ins and whether each is on PATH
-gallery agent set codex             # choose a built-in
-gallery agent set aider --command "aider --yes"   # any other CLI
+gallery agent list                  # every agent, whether each is on PATH, the default
+gallery agent set codex             # choose a built-in as the default
+gallery agent set aider --command "aider --yes"   # any other CLI, as the default
 gallery agent dir ~/Work            # where the agent starts (default: $HOME)
 gallery agent dir --clear           # back to $HOME
 ```
+
+Install the agent itself first: `brew install --cask claude-code` for Claude
+Code, or the install instructions of Codex, Gemini CLI, opencode and the
+rest. `gallery agent list` shows which ones it can find on your `PATH`.
 
 The built-in agents, and the command line each is started with (its own way of
 saying "do not stop to ask"):
@@ -852,6 +856,38 @@ the start directory exactly as typed, so put the program first and its own
 newlines (use single quotes inside it), and the name may use only letters,
 digits, `.`, `_` and `-`. `set <built-in>` without `--command` goes back to
 the built-in's own command. Settings are in `state/agent.json`.
+
+### More than one agent
+
+One agent is the **default**: the key and a bare `gallery agent` start it.
+Any other agent is started **by name**, once, and the default stays as it
+was:
+
+```sh
+gallery agent open gemini           # a built-in: needs no setup
+gallery agent inline gemini         # the same, in this terminal
+
+gallery agent add aider --command "aider --yes"   # register a custom agent
+gallery agent open aider            # start it by name
+gallery agent set aider             # or make it the default from now on
+gallery agent remove aider          # forget it (not while it is the default)
+```
+
+`add` takes the same command line as `set --command`, with the same rules,
+but leaves the default alone. A custom agent set as the default with
+`set <name> --command` is registered at the same time, so it stays available
+by name after you switch the default to another agent. `gallery agent list`
+shows every agent, its command line if it has a custom one, and which is the
+default. Registered agents live in `state/agents/`, one file each.
+
+To give a second agent a key of its own, bind it in `local.skhd` (see
+[Your own keys](#your-own-keys-localskhd)); the `## ` line puts it on the key
+sheet:
+
+```
+## open Gemini, as a second coding agent
+shift + ctrl + lalt - g : "$HOME/bin/gallery" agent open gemini
+```
 
 The start directory is `GALLERY_AGENT_DIR` if set (in the environment skhd
 runs under), else the one recorded with `gallery agent dir`, else `$HOME`; an
@@ -873,18 +909,35 @@ Learn (`super + space`) lists markdown files as a menu and renders the one you
 pick; `q` or Esc closes it. The folder is `~/.config/gallery/sheets`: drop in
 any `.md` file and it appears under its filename. Front matter is stripped.
 
+A new install has **one sheet**, the generated key sheet. The rest are yours
+to add: a sheet for the git commands you never remember, your editor, tmux,
+the shortcuts of an app you use daily.
+
 ```sh
 mkdir -p ~/.config/gallery/sheets
 $EDITOR ~/.config/gallery/sheets/Git-Tricks.md
 ~/.config/skhd/learn list           # the sheet names
 ```
 
+**Let your agent write them.** If you use a coding agent, it is the quickest
+way to a good sheet. Ask it for the sheet and give it the full path, since the
+agent works in its start directory, not in `~/.config`:
+
+> Write a concise cheat sheet for tmux as
+> `~/.config/gallery/sheets/Tmux.md`: short markdown tables grouped by task
+> (sessions, windows, panes, copy mode), the default key bindings only.
+
+Ask it to add to or tidy a sheet the same way. Learn picks up a new or changed
+file the next time it opens; nothing needs reloading.
+
 `Tiler-Keys.md` is the one generated sheet, rebuilt from the `## ` description
 lines in `local.skhd`, `tiler.skhd` and `gallery.skhd` (`~/.config/skhd/learn
 install`, which the installers also run). Do not edit it; edit the descriptions.
 To read sheets from somewhere else, either replace the folder with a symlink
 (`ln -s <folder> ~/.config/gallery/sheets`) or set `LEARN_SHEETS` in the
-environment skhd runs under. Learn needs `fzf` and `glow`. More in
+environment skhd runs under. An Obsidian user can instead set
+`OBSIDIAN_VAULT` to the vault's folder; Learn then reads its `Cheat-Sheets`
+subfolder (`LEARN_SHEETS` wins if both are set). Learn needs `fzf` and `glow`. More in
 [tiler/README.md](../tiler/README.md#learn-cheat-sheets-on-a-key).
 
 ## Where to look next

@@ -393,7 +393,8 @@ gallery borders status | width <n> | bright on|off|toggle |
 gallery glass [status] | set <transparency 0-0.9> [<blur 0-64>] | default |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery ghosts [list] | fix [OWNER|ID] | forget |
-gallery agent [open] | inline | status | list | set <name> [--command "<line>"] | dir [<path>|--clear] |
+gallery agent [open [<name>]] | inline [<name>] | status | list | set <name> [--command "<line>"] |
+              add <name> --command "<line>" | remove <name> | dir [<path>|--clear] |
 gallery reload | log | doctor | install
 ```
 
@@ -495,7 +496,10 @@ agent CLI works with `gallery agent set <name> --command "<command line>"`
 run, from the start directory, as typed, so put the program first and its own
 "do not ask" flag after it. It may not contain double quotes, backslashes or
 newlines (use single quotes inside it); `gallery agent set claude` goes back to
-a built-in.
+a built-in. Only one agent is the default, but any other starts by name, once,
+with `gallery agent open <name>`; `gallery agent add <name> --command "<line>"`
+registers a custom one without making it the default (see
+[More than one agent](docs/CUSTOMIZING.md#more-than-one-agent)).
 
 The window is an **ordinary terminal window, tiled like any other** — not a
 floating Gallery surface. Omarchy's launcher ends in `omarchy-launch-tui

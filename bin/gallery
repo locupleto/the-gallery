@@ -65,7 +65,7 @@
 #   gallery home save [--roam A,B] [--dry-run]
 #   gallery home apply
 #   gallery ghosts [list|fix [OWNER|ID]|forget]
-#   gallery agent [open|inline|status|list|set <name> [--command "<line>"]|dir [<path>|--clear]]
+#   gallery agent [open [<name>]|inline [<name>]|status|list|set <name> [--command "<line>"]|add <name> --command "<line>"|remove <name>|dir [<path>|--clear]]
 #   gallery reload
 #   gallery log
 #   gallery doctor
@@ -205,9 +205,13 @@ commands:
   ghosts fix [OWNER|ID]           quit + relaunch the app owning ghost window(s)
   ghosts forget                   clear the ghosts service's reported/handled state
   agent [open|inline|status|list]  launch / inspect the default coding agent
+  agent open|inline <name>        start another agent once; the default stays
   agent set <name>                pick a built-in agent (claude, gemini, opencode, codex, copilot, crush)
   agent set <name> --command "<command line>"
                                    use any other agent CLI, run as typed (single quotes only)
+  agent add <name> --command "<command line>"
+                                   register another agent without making it the default
+  agent remove <name>             forget a registered agent
   agent dir [<path>|--clear]      show, record or forget the agent's start directory
   off                             switch the Gallery off for now: plain macOS
                                   windows and keys (tiling stops, the focus

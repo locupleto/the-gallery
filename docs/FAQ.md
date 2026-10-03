@@ -158,7 +158,11 @@ shipped themes ([Themes](CUSTOMIZING.md#themes),
 The start directory is `gallery agent dir <path>` (it falls back to `$HOME`
 with a warning if the path cannot be reached). Pick the agent with
 `gallery agent set <name>`, or `gallery agent set <name> --command "..."` for
-any other CLI. The built-in commands already start the agent in its
+any other CLI. To keep one default and use others now and then, start them
+by name with `gallery agent open <name>` (custom ones are registered first
+with `gallery agent add`; see
+[More than one agent](CUSTOMIZING.md#more-than-one-agent)). The built-in
+commands already start the agent in its
 "do not ask" mode, so it will not stop to ask; read the security note in
 [Getting started](GETTING-STARTED.md#set-up-your-coding-agent) and
 [AI agents](CUSTOMIZING.md#ai-agents). `gallery agent status` shows what is set.

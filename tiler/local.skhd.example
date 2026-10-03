@@ -36,6 +36,8 @@
 #shift + lalt - g : open -a "$HOME/Applications/Grok.app"
 
 # --- your own keys ------------------------------------------------------------
+## open Gemini, as a second coding agent (the default is on shift+ctrl+super+a)
+#shift + ctrl + lalt - g : "$HOME/bin/gallery" agent open gemini
 ## open a project folder in the editor
 #lalt - p : open -a "Visual Studio Code" "$HOME/projects"
 

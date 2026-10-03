@@ -3,13 +3,20 @@
 # gallery-agent -- launch the default coding agent, modelled on Omarchy 4's
 # omarchy-agent (/usr/share/omarchy/bin/omarchy-agent).
 #
-#   gallery-agent            open the agent in a new terminal window
-#   gallery-agent inline     run the agent in the current terminal
+#   gallery-agent [open [<name>]]
+#                            open the default agent (or <name>, once) in a new
+#                            terminal window
+#   gallery-agent inline [<name>]
+#                            run the default agent (or <name>) in this terminal
 #   gallery-agent status     which agent is default, where it starts, is it installed
-#   gallery-agent list       the supported agents and whether each is on PATH
+#   gallery-agent list       every agent, whether each is on PATH, which is default
 #   gallery-agent set <name> record the default agent
 #   gallery-agent set <name> --command "<command line>"
-#                            use any other agent CLI (see CUSTOM AGENTS)
+#                            use any other agent CLI as the default (see CUSTOM AGENTS)
+#   gallery-agent add <name> --command "<command line>"
+#                            register another agent without making it the default
+#   gallery-agent remove <name>
+#                            forget a registered agent
 #   gallery-agent dir [<path>|--clear]
 #                            show, record or forget the start directory
 #
@@ -49,6 +56,19 @@
 # (use single quotes inside the line). `set <built-in>` without --command goes
 # back to that built-in's own command.
 #
+# SEVERAL AGENTS. One agent is the default: the key and a bare `open` start it.
+# Any other is started by name, once, with `open <name>` (or bound to a key of
+# its own in local.skhd); the default does not change. A built-in needs no
+# setup for that. A custom one is registered with `add <name> --command
+# "<line>"`, which writes the line to AGENTS_DIR/<name> -- one file per agent,
+# one line each, for the same reason the state file is plain printf/sed.
+# `set <name> --command` records the default's line in the state file as
+# before and registers it too, so a custom agent stays available by name
+# after another becomes the default; `set <registered name>` makes it the
+# default again. A registered line for a built-in name overrides that
+# built-in's command; `set <built-in>` without --command drops the override,
+# as it always has.
+#
 # PERMISSIONS. Each agent is started with its own spelling of "do not stop to
 # ask", exactly as omarchy-agent does: a keypress-launched agent that sits
 # waiting for an approval it cannot show is useless. This is a deliberate
@@ -58,6 +78,7 @@ set -euo pipefail
 
 CONFIG_DIR="${GALLERY_CONFIG_DIR:-${HOME}/.config/gallery}"
 STATE_FILE="${CONFIG_DIR}/state/agent.json"
+AGENTS_DIR="${CONFIG_DIR}/state/agents"
 DEFAULT_AGENT="claude"
 
 # This script's own absolute path: the window opened below runs it again with
@@ -86,16 +107,62 @@ die() { echo "gallery agent: $*" >&2; exit 1; }
 # A custom command line (see CUSTOM AGENTS) for the current agent, or nothing.
 custom_command() { state_value command; }
 
-# The command line of agent $1 as one string: the custom line if one is
-# recorded, else the built-in's.
+# The custom command line of agent $1, or nothing: the default agent's line
+# from the state file, else a line registered in AGENTS_DIR (see SEVERAL
+# AGENTS).
+custom_line() {
+  local c=""
+  [ "$1" = "$(state_value agent)" ] && c="$(custom_command)"
+  if [ -z "${c}" ] && [ -f "${AGENTS_DIR}/$1" ]; then
+    c="$(head -n 1 "${AGENTS_DIR}/$1")"
+  fi
+  printf '%s' "${c}"
+}
+
+# The command line of agent $1 as one string: its custom line if it has one,
+# else the built-in's. Fails for a name that is neither.
 agent_line() {
   local c
-  c="$(custom_command)"
-  if [ -n "${c}" ] && [ "$1" = "$(state_value agent)" ]; then
+  c="$(custom_line "$1")"
+  if [ -n "${c}" ]; then
     printf '%s\n' "${c}"
   else
     agent_command "$1" | tr '\n' ' ' | sed 's/ $//'
   fi
+}
+
+# known_agent <name> -- a built-in, or a custom agent with a recorded line.
+known_agent() {
+  agent_command "$1" >/dev/null 2>&1 || [ -n "$(custom_line "$1")" ]
+}
+
+# valid_name <name> -- the characters an agent name may use. Names end up in a
+# file name and in the window's command, so nothing else gets through.
+valid_name() {
+  case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+}
+
+# check_line <line> -- refuses what the plain-text state cannot hold (see
+# CUSTOM AGENTS), or a line with no program in it.
+check_line() {
+  [ -n "${1//[[:space:]]/}" ] || return 1
+  case "$1" in
+    *\"*|*\\*|*$'\n'*|*$'\r'*) die "the command may not contain double quotes, backslashes or newlines (use single quotes inside it)" ;;
+  esac
+}
+
+# register <name> <line> -- write a custom agent's line to AGENTS_DIR.
+register() {
+  mkdir -p "${AGENTS_DIR}"
+  printf '%s\n' "$2" > "${AGENTS_DIR}/$1.new"
+  mv -f "${AGENTS_DIR}/$1.new" "${AGENTS_DIR}/$1"
+}
+
+# warn_if_missing <line> -- the "not on PATH" warning for a line's program.
+warn_if_missing() {
+  local prog="${1#"${1%%[![:space:]]*}"}"
+  prog="${prog%%[[:space:]]*}"
+  command -v "${prog}" >/dev/null 2>&1 || echo "gallery agent: warning -- ${prog} is not on PATH" >&2
 }
 
 # The program (first word) of agent $1's command line, for the on-PATH check.
@@ -154,8 +221,11 @@ start_dir() {
 # The script path is passed as $0 rather than interpolated into the quoted
 # command, so a path containing spaces or quotes cannot break out of it.
 open_window() {
-  local script="$1"
+  local script="$1" name="${2:-}"
   local command="/bin/zsh -l -c 'exec \"\$0\" launch' \"${script}\""
+  # A named agent (`open <name>`) is handed to `launch` as $1; valid_name has
+  # already limited it to characters that need no quoting.
+  [ -z "${name}" ] || command="/bin/zsh -l -c 'exec \"\$0\" launch \"\$1\"' \"${script}\" \"${name}\""
   # Test seam: tests/agent_test.sh asserts on the command without ever
   # opening a window (see the login-shell note above -- it is the one part
   # of this that is easy to get subtly wrong).
@@ -171,7 +241,11 @@ open_window() {
   local term wid
   term="${GALLERY_TERM_BIN:-$(dirname "${SELF}")/gallery-term}"
   [ -x "${term}" ] || term="${HOME}/bin/gallery-term"
-  wid="$("${term}" open --role tile -- /bin/zsh -l -c 'exec "$0" launch' "${script}")" || return 0
+  if [ -n "${name}" ]; then
+    wid="$("${term}" open --role tile -- /bin/zsh -l -c 'exec "$0" launch "$1"' "${script}" "${name}")" || return 0
+  else
+    wid="$("${term}" open --role tile -- /bin/zsh -l -c 'exec "$0" launch' "${script}")" || return 0
+  fi
   case "${wid}" in ''|*[!0-9]*) return 0 ;; esac
   keep_on_current_space "${wid}"
 }
@@ -213,51 +287,88 @@ keep_on_current_space() {
 
 case "${1:-open}" in
   list)
-    for a in ${SUPPORTED}; do
-      if command -v "$a" >/dev/null 2>&1; then mark="installed"; else mark="-"; fi
-      [ "$a" = "$(current_agent)" ] && mark="${mark} (default)"
-      printf '%-10s %s\n' "$a" "${mark}"
-    done
-    # A custom agent (a name outside the built-ins, or a built-in with its own
-    # command line) is listed too, with the line that runs it.
-    if [ -n "$(custom_command)" ]; then
-      a="$(current_agent)"
-      if command -v "$(agent_program "$a")" >/dev/null 2>&1; then mark="installed"; else mark="-"; fi
-      printf '%-10s %s (default, custom: %s)\n' "$a" "${mark}" "$(custom_command)"
+    # One row per agent: the built-ins, then every custom agent (registered,
+    # or the default's own line). A custom line is shown with the row.
+    row() {
+      local a="$1" c extra="" mark="-"
+      c="$(custom_line "$a")"
+      command -v "$(agent_program "$a")" >/dev/null 2>&1 && mark="installed"
+      [ "$a" = "$(current_agent)" ] && extra="default"
+      [ -z "${c}" ] || extra="${extra:+${extra}, }custom: ${c}"
+      printf '%-10s %s%s\n' "$a" "${mark}" "${extra:+ (${extra})}"
+    }
+    for a in ${SUPPORTED}; do row "$a"; done
+    customs=""
+    if [ -d "${AGENTS_DIR}" ]; then
+      for f in "${AGENTS_DIR}"/*; do
+        [ -f "$f" ] || continue
+        a="$(basename "$f")"
+        case "$a" in *.new) continue ;; esac
+        valid_name "$a" || continue
+        customs="${customs} ${a}"
+      done
     fi
+    a="$(current_agent)"
+    [ -z "$(custom_command)" ] || customs="${customs} ${a}"
+    printf '%s\n' ${customs} | sort -u | while read -r a; do
+      [ -n "$a" ] || continue
+      agent_command "$a" >/dev/null 2>&1 && continue   # already listed above
+      row "$a"
+    done
     ;;
   status)
     a="$(current_agent)"
     printf 'agent:   %s%s\n' "$a" "$(command -v "$(agent_program "$a")" >/dev/null 2>&1 || echo ' (NOT INSTALLED)')"
     printf 'starts:  %s\n' "$(start_dir 2>/dev/null)"
-    printf 'command: %s%s\n' "$(agent_line "$a" 2>/dev/null)" "$([ -z "$(custom_command)" ] || echo ' (custom)')"
+    printf 'command: %s%s\n' "$(agent_line "$a" 2>/dev/null)" "$([ -z "$(custom_line "$a")" ] || echo ' (custom)')"
     printf 'state:   %s\n' "${STATE_FILE}"
     ;;
   set)
     name="${2:?usage: gallery agent set <name> [--command \"<command line>\"]}"
-    case "${name}" in *[!A-Za-z0-9._-]*) die "agent names use letters, digits, . _ - only: ${name}" ;; esac
+    valid_name "${name}" || die "agent names use letters, digits, . _ - only: ${name}"
     line=""
     if [ "${3:-}" = "--command" ]; then
       line="${4:-}"
-      [ $# -eq 4 ] && [ -n "${line//[[:space:]]/}" ] \
+      [ $# -eq 4 ] && check_line "${line}" \
         || die "usage: gallery agent set <name> --command \"<command line>\""
-      case "${line}" in
-        *\"*|*\\*|*$'\n'*|*$'\r'*) die "the command may not contain double quotes, backslashes or newlines (use single quotes inside it)" ;;
-      esac
+      register "${name}" "${line}"
     elif [ $# -gt 2 ]; then
       die "usage: gallery agent set <name> [--command \"<command line>\"]"
+    elif agent_command "${name}" >/dev/null 2>&1; then
+      # A built-in without --command goes back to its own command line.
+      rm -f "${AGENTS_DIR}/${name}"
+    elif [ -f "${AGENTS_DIR}/${name}" ]; then
+      line="$(head -n 1 "${AGENTS_DIR}/${name}")"
     else
-      agent_command "${name}" >/dev/null 2>&1 \
-        || die "unsupported agent: ${name} (one of: ${SUPPORTED}; or give it a command: set ${name} --command \"<command line>\")"
+      die "unsupported agent: ${name} (one of: ${SUPPORTED}; or give it a command: set ${name} --command \"<command line>\")"
     fi
-    if [ -n "${line}" ]; then
-      prog="${line#"${line%%[![:space:]]*}"}"; prog="${prog%%[[:space:]]*}"
-    else
-      prog="${name}"
-    fi
-    command -v "${prog}" >/dev/null 2>&1 || echo "gallery agent: warning -- ${prog} is not on PATH" >&2
+    warn_if_missing "${line:-${name}}"
     write_state "${name}" "$(state_value dir)" "${line}"
     echo "default agent: ${name}${line:+ (custom: ${line})}"
+    ;;
+  add)
+    name="${2:-}"
+    valid_name "${name}" && [ "${3:-}" = "--command" ] && [ $# -eq 4 ] \
+      || die "usage: gallery agent add <name> --command \"<command line>\""
+    line="$4"
+    check_line "${line}" || die "usage: gallery agent add <name> --command \"<command line>\""
+    register "${name}" "${line}"
+    # Re-registering the default changes what the key starts, so the state
+    # file's copy of its line follows.
+    if [ "${name}" = "$(current_agent)" ]; then
+      write_state "${name}" "$(state_value dir)" "${line}"
+    fi
+    warn_if_missing "${line}"
+    echo "registered agent: ${name} (custom: ${line}); start it with: gallery agent open ${name}"
+    ;;
+  remove)
+    name="${2:-}"
+    valid_name "${name}" && [ $# -eq 2 ] || die "usage: gallery agent remove <name>"
+    [ -f "${AGENTS_DIR}/${name}" ] || die "${name} is not a registered agent (gallery agent list)"
+    [ "${name}" != "$(current_agent)" ] \
+      || die "${name} is the default agent; choose another first (gallery agent set <name>)"
+    rm -f "${AGENTS_DIR}/${name}"
+    echo "removed agent: ${name}"
     ;;
   dir)
     case "${2:-}" in
@@ -279,17 +390,24 @@ case "${1:-open}" in
     # the terminal the key was pressed from instead of in a window that
     # opens and closes again before it can be read. From the key there is no
     # terminal, so it is also shown as a notification.
-    a="$(current_agent)"
+    # `open <name>` starts that agent once and leaves the default alone.
+    [ $# -le 2 ] || die "usage: gallery agent open [<name>]"
+    a="${2:-$(current_agent)}"
+    valid_name "$a" || die "agent names use letters, digits, . _ - only: $a"
+    known_agent "$a" || die "unknown agent: $a (gallery agent list; register one with: gallery agent add $a --command \"<command line>\")"
     if ! command -v "$(agent_program "$a")" >/dev/null 2>&1; then
       [ -n "${GALLERY_NO_NOTIFY:-}" ] || /usr/bin/osascript -e "display notification \"${a} is not installed. Install it, or choose another agent: gallery agent list\" with title \"Gallery: no coding agent\"" >/dev/null 2>&1 || true
       die "${a} is not installed (gallery agent list)"
     fi
-    open_window "${SELF}"
+    open_window "${SELF}" "${2:-}"
     ;;
   inline|launch)
-    a="$(current_agent)"
+    [ $# -le 2 ] || die "usage: gallery agent inline [<name>]"
+    a="${2:-$(current_agent)}"
+    valid_name "$a" || die "agent names use letters, digits, . _ - only: $a"
+    known_agent "$a" || die "unknown agent: $a (gallery agent list)"
     command -v "$(agent_program "$a")" >/dev/null 2>&1 || die "${a} is not installed (gallery agent list)"
-    if [ -n "$(custom_command)" ]; then
+    if [ -n "$(custom_line "$a")" ]; then
       # A custom command line: run by a shell so its own quoting applies.
       line="$(agent_line "$a")"
       cd "$(start_dir)"
@@ -303,6 +421,6 @@ case "${1:-open}" in
     exec "${cmd[@]}"
     ;;
   *)
-    die "usage: gallery agent [open|inline|status|list|set <name> [--command \"<line>\"]|dir]"
+    die "usage: gallery agent [open [<name>]|inline [<name>]|status|list|set <name> [--command \"<line>\"]|add <name> --command \"<line>\"|remove <name>|dir]"
     ;;
 esac

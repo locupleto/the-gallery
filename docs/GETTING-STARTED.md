@@ -23,7 +23,9 @@ Learn these first. Everything else can be looked up with them.
   Enter shows the highlighted sheet (a preview appears on the right), and Esc
   closes the menu. A sheet is paged: arrows, PgUp, PgDn, the mouse wheel,
   `j`/`k`, space and `b` scroll, and `q`, Esc or Enter close it. There is no
-  search inside a sheet.
+  search inside a sheet. A new install has one sheet, the key sheet below;
+  add your own markdown files to `~/.config/gallery/sheets`, or ask your
+  coding agent to write them (see [Learn sheets](CUSTOMIZING.md#learn-sheets)).
 - **super + shift + space** opens the **key sheet** directly: every binding
   from your `local.skhd`, `tiler.skhd` and `gallery.skhd`, generated from the
   files, so it is always current and includes keys you add yourself.
@@ -188,6 +190,18 @@ Choose the agent and where it starts, once.
 
 4. **Press super + shift + ctrl + a.** Each press opens another window;
    quit the agent to close it.
+
+5. **More than one agent?** The default is the one the key starts. Start any
+   other by name, once, without changing the default:
+
+   ```sh
+   gallery agent open gemini                         # a built-in
+   gallery agent add aider --command "aider --yes"   # register a custom one
+   gallery agent open aider
+   ```
+
+   `gallery agent set <name>` changes the default, and a second agent can have
+   a key of its own. See [More than one agent](CUSTOMIZING.md#more-than-one-agent).
 
 **Security.** The built-in commands start each agent in its "do not ask"
 mode, so it runs unattended with the full file and shell access of your

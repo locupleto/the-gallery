@@ -170,4 +170,59 @@ grep -qF 'command: claude --model opus (custom)' <<<"$(run status)" || fail "a b
 run set claude >/dev/null
 say "custom agents: set --command, status/list, inline, dir keeps it, bad input refused, built-in clears it"
 
+# --- 9. several agents: one default, the others by name ------------------------
+# `add` registers a custom agent without touching the default; `open <name>`
+# and `inline <name>` start any agent once; `set <registered>` makes it the
+# default; `remove` forgets one; an old state file with the default's line in
+# agent.json keeps working.
+open_cmd() { GALLERY_CONFIG_DIR="${WORK_DIR}/config" GALLERY_AGENT_DIR="${WORK_DIR}/start" \
+             PATH="${WORK_DIR}/bin:/usr/bin:/bin" GALLERY_AGENT_PRINT_COMMAND=1 "${AGENT}" open "$@"; }
+run set claude >/dev/null
+run add aider --command "my-agent --second 'x y'" >/dev/null 2>&1 || fail "add was rejected"
+grep -q '^agent:   claude$' <<<"$(run status)" || fail "add changed the default: $(run status)"
+grep -qF "aider      installed (custom: my-agent --second 'x y')" <<<"$(run list)" || fail "list does not show the registered agent: $(run list)"
+grep -q '^claude .*(default)' <<<"$(run list)" || fail "list lost the default mark: $(run list)"
+cmd="$(open_cmd aider)"
+grep -qF 'launch "$1"' <<<"${cmd}" && grep -qF '"aider"' <<<"${cmd}" || fail "open <name> does not hand the name to launch: ${cmd}"
+grep -q -- '/bin/zsh -l -c' <<<"${cmd}" || fail "open <name> is not a login shell: ${cmd}"
+grep -q '^agent:   claude$' <<<"$(run status)" || fail "open <name> changed the default"
+out="$(run inline aider)"
+[ "${out}" = "custom-ran in $(cd "${WORK_DIR}/start" && pwd) with: --second x y" ] || fail "inline <name> did not run the registered line: ${out}"
+open_cmd gemini >/dev/null || fail "open <built-in> should need no setup"
+[ "$(open_cmd)" = "$(open_cmd claude)" ] && fail "a bare open must not pass a name"
+grep -qF 'launch'"'"' "' <<<"$(open_cmd)" || fail "a bare open should keep the plain launch command: $(open_cmd)"
+# the custom default from section 8 stays reachable by name after a switch
+open_cmd myagent >/dev/null || fail "a former custom default is no longer available by name"
+# refused: unknown names, bad names, extra words
+if open_cmd nosuchagent >/dev/null 2>&1; then fail "open <unknown> was accepted"; fi
+if open_cmd "bad name" >/dev/null 2>&1; then fail "open with a bad name was accepted"; fi
+if open_cmd aider extra >/dev/null 2>&1; then fail "open with two names was accepted"; fi
+if run inline nosuchagent >/dev/null 2>&1; then fail "inline <unknown> was accepted"; fi
+if run add aider >/dev/null 2>&1; then fail "add without --command was accepted"; fi
+if run add aider --command 'my-agent "q"' >/dev/null 2>&1; then fail "add with a double quote was accepted"; fi
+# set <registered> makes it the default, with its line
+run set aider >/dev/null 2>&1 || fail "set <registered name> was rejected"
+grep -q '^agent:   aider$' <<<"$(run status)" && grep -qF "command: my-agent --second 'x y' (custom)" <<<"$(run status)" \
+  || fail "set <registered> did not take its line: $(run status)"
+if run remove aider >/dev/null 2>&1; then fail "remove of the default was accepted"; fi
+run set claude >/dev/null
+grep -q '^aider ' <<<"$(run list)" || fail "aider vanished when it stopped being the default"
+# re-registering the default follows into the state file; set <built-in> drops it
+run add claude --command "claude --model opus" >/dev/null 2>&1
+grep -qF 'command: claude --model opus (custom)' <<<"$(run status)" || fail "add <default> did not change the default's line"
+run set claude >/dev/null
+grep -q -- '--permission-mode bypassPermissions' <<<"$(run status)" || fail "set <built-in> did not drop a registered override"
+[ ! -e "${WORK_DIR}/config/state/agents/claude" ] || fail "set <built-in> left the override file"
+# remove
+run remove aider >/dev/null || fail "remove was rejected"
+if grep -q '^aider ' <<<"$(run list)"; then fail "remove left aider in the list"; fi
+if run remove aider >/dev/null 2>&1; then fail "removing an unregistered agent was accepted"; fi
+# an old state file (custom line only in agent.json) still works by name
+rm -rf "${WORK_DIR}/config/state/agents"
+printf '{\n  "agent": "legacy1",\n  "command": "my-agent --legacy"\n}\n' > "${WORK_DIR}/config/state/agent.json"
+grep -q '^legacy1 .*(default, custom: my-agent --legacy)' <<<"$(run list)" || fail "an old-format custom default is not listed: $(run list)"
+open_cmd legacy1 >/dev/null || fail "an old-format custom default cannot be opened by name"
+run set claude >/dev/null
+say "several agents: add keeps the default, open/inline <name>, set <registered>, remove, old state works"
+
 say "PASS"
