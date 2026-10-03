@@ -318,13 +318,15 @@ new tile. Tell it two things once per Mac:
 ```sh
 gallery agent set claude       # or codex, gemini, opencode, copilot, crush,
                                # or: set <name> --command "<any CLI>"
-gallery agent dir ~/Code       # the folder that holds your repositories
+gallery agent dir ~/Code       # optional: the folder that holds your repositories
 gallery agent status           # check both
 ```
 
 The agent starts in that folder, so it asks to trust it once and that covers
-every repository inside it. Without a folder set it starts in your home
-folder. It runs without stopping to ask before each command or edit, so pick
+every repository inside it. Without a folder set it starts in `~/Work`, as on
+Omarchy (created on the first start if it is not there; an existing one is
+used as it is). Uninstalling removes `~/Work` only if the agent created it
+and it is still empty. It runs without stopping to ask before each command or edit, so pick
 the folder with that in mind. More in
 [Getting started](GETTING-STARTED.md#set-up-your-coding-agent).
 

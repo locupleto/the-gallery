@@ -907,17 +907,19 @@ shift + ctrl + lalt - g : "$HOME/bin/gallery" agent open gemini
 ```
 
 The start directory is `GALLERY_AGENT_DIR` if set (in the environment skhd
-runs under), else the one recorded with `gallery agent dir`, else `$HOME`; an
-unreachable directory falls back to `$HOME` with a warning. Pointing it at one
-folder that holds your repositories means an agent asks for trust once rather
-than per project.
+runs under), else the one recorded with `gallery agent dir`, else `~/Work`
+(as on Omarchy; created on the first start if missing, used as it is if it
+exists, and removed by the uninstall only if the agent created it and it is
+still empty). A recorded folder that cannot be reached falls back to `~/Work`
+with a warning. Never `$HOME`: agents do not remember a trust decision for
+it and would ask on every start. Pointing it at one folder that holds your
+repositories means an agent asks for trust once rather than per project.
 
 **Security.** An agent started this way runs unattended, with the full file
 and shell access of your account, in the start directory: it will not stop to
 ask before it edits or deletes files or runs commands. That is on purpose,
 because a window opened by a keypress could not show a prompt anyway. Choose
-the start directory with that in mind, do not point it at `$HOME` if you can
-avoid it, and do not set a custom command whose "do not ask" flag you do not
+the start directory with that in mind, do not point it at your home folder, and do not set a custom command whose "do not ask" flag you do not
 want.
 
 ## Learn sheets

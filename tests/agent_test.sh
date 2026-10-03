@@ -60,8 +60,8 @@ grep -q "^starts:  ${WORK_DIR}/start$" <<<"$(run status)" || fail "start dir not
 # agent must still launch, from $HOME, rather than failing outright.
 missing="$(GALLERY_CONFIG_DIR="${WORK_DIR}/config" GALLERY_AGENT_DIR="${WORK_DIR}/gone" \
            PATH="${WORK_DIR}/bin:/usr/bin:/bin" "${AGENT}" status 2>/dev/null)"
-grep -q "^starts:  ${HOME}$" <<<"${missing}" || fail "missing start dir should fall back to HOME: ${missing}"
-say "start directory honoured, and falls back to HOME when unreachable"
+grep -q "^starts:  ${HOME}/Work$" <<<"${missing}" || fail "missing start dir should fall back to ~/Work: ${missing}"
+say "start directory honoured, and falls back to ~/Work when unreachable"
 
 # --- 5. the choice survives, and list marks it ---------------------------------
 run set gemini >/dev/null
@@ -224,5 +224,42 @@ grep -q '^legacy1 .*(default, custom: my-agent --legacy)' <<<"$(run list)" || fa
 open_cmd legacy1 >/dev/null || fail "an old-format custom default cannot be opened by name"
 run set claude >/dev/null
 say "several agents: add keeps the default, open/inline <name>, set <registered>, remove, old state works"
+
+# --- the default start directory: ~/Work, as on Omarchy ---------------------------
+# Never $HOME (an agent re-asks for trust there every time). Created on the
+# first start and noted when missing; one of the user's own is used as it is.
+fresh() {  # fresh <name>: a HOME and a config with nothing set
+  mkdir -p "${WORK_DIR}/$1/home" "${WORK_DIR}/$1/config"
+}
+wrun() {   # wrun <name> <args...>: the agent with that HOME, no start dir set
+  local n="$1"; shift
+  HOME="${WORK_DIR}/${n}/home" GALLERY_CONFIG_DIR="${WORK_DIR}/${n}/config" \
+    PATH="${WORK_DIR}/bin:/usr/bin:/bin" "${AGENT}" "$@"
+}
+fresh w1
+wrun w1 set myagent --command "my-agent" >/dev/null 2>&1 || fail "w1: set failed"
+grep -q "^starts:  ${WORK_DIR}/w1/home/Work$" <<<"$(wrun w1 status)" || fail "the default start should be ~/Work: $(wrun w1 status)"
+[ -e "${WORK_DIR}/w1/home/Work" ] && fail "status must not create ~/Work"
+out="$(wrun w1 inline)"
+[ "${out}" = "custom-ran in $(cd "${WORK_DIR}/w1/home/Work" && pwd) with: " ] || fail "the agent did not start in a new ~/Work: ${out}"
+[ -e "${WORK_DIR}/w1/config/state/agent-work-created" ] || fail "a ~/Work the agent made was not noted"
+wrun w1 dir "${WORK_DIR}/start" >/dev/null
+wrun w1 dir --clear | grep -q "${WORK_DIR}/w1/home/Work (the default" || fail "dir --clear should name ~/Work"
+# an existing ~/Work is the user's: used, not noted
+fresh w2
+mkdir -p "${WORK_DIR}/w2/home/Work"; echo mine > "${WORK_DIR}/w2/home/Work/notes.txt"
+wrun w2 set myagent --command "my-agent" >/dev/null 2>&1
+out="$(wrun w2 inline)"
+[ "${out}" = "custom-ran in $(cd "${WORK_DIR}/w2/home/Work" && pwd) with: " ] || fail "the agent did not start in the user's ~/Work: ${out}"
+[ -e "${WORK_DIR}/w2/config/state/agent-work-created" ] && fail "the user's own ~/Work was noted as the agent's"
+[ "$(cat "${WORK_DIR}/w2/home/Work/notes.txt")" = mine ] || fail "the user's ~/Work was changed"
+# ~/Work is a file: the agent still starts, in $HOME, with a warning
+fresh w3
+echo file > "${WORK_DIR}/w3/home/Work"
+wrun w3 set myagent --command "my-agent" >/dev/null 2>&1
+out="$(wrun w3 inline 2>"${WORK_DIR}/w3.err")"
+[ "${out}" = "custom-ran in $(cd "${WORK_DIR}/w3/home" && pwd) with: " ] || fail "with ~/Work a file the agent should start in HOME: ${out}"
+grep -q "is not a folder" "${WORK_DIR}/w3.err" || fail "no warning when ~/Work is a file"
+say "default start directory: ~/Work, created and noted when missing, the user's own used as it is"
 
 say "PASS"

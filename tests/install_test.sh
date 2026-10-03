@@ -436,4 +436,24 @@ out="$(GALLERY_TERM_APP_DIRS="${WORK_DIR}/noterm-apps" "${INSTALL}" --uninstall 
 assert_contains "${out}" "brew uninstall --cask iterm2 if you want" "E's uninstall mentions the iTerm2 it added"
 say "E: iTerm2 brewed when no terminal is present; stops untouched if that fails; uninstall mentions it"
 
+say "scenario F: the agent's ~/Work"
+new_home homeF
+# made by the agent and still empty (Finder's .DS_Store aside): removed
+"${INSTALL}" --minimal >/dev/null 2>&1 || fail "F: install failed"
+mkdir -p "${HOME_DIR}/Work"; : > "${HOME_DIR}/Work/.DS_Store"; : > "${HOME_DIR}/.config/gallery/state/agent-work-created"
+out="$("${INSTALL}" --uninstall 2>&1)" || { echo "${out}" >&2; fail "F: uninstall failed"; }
+assert_gone "${HOME_DIR}/Work" "F an empty ~/Work the agent made"
+# made by the agent, with files in it now: kept
+"${INSTALL}" --minimal >/dev/null 2>&1 || fail "F: second install failed"
+mkdir -p "${HOME_DIR}/Work"; echo work > "${HOME_DIR}/Work/project.txt"; : > "${HOME_DIR}/.config/gallery/state/agent-work-created"
+out="$("${INSTALL}" --uninstall 2>&1)" || fail "F: second uninstall failed"
+assert_file "${HOME_DIR}/Work/project.txt" "F a ~/Work with files in it"
+assert_contains "${out}" "has files in it now" "F says why ~/Work stays"
+# the user's own ~/Work (not noted), even empty: kept
+rm -f "${HOME_DIR}/Work/project.txt"
+"${INSTALL}" --minimal >/dev/null 2>&1 || fail "F: third install failed"
+"${INSTALL}" --uninstall >/dev/null 2>&1 || fail "F: third uninstall failed"
+assert_file "${HOME_DIR}/Work" "F the user's own ~/Work"
+say "F: ~/Work removed only when the agent made it and it is still empty"
+
 say "all install tests passed"

@@ -159,10 +159,39 @@ shipped themes ([Themes](CUSTOMIZING.md#themes),
 
 ## Coding agent
 
-### My agent starts in the wrong folder, asks for permissions, or I want a different one
+### Which folder does my coding agent start in, and how do I change it?
 
-The start directory is `gallery agent dir <path>` (it falls back to `$HOME`
-with a warning if the path cannot be reached). Pick the agent with
+`~/Work`, as on Omarchy. The first time the agent starts, the Gallery creates
+`~/Work` if it is not there. If you already have a `~/Work`, it is used as it
+is: nothing in it is changed, and uninstalling never removes it. (Uninstalling
+removes `~/Work` only when the Gallery created it and it is still empty.)
+
+To start it somewhere else, say the folder that holds your git repositories,
+record that folder once per Mac:
+
+```sh
+gallery agent dir ~/Developer/git     # any folder; it must exist
+gallery agent status                  # "starts:" shows the folder in use
+gallery agent dir --clear             # back to ~/Work
+```
+
+The next agent you open starts there; agents already open stay where they
+are. A folder on an external disk is fine: if it is not mounted when the agent
+starts, the agent starts in `~/Work` and prints a warning instead of failing.
+`GALLERY_AGENT_DIR`, if set in the environment skhd runs under, overrides the
+recorded folder.
+
+**Why not the home folder?** Agents such as Claude Code ask whether you trust
+the folder they start in, and they never remember the answer for your home
+folder, so they would ask on every start. One folder means one answer that
+sticks, and it covers every repository inside it. It also limits where an
+agent works: the Gallery starts agents in their "do not ask" mode (see
+[Getting started](GETTING-STARTED.md#set-up-your-coding-agent)), so they act
+without stopping in whatever folder they start in.
+
+### My agent asks for permissions, or I want a different one
+
+The start directory is `gallery agent dir <path>` (see above). Pick the agent with
 `gallery agent set <name>`, or `gallery agent set <name> --command "..."` for
 any other CLI. To keep one default and use others now and then, start them
 by name with `gallery agent open <name>` (custom ones are registered first

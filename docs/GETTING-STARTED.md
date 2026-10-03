@@ -191,17 +191,23 @@ Choose the agent and where it starts, once.
    gallery agent set aider --command "aider --yes"   # any other CLI, run as typed
    ```
 
-2. **Set the start directory** to the folder that holds your repositories:
+2. **Choose the start directory** (optional). Out of the box the agent
+   starts in `~/Work`, as on Omarchy: the first start creates it if it is not
+   there, and an existing `~/Work` is used as it is. If your repositories live
+   elsewhere, point the agent at the folder that holds them:
 
    ```sh
    gallery agent dir ~/Code
    ```
 
-   One folder for all repositories means the agent asks you to trust the
-   folder once, instead of once per project. Tell the agent which repository to
-   work in, or start it from a shell and `cd` first. If the directory cannot be reached (an external
-   volume that is not mounted, say), the agent starts in `$HOME` and prints a
-   warning. `gallery agent dir --clear` goes back to `$HOME`.
+   Either way it is one folder, so the agent asks you to trust it once, not
+   once per project or on every start (which is what happens in your home
+   folder: agents never remember trust for it, so the Gallery never starts
+   one there). Tell the agent which repository to work in, or start it from
+   a shell and `cd` first. If the folder cannot be reached (an external
+   volume that is not mounted, say), the agent starts in `~/Work` and prints
+   a warning. `gallery agent dir --clear` goes back to `~/Work`. Details in
+   the [FAQ](FAQ.md#which-folder-does-my-coding-agent-start-in-and-how-do-i-change-it).
 
 3. **Check it:**
 
@@ -227,7 +233,7 @@ Choose the agent and where it starts, once.
 **Security.** The built-in commands start each agent in its "do not ask"
 mode, so it runs unattended with the full file and shell access of your
 account, in the start directory. Choose that directory with this in mind and
-do not point it at `$HOME` if you can avoid it. More in
+do not point it at your home folder. More in
 [AI agents](CUSTOMIZING.md#ai-agents).
 
 ## Next steps

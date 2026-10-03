@@ -40,8 +40,11 @@ iTerm2 (see [Prerequisites](#prerequisites)):
 git clone https://github.com/locupleto/the-gallery && cd the-gallery
 ./install.sh               # install; macOS then asks for a few permissions
 gallery doctor             # check that everything is in place
-gallery agent dir ~/Code   # the folder that holds your repos: your agent starts there
 ```
+
+Your coding agent starts in `~/Work` (made on first use, as on Omarchy). To
+start it in the folder that holds your repositories instead:
+`gallery agent dir ~/Code` ([how, and why](docs/FAQ.md#which-folder-does-my-coding-agent-start-in-and-how-do-i-change-it)).
 
 (The installer puts `gallery` in `~/bin`. If that is not on your PATH yet,
 it prints the one line to add; until you have added it and opened a new

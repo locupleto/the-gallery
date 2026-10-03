@@ -362,6 +362,27 @@ uninstall_terminal_wiring() {
   fi
 }
 
+# ~/Work, the agent's default start folder: removed only if the agent created
+# it (bin/gallery-agent notes that) and it is still empty. A ~/Work that was
+# already there, or that has files in it now, stays.
+uninstall_agent_work_dir() {
+  local d="${HOME_DIR}/Work" mark="${CONFIG_DIR}/state/agent-work-created"
+  [ -e "${mark}" ] || return 0
+  if [ -d "${d}" ] && [ ! -L "${d}" ]; then
+    # Finder's .DS_Store alone does not make it the user's.
+    if [ "$(ls -A "${d}")" = ".DS_Store" ]; then
+      run rm -f "${d}/.DS_Store"
+    fi
+    if [ -z "$(ls -A "${d}")" ]; then
+      run rmdir "${d}"
+      gl_note removed "${d} (made for the agent, still empty)"
+    else
+      gl_note kept "${d} (made for the agent, but it has files in it now)"
+    fi
+  fi
+  run rm -f "${mark}"
+}
+
 uninstall_iterm_profiles() {
   local dir="${HOME_DIR}/Library/Application Support/iTerm2/DynamicProfiles"
   if [ -e "${dir}/gallery-theme.json" ]; then
@@ -526,6 +547,7 @@ EOF
 
   uninstall_terminal_wiring
   uninstall_iterm_profiles
+  uninstall_agent_work_dir
 
   # btop / superfile settings back to what they were (and their rendered
   # themes removed), from the checkout's renderer so it works without an

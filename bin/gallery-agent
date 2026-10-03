@@ -36,15 +36,18 @@
 # focusing the first: one per repo, one per task (decided
 # after the first cut shipped it as a floating tui plugin).
 #
-# THE START DIRECTORY. Omarchy cds to $HOME/Work before launching, because an
-# agent will not remember a trust decision for $HOME and would re-ask on every
-# session. Point the agent at the directory holding your repos and one trust
-# approval covers all of them: `gallery agent dir <path>` records it per
-# machine in the state file, GALLERY_AGENT_DIR overrides that, and with
-# neither the agent starts in $HOME. It applies however the agent is
-# launched (chosen over Omarchy's "only when PWD is $HOME" rule); a
-# directory that has gone missing -- e.g. on an external volume -- falls
-# back to $HOME with a warning rather than failing to launch.
+# THE START DIRECTORY. Never $HOME: an agent will not remember a trust
+# decision for $HOME and would re-ask on every session (and it runs without
+# asking in whatever folder it starts in). Like Omarchy, the default is
+# $HOME/Work. If that does not exist it is created on the first start and
+# noted (state/agent-work-created), so the uninstall removes it again while
+# it is still empty; a ~/Work of the user's own is used as it is and never
+# removed. `gallery agent dir <path>` records another folder per machine
+# (the one holding your repos: one trust approval then covers all of them),
+# GALLERY_AGENT_DIR overrides that. It applies however the agent is launched
+# (chosen over Omarchy's "only when PWD is $HOME" rule); a chosen folder that
+# has gone missing -- e.g. on an external volume -- falls back to ~/Work with
+# a warning rather than failing to launch.
 #
 # CUSTOM AGENTS. The built-ins below are only the agents Omarchy knows. Any other
 # CLI works through `set <name> --command "<command line>"`, which records the
@@ -207,14 +210,36 @@ current_agent() {
   printf '%s\n' "${a:-${DEFAULT_AGENT}}"
 }
 
+DEFAULT_START_DIR="${HOME}/Work"
+WORK_CREATED_MARK="${CONFIG_DIR}/state/agent-work-created"
+
+# start_dir [--create] -- the folder the agent starts in. --create (the
+# launch) makes the default ~/Work when it does not exist yet.
 start_dir() {
   local d="${GALLERY_AGENT_DIR:-$(state_value dir)}"
-  d="${d:-${HOME}}"
-  if [ -d "${d}" ]; then
-    printf '%s\n' "${d}"
-  else
-    echo "gallery agent: ${d} is not reachable, starting in ${HOME}" >&2
+  if [ -n "${d}" ]; then
+    if [ -d "${d}" ]; then
+      printf '%s\n' "${d}"
+      return 0
+    fi
+    echo "gallery agent: ${d} is not reachable, starting in ${DEFAULT_START_DIR}" >&2
+  fi
+  default_start_dir "${1:-}"
+}
+
+default_start_dir() {
+  local d="${DEFAULT_START_DIR}"
+  if [ ! -e "${d}" ] && [ "${1:-}" = --create ] && mkdir "${d}" 2>/dev/null; then
+    mkdir -p "$(dirname "${WORK_CREATED_MARK}")" && : > "${WORK_CREATED_MARK}"
+  fi
+  if [ -e "${d}" ] && [ ! -d "${d}" ]; then
+    echo "gallery agent: ${d} is not a folder, starting in ${HOME}" >&2
     printf '%s\n' "${HOME}"
+  elif [ ! -d "${d}" ] && [ "${1:-}" = --create ]; then
+    echo "gallery agent: could not create ${d}, starting in ${HOME}" >&2
+    printf '%s\n' "${HOME}"
+  else
+    printf '%s\n' "${d}"
   fi
 }
 
@@ -383,7 +408,7 @@ case "${1:-open}" in
       "") start_dir ;;
       --clear)
         write_state "$(current_agent)" "" "$(custom_command)"
-        echo "start directory: \$HOME (GALLERY_AGENT_DIR still overrides)"
+        echo "start directory: ${DEFAULT_START_DIR} (the default; GALLERY_AGENT_DIR still overrides)"
         ;;
       *)
         [ -d "$2" ] || die "not a directory: $2"
@@ -418,14 +443,14 @@ case "${1:-open}" in
     if [ -n "$(custom_line "$a")" ]; then
       # A custom command line: run by a shell so its own quoting applies.
       line="$(agent_line "$a")"
-      cd "$(start_dir)"
+      cd "$(start_dir --create)"
       eval "exec ${line}"
     fi
     # Read the command into an array before the cd, so a failure here is
     # reported from a known directory.
     cmd=()
     while IFS= read -r part; do cmd+=("$part"); done < <(agent_command "$a")
-    cd "$(start_dir)"
+    cd "$(start_dir --create)"
     exec "${cmd[@]}"
     ;;
   *)
