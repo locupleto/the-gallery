@@ -82,7 +82,11 @@ yabai -m rule --apply
 ```
 
 See [Tiling](CUSTOMIZING.md#settings-yabairclocal). A few apps refuse to
-resize to their tile and leave a gap; that is the app, not the tiler.
+resize to their tile: a window with a minimum size larger than its tile
+overlaps its neighbour (Finder windows do not get narrower than about 480
+points, which shows with five windows on a laptop screen), and one that
+cannot grow leaves a gap. That is the app, not the tiler; fewer windows on
+the Space, or super + t to float one, gives it room.
 
 If no window tiles at all, `gallery doctor` may print "yabai is blind". It
 means yabai has no Accessibility access: dismiss any pending prompt and

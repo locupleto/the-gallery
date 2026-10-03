@@ -60,7 +60,9 @@ gallery on
 - Windows go back to the size and place they had before the tiling took
   them: the ones that were open when you last switched the Gallery on (or
   installed it). A window you opened since has no earlier place, so it stays
-  where the tiling put it, as an ordinary window.
+  where the tiling put it, as an ordinary window. Windows that macOS reopens
+  after a restart count as new ones, so if you restart while the Gallery is
+  on, they too stay where the tiling put them.
 - yabai, skhd and the focus outline stop. Every key goes back to macOS, and
   left Option types characters again.
 - It stays off until you switch it on, also after you log out or restart the
