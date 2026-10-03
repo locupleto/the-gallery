@@ -445,12 +445,14 @@ already-open windows. The mode is stored in
 `~/.config/gallery/state/console.json` and re-applied on every `theme
 set`/`next`/`render`. Inside the theme picker, `ctrl-t` toggles it.
 
-One-time iTerm2 setup, by hand: Settings (Cmd-,) > Profiles > select
-"Console" in the profile list > "Other Actions..." > "Set as Default". The
-default profile shows a star in the list; `gallery console status` prints
-`default profile: Console (ok)` once it has taken. Writing the
-`Default Bookmark Guid` preference from the shell is not honoured while
-iTerm runs, so the CLI never tries.
+While the console follows the theme, the Gallery also makes Console iTerm2's
+default profile, so iTerm2's own Cmd-N windows follow it, and sets iTerm2's
+window style to Minimal, so the title bar and tabs take the theme's
+background too. Your own values are noted first and come back with
+`native`, `gallery off` and uninstalling. A running iTerm2 puts its own
+settings back over any outside change, so while it runs the change waits
+until you quit it. `gallery console status` prints
+`default profile: Console (ok)` once it has taken.
 
 `font ...` records a single Gallery-wide monospace font preference in
 `~/.config/gallery/state/font.json` (`{"family", "size", "weight"}`;

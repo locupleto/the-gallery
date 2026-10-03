@@ -224,16 +224,28 @@ the later steps assume the earlier ones.
    profiles. "Gallery" is used by the floating windows. "Console" is a child
    of your own "Default" profile carrying the theme's colours; the windows
    the Gallery opens use it, and the installer makes it iTerm2's default
-   profile so iTerm2's own Cmd-N windows follow the theme too, after noting
-   your own default (given back by `gallery console native`, `gallery off`
-   and uninstalling). If iTerm2 is running while you install, that waits
-   until you next quit it: a running iTerm2 puts its own default back over
-   any outside change. `gallery console status` prints
+   profile so iTerm2's own Cmd-N windows follow the theme too. It also sets
+   iTerm2's window style to *Minimal*, which paints the title bar and tabs in
+   the terminal's background colour, so the whole window follows the theme
+   instead of the system's light or dark look. Your own default and window
+   style are noted first and given back by `gallery console native`,
+   `gallery off` and uninstalling. If iTerm2 is running while you install,
+   that waits until you next quit it: a running iTerm2 puts its own settings
+   back over any outside change. `gallery console status` prints
    `default profile: Console (ok)` once it has happened. To do it by hand:
    Settings (Cmd-,), Profiles, select "Console", Other Actions, Set as
    Default. Do not make "Gallery"
    the default: it closes its session when the command ends and never
    prompts, which suits a floating TUI and not a shell.
+7. **iTerm2's own questions**, asked once in each account, the first time
+   the Gallery opens a window in it:
+   - "iTerm2 would like to find devices on your local network": iTerm2 asks
+     this itself on its first start. The Gallery does not need it; either
+     answer works.
+   - "Allow terminal-initiated display?" (or similar), when the theme or
+     wallpaper picker first shows a preview: the previews are pictures drawn
+     through iTerm2's inline-image feature. Allow it, and tick *remember*, or
+     the previews stay empty.
 
 ### Choosing the terminal
 
@@ -408,9 +420,11 @@ install manifest and the backups described under
 - removes the `include` line from your kitty config, the `config-file` line
   from your Ghostty config, and `~/.wezterm.lua` if it is still exactly what
   the Gallery wrote (a wezterm config of yours is only reported);
+- gives back iTerm2's default profile and window style as they were before
+  the Gallery; if iTerm2 is running, that happens by itself the moment you
+  quit it (the summary prints the commands, should you log out first);
 - removes the iTerm2 profile `gallery-theme.json`, and `gallery-console.json`
-  unless iTerm2's default profile is still Console, in which case it keeps the
-  file and says to set your own profile as the default first;
+  unless iTerm2's default profile is still Console (then once iTerm2 quits);
 - restores the btop and superfile settings it changed, and removes the themes
   it rendered for them;
 - removes the two Omarchy theme links if they point into `~/.config/gallery`;

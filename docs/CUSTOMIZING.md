@@ -639,9 +639,11 @@ What following the theme changes, and how it is undone:
 - **iTerm2**: windows the Gallery opens (super + return, the agent) use the
   "Console" profile, your own Default plus the theme's colours. The Gallery
   also makes Console iTerm2's default profile, so iTerm2's own Cmd-N windows
-  follow too, after noting your own default; that comes back with `native`,
-  `gallery off` and uninstalling. A running iTerm2 puts its own default back
-  over any outside change, so while it runs the change waits and is made the
+  follow too, and sets iTerm2's window style to Minimal, so the title bar and
+  tabs take the theme's background instead of the system's light or dark
+  look. Your own default and window style are noted first and come back with
+  `native`, `gallery off` and uninstalling. A running iTerm2 puts its own
+  settings back over any outside change, so while it runs the change waits and is made the
   moment you quit it (Hammerspoon watches for that). If you pick another default in iTerm2's
   settings later, it is yours and is left alone (`gallery doctor` mentions it).
 - **Ghostty and kitty**: one include line at the end of your config, which is
@@ -658,7 +660,7 @@ toggles the console.
 ### Which settings win
 
 The Gallery never rewrites your terminal's own settings (only the one include
-line above, and iTerm2's choice of default profile). It renders its own
+line above, and iTerm2's default profile and window style). It renders its own
 file for each terminal (colours, the font from `gallery font`, the glass) and
 places it next to yours:
 

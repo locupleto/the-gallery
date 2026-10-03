@@ -401,7 +401,10 @@ say "console theme|native on wezterm: prints, creates only when absent, never ed
 rm -f "${GH_CONF}" "${KT_CONF}"
 PREFS() { "${GALLERY_DEFAULTS_BIN}" "$@"; }
 PREFS write com.googlecode.iterm2 "Default Bookmark Guid" -string MY-OWN-GUID
+PREFS write com.googlecode.iterm2 TabStyleWithAutomaticOption -integer 1
 "${GALLERY}" console theme >/dev/null
+[ "$(PREFS read com.googlecode.iterm2 TabStyleWithAutomaticOption)" = 5 ] || fail "theme should set iTerm2's window style to Minimal"
+grep -q '"iterm_tabstyle_before": "1"' "${CFG}/state/console.json" || fail "the user's own iTerm2 window style was not noted"
 [ "$(count_line "${GH_CONF}" "${GH_LINE}")" = 1 ] || fail "console theme should wire every installed terminal (ghostty)"
 [ "$(count_line "${KT_CONF}" "${KT_LINE}")" = 1 ] || fail "console theme should wire every installed terminal (kitty)"
 grep -q '"Background Color"' "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" \
@@ -423,6 +426,7 @@ PATH="${WORK_DIR}/stub:${PATH}" "${GALLERY}" off >/dev/null
 [ "$(count_line "${GH_CONF}" "${GH_LINE}")" = 0 ] || fail "off should take the theme out of ghostty"
 [ "$(count_line "${KT_CONF}" "${KT_LINE}")" = 0 ] || fail "off should take the theme out of kitty"
 [ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = MY-OWN-GUID ] || fail "off should give back the user's iTerm2 default"
+[ "$(PREFS read com.googlecode.iterm2 TabStyleWithAutomaticOption)" = 1 ] || fail "off should give back the user's iTerm2 window style"
 if grep -q '"Background Color"' "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"; then
   fail "off should render the Console profile bare"
 fi
@@ -439,6 +443,23 @@ say "gallery off / on: terminals back to their own colours and themed again, pre
   || fail "native should unwire every installed terminal"
 [ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = MY-OWN-GUID ] || fail "native should give back the user's iTerm2 default"
 grep -q iterm_default_before "${CFG}/state/console.json" && fail "the noted default should be cleared once given back"
+[ "$(PREFS read com.googlecode.iterm2 TabStyleWithAutomaticOption)" = 1 ] || fail "native should give back the user's iTerm2 window style"
+grep -q iterm_tabstyle_before "${CFG}/state/console.json" && fail "the noted window style should be cleared once given back"
+# no window style of the user's own: the Gallery's is deleted again, not kept
+PREFS delete com.googlecode.iterm2 TabStyleWithAutomaticOption
+"${GALLERY}" console theme >/dev/null
+grep -q '"iterm_tabstyle_before": "-"' "${CFG}/state/console.json" || fail "a missing window style should be noted as none"
+"${GALLERY}" console native >/dev/null
+PREFS read com.googlecode.iterm2 TabStyleWithAutomaticOption >/dev/null 2>&1 && fail "native should delete a window style the user never had"
+# an upgrade takes a setting added since, without touching the taken ones
+"${GALLERY}" console theme >/dev/null
+PREFS delete com.googlecode.iterm2 TabStyleWithAutomaticOption
+python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d.pop("iterm_tabstyle_before", None); json.dump(d, open(p, "w"))' "${CFG}/state/console.json"
+"${GALLERY}" console _iterm-take >/dev/null
+[ "$(PREFS read com.googlecode.iterm2 TabStyleWithAutomaticOption)" = 5 ] || fail "_iterm-take should take a newly added setting"
+[ -z "$("${GALLERY}" console _iterm-take)" ] || fail "_iterm-take should be silent when everything is taken"
+"${GALLERY}" console native >/dev/null
+PREFS write com.googlecode.iterm2 TabStyleWithAutomaticOption -integer 1
 if grep -q '"Background Color"' "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"; then
   fail "iTerm2 console profile should be bare in native mode"
 fi

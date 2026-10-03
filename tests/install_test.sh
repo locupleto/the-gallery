@@ -40,11 +40,12 @@ mkdir -p "${STUBS}"
 for name in yabai skhd osascript open pkill killall launchctl hs plutil codesign mdimport glow fzf; do
   printf '#!/bin/sh\necho "%s $*" >> "%s"\nexit 0\n' "${name}" "${STUB_LOG}" > "${STUBS}/${name}"
 done
-# pgrep: succeeds for the names in $STUB_RUNNING.
+# pgrep: succeeds for the names in $STUB_RUNNING, or in the file
+# ${STUBS}/running (for a background job that outlives the call).
 cat > "${STUBS}/pgrep" <<EOF
 #!/bin/sh
 for a in "\$@"; do n="\$a"; done
-case " \${STUB_RUNNING:-} " in *" \$n "*) exit 0 ;; esac
+case " \${STUB_RUNNING:-} \$(cat "${STUBS}/running" 2>/dev/null) " in *" \$n "*) exit 0 ;; esac
 exit 1
 EOF
 # brew: every formula is installed; \`brew services list\` prints \$STUB_BREW_SERVICES.
@@ -321,6 +322,40 @@ assert_gone "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-the
 assert_gone "${H}/.config/skhd/local.skhd" "B removes the unedited local.skhd seed"
 assert_gone "${H}/.config/skhd/tiler.skhd" "B tiler.skhd"
 rm -rf "${H}/Library/Application Support/iTerm2"
+# Uninstalling while iTerm2 runs: iTerm2 would put its settings straight back,
+# so a background job gives them back once it has quit, and removes the
+# Console profile.
+"${INSTALL}" --minimal >/dev/null 2>&1 || fail "B: iTerm reinstall failed"
+mkdir -p "${H}/Library/Application Support/iTerm2/DynamicProfiles"
+echo '{}' > "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"
+python3 - "${H}/.config/gallery/state/console.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {}
+d["iterm_default_before"] = "MY-OWN-GUID"
+json.dump(d, open(p, "w"))
+PY
+echo iTerm2 > "${STUBS}/running"
+: > "${STUB_LOG}"
+STUB_ITERM_GUID="gallery-console" "${INSTALL}" --uninstall > "${WORK_DIR}/B.iterm.out" 2>&1 \
+  || { cat "${WORK_DIR}/B.iterm.out" >&2; fail "B: uninstall with iTerm2 running failed"; }
+assert_contains "$(cat "${WORK_DIR}/B.iterm.out")" "come back, and the Console profile goes, when you quit it" "B says the settings come back on quit"
+sleep 3
+assert_lacks "$(cat "${STUB_LOG}")" "Default Bookmark Guid -string MY-OWN-GUID" "B waits while iTerm2 runs"
+rm -f "${STUBS}/running"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  grep -q "Default Bookmark Guid -string MY-OWN-GUID" "${STUB_LOG}" && break
+  sleep 1
+done
+assert_contains "$(cat "${STUB_LOG}")" "defaults write com.googlecode.iterm2 Default Bookmark Guid -string MY-OWN-GUID" "B gives the default back once iTerm2 quits"
+sleep 1
+assert_gone "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" "B Console profile after iTerm2 quits"
+# bin/gallery and install.sh keep the same table of iTerm2 settings.
+[ "$(sed -n "/^ITERM_TAKEN_PREFS=/,/'$/p" "${REPO_ROOT}/install.sh")" = "$(sed -n "/^ITERM_TAKEN_PREFS=/,/'$/p" "${REPO_ROOT}/bin/gallery")" ] \
+  || fail "ITERM_TAKEN_PREFS differs between install.sh and bin/gallery"
 # An edited local.skhd is the user's and survives uninstall.
 "${INSTALL}" --minimal >/dev/null 2>&1 || fail "B: second install failed"
 echo 'lalt - p : echo mine' >> "${H}/.config/skhd/local.skhd"

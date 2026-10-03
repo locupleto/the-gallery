@@ -83,11 +83,20 @@ if [ "$UNINSTALL" = 1 ]; then
     # are RunAtLoad/KeepAlive, so a stopped-but-registered service would start
     # again at the next login with no rc file to read.
     enable_services
+    labels=""
+    for p in "$HOME/Library/LaunchAgents/"*.yabai.plist "$HOME/Library/LaunchAgents/"*.skhd.plist; do
+        [ -f "$p" ] && labels="$labels $(basename "$p" .plist)"
+    done
     for f in yabai skhd; do
         if command -v "$f" >/dev/null; then
             run "$f" --stop-service || true
             run "$f" --uninstall-service || true
         fi
+    done
+    # yabai's --stop-service leaves its label disabled in launchd: clear that,
+    # or a yabai the user sets up later refuses to start.
+    for l in $labels; do
+        run launchctl enable "gui/$(id -u)/$l"
     done
     # JankyBorders is started from yabairc, outside launchd. Leave it alone if
     # the user runs it as a brew service of their own.

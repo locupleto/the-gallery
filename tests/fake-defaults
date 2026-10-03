@@ -3,7 +3,7 @@
 
 The real `defaults` writes the real user's preferences whatever $HOME says
 (and through cfprefsd's cache, so even a plist path is unreliable). This
-keeps "defaults read|write|delete <domain> <key> [-string <value>]" in a
+keeps "defaults read|write|delete <domain> <key> [-string|-integer <value>]" in a
 JSON file in the test's own $HOME, with the same exit codes for a missing
 key (1).
 """
@@ -30,7 +30,7 @@ if verb == "read":
     sys.exit(0)
 if verb == "write":
     rest = args[3:]
-    if rest and rest[0] == "-string":
+    if rest and rest[0] in ("-string", "-integer", "-int"):
         rest = rest[1:]
     values[key] = rest[0] if rest else ""
 elif verb == "delete":

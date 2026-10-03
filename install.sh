@@ -55,6 +55,11 @@ PATCHES_SRC="${SCRIPT_DIR}/patches"
 PATCHES_DEST="${CONFIG_DIR}/patches"
 OMARCHY_THEME_LINK="${HOME_DIR}/.config/omarchy/current/theme"
 OMARCHY_STATE_THEME_LINK="${HOME_DIR}/.local/state/omarchy/current/theme"
+# The iTerm2 settings bin/gallery takes while the console follows the theme
+# (its ITERM_TAKEN_PREFS, kept identical; tests/install_test.sh checks):
+# key|type|value the Gallery sets|console.json key the user's own is noted under
+ITERM_TAKEN_PREFS='Default Bookmark Guid|string|gallery-console|iterm_default_before
+TabStyleWithAutomaticOption|integer|5|iterm_tabstyle_before'
 OMARCHY_THEME_TARGET="${CONFIG_DIR}/themes/current"
 OMARCHY_LINKS_RECORD="${CONFIG_DIR}/state/omarchy-links.tsv"
 HS_INIT="${HOME_DIR}/.hammerspoon/init.lua"
@@ -359,43 +364,68 @@ uninstall_terminal_wiring() {
 
 uninstall_iterm_profiles() {
   local dir="${HOME_DIR}/Library/Application Support/iTerm2/DynamicProfiles"
-  local default_guid
   if [ -e "${dir}/gallery-theme.json" ]; then
     run rm -f "${dir}/gallery-theme.json"
     gl_note removed "${dir}/gallery-theme.json"
   fi
-  # The user's own default profile, noted when the Gallery made Console the
-  # default (bin/gallery, iterm_default_take), goes back first.
-  local before
-  before="$(python3 -c '
+  # The iTerm2 settings the Gallery took while the console followed the theme
+  # (bin/gallery, ITERM_TAKEN_PREFS: the default profile and the window style)
+  # go back to the user's own, noted in console.json ("-": none).
+  local prefs="${GALLERY_DEFAULTS_BIN:-defaults}" key type value note before
+  local undo_cmds="" undo_text=""
+  while IFS='|' read -r key type value note; do
+    before="$(python3 -c '
 import json, sys
 try:
-    v = json.load(open(sys.argv[1])).get("iterm_default_before")
+    v = json.load(open(sys.argv[1])).get(sys.argv[2])
 except Exception:
     v = None
 if v is not None:
     print(v)
-' "${CONFIG_DIR}/state/console.json" 2>/dev/null || true)"
-  local prefs="${GALLERY_DEFAULTS_BIN:-defaults}" undo
-  if [ -n "${before}" ] && [ "$("${prefs}" read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)" = "gallery-console" ] \
-     && pgrep -u "$(id -u)" -xq iTerm2; then
-    # A running iTerm2 would put its default straight back: say how instead.
+' "${CONFIG_DIR}/state/console.json" "${note}" 2>/dev/null || true)"
+    [ -n "${before}" ] || continue
+    [ "$("${prefs}" read com.googlecode.iterm2 "${key}" 2>/dev/null || true)" = "${value}" ] || continue
     if [ "${before}" = "-" ]; then
-      undo="defaults delete com.googlecode.iterm2 'Default Bookmark Guid'"
+      undo_cmds+="$(printf '%q ' "${prefs}" delete com.googlecode.iterm2 "${key}")"$'\n'
+      undo_text+="defaults delete com.googlecode.iterm2 '${key}'; "
     else
-      undo="defaults write com.googlecode.iterm2 'Default Bookmark Guid' -string '${before}'"
+      undo_cmds+="$(printf '%q ' "${prefs}" write com.googlecode.iterm2 "${key}" "-${type}" "${before}")"$'\n'
+      undo_text+="defaults write com.googlecode.iterm2 '${key}' -${type} '${before}'; "
     fi
-    echo "[gallery] iTerm2 is running, so its default profile cannot be given back now. Quit iTerm2, then run:"
-    echo "[gallery]   ${undo}"
-    gl_note kept "iTerm2's default profile is still Console until you run: ${undo}"
-  elif [ -n "${before}" ] && [ "$("${prefs}" read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)" = "gallery-console" ]; then
-    if [ "${before}" = "-" ]; then
-      run "${prefs}" delete com.googlecode.iterm2 "Default Bookmark Guid"
+  done <<< "${ITERM_TAKEN_PREFS}"
+  if [ -n "${undo_cmds}" ] && pgrep -u "$(id -u)" -xq iTerm2; then
+    # A running iTerm2 would put its settings straight back: a small
+    # background job makes the change once iTerm2 has quit, then removes the
+    # Console profile. It does not survive a logout; the note says how.
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      echo "[dry] would give iTerm2's settings back once it quits: ${undo_text}"
     else
-      run "${prefs}" write com.googlecode.iterm2 "Default Bookmark Guid" -string "${before}"
+      local waiter
+      waiter="$(mktemp "${TMPDIR:-/tmp}/gallery-iterm-giveback.XXXXXX")"
+      {
+        echo '#!/bin/bash'
+        echo 'while pgrep -u "$(id -u)" -xq iTerm2; do sleep 2; done'
+        printf '%s' "${undo_cmds}"
+        printf 'rm -f %q\n' "${dir}/gallery-console.json"
+        printf 'rmdir %q 2>/dev/null\n' "${dir}"
+        echo 'rm -f "$0"'
+      } > "${waiter}"
+      chmod +x "${waiter}"
+      nohup "${waiter}" >/dev/null 2>&1 &
+      disown 2>/dev/null || true
     fi
-    gl_note restored "iTerm2's default profile (your own, from before the Gallery)"
+    echo "[gallery] iTerm2 is running: your own iTerm2 settings come back, and the Console profile goes, when you quit it"
+    gl_note kept "iTerm2's Gallery settings until you quit iTerm2 (if you log out first, run: ${undo_text%; })"
+    return 0
+  elif [ -n "${undo_cmds}" ]; then
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      echo "[dry] ${undo_text}"
+    else
+      eval "${undo_cmds}"
+    fi
+    gl_note restored "iTerm2's default profile and window style (your own, from before the Gallery)"
   fi
+  local default_guid
   if [ -e "${dir}/gallery-console.json" ]; then
     default_guid="$("${prefs}" read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)"
     if [ "${default_guid}" = "gallery-console" ]; then
@@ -437,6 +467,10 @@ uninstall_omarchy_links() {
   rm -f "${OMARCHY_LINKS_RECORD}" 2>/dev/null || true
   gl_rmdir_empty "$(dirname "${OMARCHY_THEME_LINK}")" "$(dirname "$(dirname "${OMARCHY_THEME_LINK}")")" \
     "$(dirname "${OMARCHY_STATE_THEME_LINK}")" "$(dirname "$(dirname "${OMARCHY_STATE_THEME_LINK}")")"
+  if [ -e "${CONFIG_DIR}/state/local-dir-created" ]; then
+    gl_rmdir_empty "${HOME_DIR}/.local/state" "${HOME_DIR}/.local"
+    [ -d "${HOME_DIR}/.local" ] || rm -f "${CONFIG_DIR}/state/local-dir-created"
+  fi
 }
 
 do_uninstall() {
@@ -907,6 +941,11 @@ link_omarchy_theme() {
   fi
 }
 link_omarchy_theme "${OMARCHY_THEME_LINK}"
+# ~/.local is made for the second link on a Mac that had none: noted, so the
+# uninstall removes it again and never a ~/.local of the user's own.
+if [ "${DRY_RUN}" -ne 1 ] && [ ! -d "${HOME_DIR}/.local" ]; then
+  mkdir -p "${CONFIG_DIR}/state" && : > "${CONFIG_DIR}/state/local-dir-created"
+fi
 link_omarchy_theme "${OMARCHY_STATE_THEME_LINK}"
 
 # --- theme render ---------------------------------------------------------------------
@@ -998,6 +1037,9 @@ if [ "${DRY_RUN}" -ne 1 ] && [ -x "${HOME_DIR}/bin/gallery" ]; then
     # What it did per terminal (and WezTerm's two lines), not the render log.
     "${HOME_DIR}/bin/gallery" console theme 2>&1 \
       | grep -E '^(iterm2|ghostty|kitty|wezterm):|^  (local|if) ' | sed 's/^/[gallery]   /' || true
+  else
+    # An upgrade: iTerm2 settings the Gallery has learnt to take since.
+    "${HOME_DIR}/bin/gallery" console _iterm-take 2>/dev/null | sed 's/^/[gallery] /' || true
   fi
   console_steps="$("${HOME_DIR}/bin/gallery" console _hint 2>/dev/null || true)"
   if [ -n "${console_steps}" ]; then

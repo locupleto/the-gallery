@@ -245,8 +245,9 @@ Both are dynamic profiles; iTerm2 reloads them when the file changes.
   profile (`Dynamic Profile Parent Name`), so it inherits everything it does
   not set. In `native` mode (the default) it sets nothing, so it equals
   Default. In `theme` mode (`gallery console theme`) it sets the same colours plus a bold colour.
-  Making it the default profile is a one-time manual step; see
-  [INSTALL.md](INSTALL.md#first-run-permissions).
+  In `theme` mode the Gallery also makes it iTerm2's default profile and
+  sets iTerm2's window style to Minimal, so the title bar takes the
+  background colour; see [INSTALL.md](INSTALL.md#first-run-permissions).
 
 Both profiles use the theme's ordinary `background` (not `surface_background`)
 with the same glass: by default `Transparency` 0.12 and a blur of radius 9 (the

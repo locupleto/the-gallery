@@ -1893,23 +1893,30 @@ console_effective_mode() {
   fi
 }
 
-# --- iTerm2's default profile ---------------------------------------------------
+# --- iTerm2's default profile and window style -----------------------------------
 #
 # The Console profile only reaches the windows iTerm opens by itself (its own
-# Cmd-N, a fresh launch) when it is iTerm's default profile. While the console
-# follows the theme the Gallery makes it the default, after noting the user's
-# own choice in CONSOLE_STATE_FILE ("iterm_default_before"; "-" when there was
-# none), and gives that choice back on native, gallery off and uninstall.
+# Cmd-N, a fresh launch) when it is iTerm's default profile, and iTerm draws
+# its title bar and tabs in the system's light or dark appearance unless its
+# window style is Minimal, which paints them in the terminal's own background.
+# While the console follows the theme the Gallery takes both settings
+# (ITERM_TAKEN_PREFS), after noting the user's own values in
+# CONSOLE_STATE_FILE ("-" when there was none), and gives them back on native,
+# gallery off and uninstall. install.sh keeps the same table for uninstall.
 #
-# A running iTerm2 puts its own default straight back over any outside change
-# (and writes it again when it quits), so the change is only made while iTerm2
-# is not running. Otherwise it is queued ("iterm_default_pending": take|give)
-# and made by `gallery console _iterm-apply`, which Hammerspoon runs when
-# iTerm2 quits (Gallery.spoon). The windows the Gallery opens name the
-# Console profile directly and follow the theme either way.
+# A running iTerm2 puts its own settings straight back over any outside change
+# (and writes them again when it quits), so the change is only made while
+# iTerm2 is not running. Otherwise it is queued ("iterm_default_pending":
+# take|give) and made by `gallery console _iterm-apply`, which Hammerspoon
+# runs when iTerm2 quits (Gallery.spoon). The windows the Gallery opens name
+# the Console profile directly and follow the theme either way.
 #
 # GALLERY_DEFAULTS_BIN is a test seam: `defaults` writes the real user's
 # preferences whatever $HOME says.
+#
+# key|type|value the Gallery sets|console.json key the user's own is noted under
+ITERM_TAKEN_PREFS='Default Bookmark Guid|string|gallery-console|iterm_default_before
+TabStyleWithAutomaticOption|integer|5|iterm_tabstyle_before'
 iterm_pref() {
   # Never the real preferences from a sandboxed $HOME (a test that forgot
   # its stand-in): reads are harmless, writes are skipped.
@@ -1932,41 +1939,54 @@ iterm_default_change() {
   if iterm_running; then
     console_write_key iterm_default_pending "$1"
     if [ "$1" = take ]; then
-      echo "iterm2: Console becomes the default profile when you next quit iTerm2 (windows the Gallery opens follow the theme already)"
+      echo "iterm2: Console becomes the default profile, and the window frame follows the theme, when you next quit iTerm2 (windows the Gallery opens follow the theme already)"
     else
-      echo "iterm2: your own default profile comes back when you next quit iTerm2"
+      echo "iterm2: your own default profile and window style come back when you next quit iTerm2"
     fi
     return 0
   fi
   console_delete_key iterm_default_pending
   if [ "$1" = take ]; then
-    iterm_default_take && echo "iterm2: Console is the default profile (your own is noted and comes back with native, off or uninstall)"
+    iterm_default_take && echo "iterm2: Console is the default profile and the window frame follows the theme (your own settings are noted and come back with native, off or uninstall)"
   else
-    iterm_default_give_back && echo "iterm2: your own default profile is back"
+    iterm_default_give_back && echo "iterm2: your own default profile and window style are back"
   fi
 }
 
 iterm_default_take() {
   [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ] || return 0
-  local cur
-  cur="$(iterm_default_read)"
-  [ "${cur}" = "gallery-console" ] && return 0
-  console_read_key iterm_default_before >/dev/null || console_write_key iterm_default_before "${cur:--}"
-  iterm_pref write com.googlecode.iterm2 "Default Bookmark Guid" -string gallery-console
+  local key type value note cur
+  while IFS='|' read -r key type value note; do
+    cur="$(iterm_pref read com.googlecode.iterm2 "${key}" 2>/dev/null || true)"
+    [ "${cur}" = "${value}" ] && continue
+    console_read_key "${note}" >/dev/null || console_write_key "${note}" "${cur:--}"
+    iterm_pref write com.googlecode.iterm2 "${key}" "-${type}" "${value}"
+  done <<< "${ITERM_TAKEN_PREFS}"
+}
+
+# Succeeds when some setting in ITERM_TAKEN_PREFS is not the Gallery's yet.
+iterm_prefs_untaken() {
+  local key type value note
+  while IFS='|' read -r key type value note; do
+    [ "$(iterm_pref read com.googlecode.iterm2 "${key}" 2>/dev/null || true)" = "${value}" ] || return 0
+  done <<< "${ITERM_TAKEN_PREFS}"
+  return 1
 }
 
 iterm_default_give_back() {
-  local before
-  before="$(console_read_key iterm_default_before)" || return 0
-  # Only if it is still ours: a default the user picked since is theirs.
-  if [ "$(iterm_default_read)" = "gallery-console" ]; then
-    if [ "${before}" = "-" ]; then
-      iterm_pref delete com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true
-    else
-      iterm_pref write com.googlecode.iterm2 "Default Bookmark Guid" -string "${before}"
+  local key type value note before
+  while IFS='|' read -r key type value note; do
+    before="$(console_read_key "${note}")" || continue
+    # Only if it is still ours: a value the user picked since is theirs.
+    if [ "$(iterm_pref read com.googlecode.iterm2 "${key}" 2>/dev/null || true)" = "${value}" ]; then
+      if [ "${before}" = "-" ]; then
+        iterm_pref delete com.googlecode.iterm2 "${key}" 2>/dev/null || true
+      else
+        iterm_pref write com.googlecode.iterm2 "${key}" "-${type}" "${before}"
+      fi
     fi
-  fi
-  console_delete_key iterm_default_before
+    console_delete_key "${note}"
+  done <<< "${ITERM_TAKEN_PREFS}"
 }
 
 # `gallery console _iterm-apply`: a queued change, once iTerm2 has quit.
@@ -1975,6 +1995,14 @@ iterm_default_apply_pending() {
   pending="$(console_read_key iterm_default_pending)" || return 0
   iterm_running && return 0
   iterm_default_change "${pending}" >/dev/null
+}
+
+# terminal_installed <name> -- without `installed_terminals | grep -q`, which
+# pipefail turns into a failure when grep quits early.
+terminal_installed() {
+  local all
+  all="$(installed_terminals)"
+  [[ $'\n'"${all}"$'\n' == *$'\n'"$1"$'\n'* ]]
 }
 
 # The terminals installed here (gallery-term decides what "installed" means).
@@ -2238,7 +2266,7 @@ cmd_terminal() {
 console_hint() {
   [ "$(console_read_mode)" = theme ] || return 0
   [ -f "${CONFIG_DIR}/state/paused" ] && return 0
-  if installed_terminals | grep -qx iterm2 && [ "$(iterm_default_read)" != "gallery-console" ] \
+  if terminal_installed iterm2 && [ "$(iterm_default_read)" != "gallery-console" ] \
      && ! console_read_key iterm_default_pending >/dev/null; then
     echo "in iTerm2: Settings > Profiles > Console > Other Actions > Set as Default (once)"
   fi
@@ -2278,6 +2306,11 @@ cmd_console_status() {
     echo "default profile: Console (ok)"
   else
     echo "default profile: not Console -- in iTerm2: Settings > Profiles > Console > Other Actions > Set as Default (one-time)"
+  fi
+  if [ "$(iterm_pref read com.googlecode.iterm2 TabStyleWithAutomaticOption 2>/dev/null || true)" = 5 ]; then
+    echo "window style: Minimal (ok, the title bar follows the theme)"
+  else
+    echo "window style: not Minimal -- the title bar follows the system's light or dark look (gallery console theme sets it once iTerm2 is quit)"
   fi
 
   if [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ]; then
@@ -2400,6 +2433,14 @@ cmd_console() {
     _iterm-apply)
       # Gallery.spoon, when iTerm2 quits: make a queued default-profile change
       iterm_default_apply_pending
+      ;;
+    _iterm-take)
+      # install.sh, on an upgrade: take any iTerm2 setting added since the
+      # console was set to follow the theme (already-taken ones are skipped)
+      if [ "$(console_effective_mode)" = theme ] && terminal_installed iterm2 \
+         && iterm_prefs_untaken; then
+        iterm_default_change take
+      fi
       ;;
     "")
       echo "usage: gallery console <status|theme|native|toggle|close [ask|never]>" >&2

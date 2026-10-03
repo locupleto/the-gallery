@@ -66,7 +66,7 @@ gallery on
 - yabai, skhd and the focus outline stop. Every key goes back to macOS, and
   left Option types characters again.
 - Your terminals go back to their own colours (and iTerm2 to your own
-  default profile).
+  default profile and window style).
 - It stays off until you switch it on, also after you log out or restart the
   Mac.
 
