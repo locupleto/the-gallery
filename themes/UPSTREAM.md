@@ -1,7 +1,7 @@
 # Upstream: Omarchy themes
 
-Vendored from [`basecamp/omarchy`](https://github.com/basecamp/omarchy)
-(resolved as `omacom/omarchy` at fetch time).
+Vendored from [`omacom/omarchy`](https://github.com/omacom/omarchy)
+(then named `basecamp/omarchy`).
 
 - Source commit: `b5589faaf80c6f87c07d4560fca37c4a81722f28`
 - Source branch: `quattro`

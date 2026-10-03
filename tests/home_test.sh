@@ -127,4 +127,50 @@ say "running bash -n on bin/gallery"
 bash -n "${GALLERY_BIN}" || fail "bin/gallery failed bash -n"
 say "bash -n OK"
 
+# --- the login pass (gallery home _login-pass) -----------------------------
+# A stub yabai logs every call and reports a fixed window list, so the desktop
+# is "quiet"; the session and idle time come in through the test seams.
+LP_HOME="${WORK_DIR}/lp-home"
+LP_STUB="${WORK_DIR}/lp-stub"
+LP_LOG="${WORK_DIR}/lp-yabai.log"
+mkdir -p "${LP_HOME}/.config/gallery/state" "${LP_STUB}"
+cat > "${LP_STUB}/yabai" <<EOF
+#!/bin/sh
+echo "yabai \$*" >> "${LP_LOG}"
+case "\$*" in
+  "-m query --windows") echo '[{"id": 1, "space": 2}, {"id": 2, "space": 3}]' ;;
+esac
+exit 0
+EOF
+chmod +x "${LP_STUB}/yabai"
+lp() {  # lp <session-age> <idle-seconds>
+  HOME="${LP_HOME}" PATH="${LP_STUB}:${PATH}" GALLERY_SESSION_ID=4242 \
+    GALLERY_SESSION_AGE="$1" GALLERY_IDLE_SECONDS="$2" GALLERY_HOME_POLL=1 \
+    GALLERY_HOME_QUIET_FOR=2 GALLERY_HOME_QUIET_TIMEOUT=5 "${GALLERY_BIN}" home _login-pass
+}
+applied() { grep -q -- "-m rule --apply" "${LP_LOG}" 2>/dev/null; }
+
+: > "${LP_LOG}"; lp 30 60
+applied && fail "login pass: applied without a saved layout"
+mkdir -p "${LP_HOME}/.config/yabai"
+printf '#!/bin/sh\nyabai -m rule --add label=home-mail app=^Mail$ space=5\n' > "${LP_HOME}/.config/yabai/rules.local"
+: > "${LP_LOG}"; lp 9999 60
+applied && fail "login pass: acted in a session that is not fresh"
+[ -e "${LP_HOME}/.config/gallery/state/home-login-pass" ] && fail "login pass: marked an old session as done"
+touch "${LP_HOME}/.config/gallery/state/paused"
+: > "${LP_LOG}"; lp 30 60
+applied && fail "login pass: acted while the Gallery is off"
+rm -f "${LP_HOME}/.config/gallery/state/paused"
+: > "${LP_LOG}"; lp 30 0
+applied && fail "login pass: moved windows while the user was busy"
+grep -q "no quiet moment" "${LP_HOME}/.config/gallery/gallery-home.log" || fail "login pass: giving up was not logged"
+rm -f "${LP_HOME}/.config/gallery/state/home-login-pass"
+: > "${LP_LOG}"; lp 30 60
+applied || fail "login pass: did not apply the home rules in a quiet fresh session"
+grep -q "home-mail" "${LP_LOG}" || fail "login pass: rules.local was not loaded first"
+grep -q "home rules applied" "${LP_HOME}/.config/gallery/gallery-home.log" || fail "login pass: not logged"
+: > "${LP_LOG}"; lp 30 60
+applied && fail "login pass: ran twice in one login session"
+say "login pass: once per fresh login, after a quiet moment; never while busy, off, or without a layout"
+
 say "PASS home_test.sh"

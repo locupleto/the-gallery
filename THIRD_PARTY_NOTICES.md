@@ -12,7 +12,8 @@ code.
 
 ## Omarchy
 
-- Source: https://github.com/basecamp/omarchy, commit
+- Source: https://github.com/omacom/omarchy (formerly basecamp/omarchy),
+  commit
   `b5589faaf80c6f87c07d4560fca37c4a81722f28`
 - Used in: `themes/*/colors.toml` (theme colours), `qml/vendor/qs/` (QML
   components, one documented patch to `Commons/Color.qml`). See

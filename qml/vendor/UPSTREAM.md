@@ -1,6 +1,6 @@
-# Vendored: basecamp/omarchy shell/Commons + shell/Ui
+# Vendored: omacom/omarchy shell/Commons + shell/Ui
 
-- Source: https://github.com/basecamp/omarchy
+- Source: https://github.com/omacom/omarchy (then named basecamp/omarchy)
 - Ref requested: `quattro`
 - Commit: `b5589faaf80c6f87c07d4560fca37c4a81722f28`
 - Commit date: 2026-09-11T02:57:36Z

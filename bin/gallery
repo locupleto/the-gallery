@@ -3776,6 +3776,89 @@ cmd_home_apply() {
   echo "home: applied ${RULES_LOCAL_FILE}"
 }
 
+# `gallery home _login-pass` (Gallery.spoon starts it in the background when
+# Hammerspoon starts). After a login macOS reopens the apps while yabai is
+# still attaching, so their windows can miss the home rules, which only act
+# when a window is created. Once per login session, and only while that
+# session is young (HOME_LOGIN_MAX_AGE), this waits for a quiet moment -- no
+# window opened, closed or moved for HOME_QUIET_FOR seconds, and no keyboard
+# or mouse use for HOME_IDLE_FOR -- then applies the home rules once. It
+# gives up after HOME_QUIET_TIMEOUT rather than move windows while the user
+# works. A `gallery reload` restarts the Spoon but not the session, so it
+# never repeats. Test seams: GALLERY_SESSION_ID, GALLERY_SESSION_AGE,
+# GALLERY_IDLE_SECONDS, GALLERY_HOME_POLL.
+HOME_LOGIN_MAX_AGE=600
+HOME_QUIET_FOR="${GALLERY_HOME_QUIET_FOR:-15}"
+HOME_IDLE_FOR=5
+HOME_QUIET_TIMEOUT="${GALLERY_HOME_QUIET_TIMEOUT:-600}"
+HOME_LOG="${CONFIG_DIR}/gallery-home.log"
+
+home_log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "${HOME_LOG}" 2>/dev/null || true; }
+
+# The login session: this user's loginwindow (one per login), its pid as the
+# session's identity and its age in seconds.
+login_session_id() {
+  if [ -n "${GALLERY_SESSION_ID:-}" ]; then printf '%s' "${GALLERY_SESSION_ID}"; return; fi
+  pgrep -u "$(id -u)" -ax loginwindow 2>/dev/null | head -1
+}
+login_session_age() {
+  if [ -n "${GALLERY_SESSION_AGE:-}" ]; then printf '%s' "${GALLERY_SESSION_AGE}"; return; fi
+  local pid etime
+  pid="$(login_session_id)"
+  [ -n "${pid}" ] || { printf '999999'; return; }
+  etime="$(ps -o etime= -p "${pid}" 2>/dev/null | tr -d ' ')"
+  # [[dd-]hh:]mm:ss
+  awk -v t="${etime}" 'BEGIN {
+    d = 0; if (index(t, "-")) { split(t, a, "-"); d = a[1]; t = a[2] }
+    n = split(t, p, ":"); s = 0
+    for (i = 1; i <= n; i++) s = s * 60 + p[i]
+    print d * 86400 + s }'
+}
+user_idle_seconds() {
+  if [ -n "${GALLERY_IDLE_SECONDS:-}" ]; then printf '%s' "${GALLERY_IDLE_SECONDS}"; return; fi
+  ioreg -c IOHIDSystem 2>/dev/null | awk '/HIDIdleTime/ { print int($NF / 1000000000); exit }'
+}
+# Every window and where it is: unchanged means nothing opened, closed or moved.
+windows_signature() {
+  yabai -m query --windows 2>/dev/null \
+    | python3 -c 'import json, sys
+try:
+    ws = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+print(" ".join(sorted("%s:%s" % (w.get("id"), w.get("space")) for w in ws)))'
+}
+
+cmd_home_login_pass() {
+  local session age marker="${CONFIG_DIR}/state/home-login-pass"
+  [ -f "${RULES_LOCAL_FILE}" ] || return 0
+  [ -f "${CONFIG_DIR}/state/paused" ] && return 0
+  command -v yabai >/dev/null 2>&1 || return 0
+  session="$(login_session_id)"
+  age="$(login_session_age)"
+  [ -n "${session}" ] && [ "${age:-999999}" -le "${HOME_LOGIN_MAX_AGE}" ] || return 0
+  [ "$(cat "${marker}" 2>/dev/null)" = "${session}" ] && return 0
+  mkdir -p "$(dirname "${marker}")"
+  printf '%s\n' "${session}" > "${marker}"
+
+  local poll="${GALLERY_HOME_POLL:-3}" waited=0 still=0 sig last=""
+  home_log "login pass: waiting for a quiet moment"
+  while [ "${waited}" -lt "${HOME_QUIET_TIMEOUT}" ]; do
+    sleep "${poll}"
+    waited=$((waited + poll))
+    [ -f "${CONFIG_DIR}/state/paused" ] && { home_log "login pass: the Gallery was switched off; skipped"; return 0; }
+    if ! sig="$(windows_signature)"; then still=0; last=""; continue; fi
+    if [ "${sig}" = "${last}" ]; then still=$((still + poll)); else still=0; last="${sig}"; fi
+    if [ "${still}" -ge "${HOME_QUIET_FOR}" ] && [ "$(user_idle_seconds)" -ge "${HOME_IDLE_FOR}" ]; then
+      sh "${RULES_LOCAL_FILE}" >/dev/null 2>&1 || true
+      yabai -m rule --apply
+      home_log "login pass: home rules applied after ${waited}s"
+      return 0
+    fi
+  done
+  home_log "login pass: no quiet moment in ${HOME_QUIET_TIMEOUT}s; nothing moved (gallery home apply does it by hand)"
+}
+
 # `gallery ghosts`: windows the tiler cannot see (created behind the lock screen,
 # no accessibility reference, parked under every tile). The gallery.ghosts
 # service plugin runs `check` every 30 s; this verb is the hand-driven side.
@@ -3819,6 +3902,10 @@ cmd_home() {
       ;;
     apply)
       cmd_home_apply
+      ;;
+    _login-pass)
+      # Gallery.spoon, when Hammerspoon starts: once per login (see above)
+      cmd_home_login_pass
       ;;
     "")
       echo "usage: gallery home <show|save [--roam A,B] [--dry-run]|apply>" >&2

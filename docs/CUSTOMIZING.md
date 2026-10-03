@@ -407,7 +407,15 @@ gallery home apply     # re-source rules.local and apply it live
 
 `home save` leaves terminals and the browser out (they roam; add apps with
 `--roam A,B`), previews with `--dry-run`, and keeps the previous file as
-`rules.local.prev`. Nothing saves it automatically. Because `save` rewrites
+`rules.local.prev`. Nothing saves it automatically.
+
+After a login, macOS reopens your apps while yabai is still starting, and a
+window that opens before yabai can see it misses its rule (rules act when a
+window is created). So once per login the Gallery applies the rules again by
+itself, at the first quiet moment: no window opened, closed or moved for 15
+seconds and no keyboard or mouse use for 5. It waits up to 10 minutes and
+otherwise leaves the windows alone; each run is logged in
+`~/.config/gallery/gallery-home.log`. A `gallery reload` does not repeat it. Because `save` rewrites
 the file, keep your own non-home rules in `yabairc.local`, not in
 `rules.local`. Space numbers are one global sequence across displays and shift
 if you add or remove a Space in Mission Control. The template is

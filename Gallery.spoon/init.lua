@@ -315,6 +315,15 @@ function obj:start()
     applyPending()
   end)
 
+  -- After a login, apply the home rules once more when the desktop has
+  -- settled: windows macOS reopens while yabai attaches can miss them. The
+  -- command itself decides whether this start is a fresh login, so a reload
+  -- does nothing (bin/gallery, cmd_home_login_pass).
+  pcall(function()
+    self.homeLoginTask = hs.task.new(os.getenv("HOME") .. "/bin/gallery", nil, { "home", "_login-pass" })
+    self.homeLoginTask:start()
+  end)
+
   -- While the Gallery is switched off, skhd is stopped and the on/off key is
   -- held here instead (see obj:pauseKey); that state survives a restart.
   if hs.fs.attributes(os.getenv("HOME") .. "/.config/gallery/state/paused") then

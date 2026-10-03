@@ -108,6 +108,27 @@ a yabai restart rebuilds every window tree and loses your hand-tuned split
 ratios on every display. To apply a setting change without a restart, see
 [Apply a change without restarting yabai](CUSTOMIZING.md#settings-yabairclocal).
 
+### After a restart my apps are on the wrong Desktops
+
+The Gallery puts an app back on its Desktop only if you saved one for it.
+Arrange your apps the way you want them, then:
+
+```sh
+gallery home save      # remember which Desktop each app lives on
+gallery home show      # check: the map, and the saved rules
+```
+
+Save again whenever you rearrange; nothing is saved automatically. Terminals
+and the browser roam by default (`gallery home save --roam A,B` sets your
+own list). A rule saved for one window by its title, as for a browser window
+on a Desktop of its own, stops matching when the title changes; save again.
+
+After a login macOS reopens your apps while the tiler is still starting, so
+some windows can miss their rule. The Gallery applies the rules once more by
+itself at the first quiet moment after you log in (nothing opening or moving,
+and you not typing or using the mouse), and `gallery home apply` does it by
+hand any time. `~/.config/gallery/gallery-home.log` shows when it ran.
+
 ### How do I use more than one display?
 
 super + h / j / k / l continues onto the neighbouring display when there is

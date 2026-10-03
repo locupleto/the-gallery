@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # vendor-omarchy-themes.sh -- vendor colors.toml (and light.mode, where
-# present) for every theme in basecamp/omarchy into themes/<name>/ in this
+# present) for every theme in omacom/omarchy into themes/<name>/ in this
 # repo, plus themes/UPSTREAM.md recording provenance and Omarchy's MIT
 # licence.
 #
 # Primary path: the GitHub contents/tree API (no local git needed, works
 # even if the upstream repo has been renamed -- the API redirects contents
-# and commit lookups for a renamed repo, so "basecamp/omarchy" keeps working
+# and commit lookups for a renamed repo, so an old name keeps working
 # as the canonical reference even after such a move).
 #
 # Fallback: a shallow sparse git clone into the scratchpad dir, used only if
@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 THEMES_DIR="${REPO_ROOT}/themes"
-UPSTREAM_OWNER_REPO="basecamp/omarchy"
+UPSTREAM_OWNER_REPO="omacom/omarchy"   # formerly basecamp/omarchy
 API_ROOT="https://api.github.com/repos/${UPSTREAM_OWNER_REPO}"
 SCRATCH="${TMPDIR:-/tmp}/vendor-omarchy-themes.$$"
 

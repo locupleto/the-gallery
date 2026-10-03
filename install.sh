@@ -665,7 +665,7 @@ else
     ls "${THEMES_DEST}/${name}/backgrounds/"* >/dev/null 2>&1 || missing+=("${name}")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
-    echo "[gallery] fetching Omarchy's wallpapers for ${#missing[@]} theme(s) from github.com/basecamp/omarchy"
+    echo "[gallery] fetching Omarchy's wallpapers for ${#missing[@]} theme(s) from github.com/omacom/omarchy"
     if [ "${DRY_RUN}" -eq 1 ]; then
       echo "[dry] tools/fetch-omarchy-backgrounds.sh ${missing[*]}"
     else

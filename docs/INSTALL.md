@@ -101,7 +101,7 @@ Flags:
 | `--skip-tiler` | do not run `tiler/install.sh` (yabai, skhd, JankyBorders, Learn); plugin host and theming only |
 | `--restart-tiler` | passed to `tiler/install.sh` as `--restart`: restart yabai and skhd even if their config did not change |
 | `--minimal` | do not `brew install` the companion apps (btop, superfile) |
-| `--no-wallpapers` | do not download Omarchy's wallpapers (about 50 MB from github.com/basecamp/omarchy) |
+| `--no-wallpapers` | do not download Omarchy's wallpapers (about 50 MB from github.com/omacom/omarchy) |
 | `-h`, `--help` | print usage |
 
 An unknown flag prints the usage and exits 1.
@@ -351,9 +351,10 @@ the folder with that in mind. More in
   [THEMES.md](THEMES.md#wallpapers).
 - **Home Spaces.** Arrange your apps across Spaces, then run
   `gallery home save`. It writes `~/.config/yabai/rules.local` and applies it,
-  so the apps return to their Spaces after a login. `gallery home show` prints
-  the current map and `gallery home apply` re-applies the file. Nothing saves
-  it automatically.
+  so the apps return to their Spaces after a login; once the desktop has
+  settled after a login the Gallery applies it once more by itself. `gallery
+  home show` prints the current map and `gallery home apply` re-applies the
+  file. Nothing saves it automatically.
 - **Weather.** `gallery weather key --set <key>` stores an OpenWeatherMap API
   key in `~/.config/gallery/weather.key` (mode 600; no `gallery weather`
   subcommand prints it back). `gallery weather location --set City,CC` sets the

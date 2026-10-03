@@ -175,8 +175,10 @@ gallery home save                  # remember which Space each app lives on
 ```
 
 Arrange your apps across Spaces first, then `gallery home save`: it writes
-rules so the apps return to those Spaces after a login. Nothing saves it
-automatically. Details for each are in [CUSTOMIZING.md](CUSTOMIZING.md).
+rules so the apps return to those Spaces after a login (the Gallery applies
+them once more by itself when the desktop has settled after you log in). Only
+the apps you saved have a home, and nothing saves it automatically: after
+rearranging, save again. Details for each are in [CUSTOMIZING.md](CUSTOMIZING.md).
 
 ## Set up your coding agent
 

@@ -22,7 +22,7 @@
 #                 skip files already present)
 #
 # Same upstream repo/resolution convention as vendor-omarchy-themes.sh: the
-# GitHub contents/tree API against basecamp/omarchy's default branch (no
+# GitHub contents/tree API against omacom/omarchy's default branch (no
 # ref is pinned there, so none is pinned here either -- both scripts always
 # fetch from whatever is current upstream). curl only, no git clone of the
 # whole upstream repo.
@@ -39,7 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 THEMES_DIR="${REPO_ROOT}/themes"
 CONFIG_THEMES_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/gallery/themes"
-UPSTREAM_OWNER_REPO="basecamp/omarchy"
+UPSTREAM_OWNER_REPO="omacom/omarchy"   # formerly basecamp/omarchy
 API_ROOT="https://api.github.com/repos/${UPSTREAM_OWNER_REPO}"
 
 command -v curl >/dev/null 2>&1 || { echo "fetch-omarchy-backgrounds: curl not found" >&2; exit 1; }

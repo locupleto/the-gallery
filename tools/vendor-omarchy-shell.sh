@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # vendor-omarchy-shell.sh -- pull qs.Commons and qs.Ui (Omarchy 4 "Quattro"
-# shell/Commons and shell/Ui) from basecamp/omarchy into qml/vendor/qs/, so
+# shell/Commons and shell/Ui) from omacom/omarchy into qml/vendor/qs/, so
 # gallery-qml can load unmodified Omarchy plugins that `import qs.Commons`
 # / `import qs.Ui`.
 #
@@ -16,7 +16,7 @@
 #
 set -euo pipefail
 
-REPO="basecamp/omarchy"
+REPO="omacom/omarchy"   # formerly basecamp/omarchy
 REF="${OMARCHY_REF:-quattro}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,7 +59,7 @@ done <<< "${PATHS}"
 echo "Vendored ${COUNT} files." >&2
 
 cat > "${GALLERY_ROOT}/qml/vendor/UPSTREAM.md" <<EOF
-# Vendored: basecamp/omarchy shell/Commons + shell/Ui
+# Vendored: omacom/omarchy shell/Commons + shell/Ui
 
 - Source: https://github.com/${REPO}
 - Ref requested: \`${REF}\`

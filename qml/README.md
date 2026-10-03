@@ -189,7 +189,7 @@ None of these are exercised by RadioAtlas.qml or gallery.qml-demo.
 ## Vendoring qs.Commons / qs.Ui
 
 ```
-tools/vendor-omarchy-shell.sh                 # from basecamp/omarchy@quattro
+tools/vendor-omarchy-shell.sh                 # from omacom/omarchy@quattro
 OMARCHY_REF=some-other-ref tools/vendor-omarchy-shell.sh
 ```
 
