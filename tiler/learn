@@ -311,8 +311,9 @@ install_all() {
     keys_md "$rc" > "$(sheet_path Tiler-Keys)"
     echo "[learn] wrote $(sheet_path Tiler-Keys)"
 
-    # Same content, next to the installed learn/skhdrc: the copy the voice
-    # assistant reads (fast_brain.py) — launchd cannot read the iCloud vault.
+    # Same content, next to the installed learn/skhdrc: a copy at a fixed path
+    # for other tools, since a launchd job cannot read a sheets folder kept in
+    # iCloud.
     keys_md "$rc" > "$(dirname "$SELF")/Tiler-Keys.md"
     chmod 644 "$(dirname "$SELF")/Tiler-Keys.md"
     echo "[learn] wrote $(dirname "$SELF")/Tiler-Keys.md"
