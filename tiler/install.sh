@@ -91,7 +91,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done
     # JankyBorders is started from yabairc, outside launchd. Leave it alone if
     # the user runs it as a brew service of their own.
-    if pgrep -xq borders; then
+    if pgrep -u "$(id -u)" -xq borders; then
         if command -v brew >/dev/null && brew services list 2>/dev/null | awk '$1 == "borders" && $2 != "none" { found = 1 } END { exit !found }'; then
             echo "[tiler] borders is registered as a brew service; leaving it running"
             gl_note kept "borders (a brew service of yours)"
@@ -128,6 +128,20 @@ if [ "$UNINSTALL" = 1 ]; then
 fi
 
 # --- prerequisites --------------------------------------------------------------
+# Homebrew may be installed without being on this shell's PATH (its installer
+# asks you to add `brew shellenv` to your shell, and a fresh account or an
+# SSH session may not have it): look in both of its usual places.
+if ! command -v brew >/dev/null 2>&1; then
+  for _brew_dir in /opt/homebrew/bin /usr/local/bin; do
+    if [ -x "${_brew_dir}/brew" ]; then
+      export PATH="${_brew_dir}:${PATH}"
+      echo "[tiler] note: Homebrew found at ${_brew_dir} but not on your PATH; add it with" >&2
+      echo "[tiler]         echo 'eval \"\$(${_brew_dir}/brew shellenv)\"' >> ~/.zprofile" >&2
+      break
+    fi
+  done
+fi
+
 if ! command -v brew >/dev/null; then
     echo "Homebrew is required (https://brew.sh)" >&2; exit 1
 fi
@@ -142,7 +156,7 @@ if [ "$mru" != 0 ]; then
     echo "[tiler] WARNING: 'Automatically rearrange Spaces based on most recent use'"
     echo "        is ON. Turn it OFF or Space numbers will drift under you."
 fi
-if pgrep -xq Magnet || pgrep -xq Rectangle; then
+if pgrep -u "$(id -u)" -xq Magnet || pgrep -u "$(id -u)" -xq Rectangle; then
     echo "[tiler] WARNING: another window manager (Magnet/Rectangle) is running; quit it."
 fi
 
@@ -240,16 +254,17 @@ for f in yabai skhd; do
         skhd)  before="$skhd_before";  after="$(effective skhdrc)$(effective tiler.skhd)" ;;
     esac
     if [ "$DRY" = 1 ]; then echo "[dry] $f --restart-service if config changed (or --start-service)"; continue; fi
-    if ! pgrep -xq "$f"; then
+    if ! pgrep -u "$(id -u)" -xq "$f"; then
         "$f" --start-service && echo "[tiler] $f service started"
     elif [ "$RESTART" = 1 ] || [ "$before" != "$after" ]; then
         if [ "$f" = "yabai" ]; then
             # A restart wipes the live BSP tree (see header): snapshot it first,
             # restart, then replay it back through the installed yabai-layout.
             YL="$(dirname "$YABAI_RC")/yabai-layout"
-            "$YL" save
+            # A failed snapshot costs the layout, not the install.
+            "$YL" save || echo "[tiler] could not snapshot the layout; restarting without it" >&2
             "$f" --restart-service && echo "[tiler] $f service restarted"
-            "$YL" restore --wait 40
+            "$YL" restore --wait 40 || true
         else
             "$f" --restart-service && echo "[tiler] $f service restarted"
         fi

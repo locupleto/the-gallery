@@ -1102,7 +1102,7 @@ def reload_running_terminal(terminal: str | None) -> str | None:
         if terminal == "kitty":
             kitty = find_kitty_binary()
             conf = TERMINALS_DIR / "kitty.conf"
-            running = subprocess.run(["pgrep", "-x", "kitty"], capture_output=True, check=False)
+            running = subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "kitty"], capture_output=True, check=False)
             if not kitty or running.returncode != 0:
                 return None
             done = 0

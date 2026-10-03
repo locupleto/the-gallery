@@ -3853,7 +3853,7 @@ service_off() {
 service_on() {
   local label; label="$(launch_label "$1")"
   [ -n "${label}" ] && launchctl enable "gui/$(id -u)/${label}" >/dev/null 2>&1
-  if command -v "$1" >/dev/null 2>&1 && ! pgrep -axq "$1"; then
+  if command -v "$1" >/dev/null 2>&1 && ! pgrep -u "$(id -u)" -axq "$1"; then
     "$1" --start-service >/dev/null 2>&1
   fi
   return 0
@@ -3863,7 +3863,7 @@ service_on() {
 # ancestors, so `gallery on` started by Hammerspoon's key (or `off` by skhd's)
 # would find its own parent "not running".
 hs_quiet() { # hs_quiet <lua> -- no output, and only when Hammerspoon is running
-  pgrep -axq Hammerspoon && hs_call "$1" >/dev/null 2>&1
+  pgrep -u "$(id -u)" -axq Hammerspoon && hs_call "$1" >/dev/null 2>&1
   return 0
 }
 
@@ -3944,7 +3944,7 @@ cmd_off() {
   mkdir -p "$(dirname "${PAUSED_FILE}")"
   date '+%Y-%m-%d %H:%M:%S' > "${PAUSED_FILE}"
   local moved=0
-  pgrep -axq yabai && moved="$(restore_windows)"
+  pgrep -u "$(id -u)" -axq yabai && moved="$(restore_windows)"
   service_off yabai
   pkill -x borders 2>/dev/null || true
   # The Hammerspoon outline (Macs without JankyBorders) goes too, and
@@ -3957,12 +3957,12 @@ cmd_off() {
 }
 
 cmd_on() {
-  if [ ! -f "${PAUSED_FILE}" ] && pgrep -axq yabai && pgrep -axq skhd; then
+  if [ ! -f "${PAUSED_FILE}" ] && pgrep -u "$(id -u)" -axq yabai && pgrep -u "$(id -u)" -axq skhd; then
     echo "Gallery is already on"
     return 0
   fi
   # Where every window is before yabai tiles it: what the next off restores.
-  pgrep -axq yabai || snapshot_windows
+  pgrep -u "$(id -u)" -axq yabai || snapshot_windows
   rm -f "${PAUSED_FILE}"
   hs_quiet "if spoon.Gallery then spoon.Gallery:pauseKey(false) end; return 1"
   service_on skhd
@@ -3998,7 +3998,7 @@ cmd_doctor() {
     ok=0
   fi
 
-  if pgrep -x "Hammerspoon" >/dev/null 2>&1; then
+  if pgrep -u "$(id -u)" -x "Hammerspoon" >/dev/null 2>&1; then
     echo "OK      Hammerspoon running"
   else
     echo "MISSING Hammerspoon running"
@@ -4139,7 +4139,7 @@ cmd_doctor() {
     ok=0
   fi
 
-  if pgrep -xq yabai; then
+  if pgrep -u "$(id -u)" -xq yabai; then
     echo "OK      yabai running"
   elif [ -f "${PAUSED_FILE}" ]; then
     echo "OFF     yabai stopped (gallery off)"
@@ -4155,7 +4155,7 @@ cmd_doctor() {
     ok=0
   fi
 
-  if pgrep -xq skhd; then
+  if pgrep -u "$(id -u)" -xq skhd; then
     echo "OK      skhd running"
   elif [ -f "${PAUSED_FILE}" ]; then
     echo "OFF     skhd stopped (gallery off)"
@@ -4178,7 +4178,7 @@ cmd_doctor() {
     echo "WARN    ${HOME}/.config/skhd/browser-window (super+b) missing (run tiler/install.sh)"
   fi
 
-  if pgrep -x skhd >/dev/null 2>&1 \
+  if pgrep -u "$(id -u)" -x skhd >/dev/null 2>&1 \
     && grep -q '\.load "gallery\.skhd"' "${HOME}/.config/skhd/skhdrc" 2>/dev/null \
     && [ -f "${HOME}/.config/skhd/gallery.skhd" ]; then
     echo "OK      skhd running with gallery.skhd loaded"
@@ -4238,7 +4238,7 @@ else:
 
   # The focus outline: JankyBorders, or (before macOS 14) the Spoon's own.
   if [ -x /opt/homebrew/bin/borders ] || [ -x /usr/local/bin/borders ]; then
-    if pgrep -xq borders; then
+    if pgrep -u "$(id -u)" -xq borders; then
       echo "OK      focus outline (JankyBorders running)"
     elif [ ! -f "${PAUSED_FILE}" ]; then
       echo "WARN    focus outline (JankyBorders installed but not running; gallery-borders apply starts it)"
@@ -4443,7 +4443,7 @@ case "${command}" in
     ;;
   _snapshot)
     # install.sh, before the tiler first starts yabai: what a later off restores.
-    pgrep -xq yabai || snapshot_windows
+    pgrep -u "$(id -u)" -xq yabai || snapshot_windows
     ;;
   reload)
     cmd_reload

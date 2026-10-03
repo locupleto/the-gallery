@@ -144,4 +144,10 @@ sed -n '/^# --- off \/ on/,/^cmd_reload/p' "${G}" | grep -q 'pgrep -xq' \
 grep -q 'off and "on" or "off"' "${REPO_ROOT}/Gallery.spoon/init.lua" \
   || fail "the Hammerspoon key does not decide on or off from the state file"
 say "pgrep -a in the off/on code; the Hammerspoon key follows the state file"
+# pgrep sees every user's processes: on a Mac where someone else is logged
+# in, their yabai would pass for ours. Every lookup is scoped to this user.
+unscoped="$(cd "${REPO_ROOT}" && grep -n 'pgrep -' bin/gallery bin/gallery-borders bin/gallery-term install.sh tiler/install.sh tiler/tiler.skhd \
+  | grep -v -E '^[^:]+:[0-9]+: *#' | grep -v 'pgrep -u "\$(id -u)"' || true)"
+[ -z "${unscoped}" ] || fail "pgrep not scoped to the current user: ${unscoped}"
+say "every pgrep is scoped to the current user"
 say "PASS offon_test.sh"

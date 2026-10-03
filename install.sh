@@ -188,6 +188,20 @@ require_hammerspoon() {
   fi
 }
 
+# Homebrew may be installed without being on this shell's PATH (its installer
+# asks you to add `brew shellenv` to your shell, and a fresh account or an
+# SSH session may not have it): look in both of its usual places.
+if ! command -v brew >/dev/null 2>&1; then
+  for _brew_dir in /opt/homebrew/bin /usr/local/bin; do
+    if [ -x "${_brew_dir}/brew" ]; then
+      export PATH="${_brew_dir}:${PATH}"
+      echo "[gallery] note: Homebrew found at ${_brew_dir} but not on your PATH; add it with" >&2
+      echo "[gallery]         echo 'eval \"\$(${_brew_dir}/brew shellenv)\"' >> ~/.zprofile" >&2
+      break
+    fi
+  done
+fi
+
 # Homebrew is a prerequisite, never installed from here (its installer wants
 # sudo and an interactive terminal). Checked up front so a Mac without it
 # fails before anything is copied, rather than half-way through in
@@ -714,7 +728,7 @@ fi
 # skhd is asked to reload if it is running, so a change to this file alone takes
 # effect without a restart.
 if [ -d "${SKHD_DIR}" ]; then
-  if pgrep -xq skhd; then
+  if pgrep -u "$(id -u)" -xq skhd; then
     if [ "${DRY_RUN}" -eq 1 ]; then
       echo "[dry] skhd --reload"
     else
@@ -811,7 +825,7 @@ else
   else
     echo "[gallery] theme render failed; run 'gallery theme render' by hand" >&2
   fi
-  if pgrep -xq borders && [ -x "${BORDERS_BIN_DEST}" ]; then
+  if pgrep -u "$(id -u)" -xq borders && [ -x "${BORDERS_BIN_DEST}" ]; then
     "${BORDERS_BIN_DEST}" apply >/dev/null 2>&1 && echo "[gallery] borders re-synced to the rendered theme" || true
   fi
 fi
@@ -825,7 +839,7 @@ READY="${CONFIG_DIR}/state/ready"
 stamp_fresh() { [ -f "${READY}" ] && [ "$(cut -d' ' -f1 "${READY}")" -ge "${INSTALL_EPOCH}" ]; }
 if [ "${DRY_RUN}" -eq 1 ]; then
   echo "[dry] wait for the Gallery ready stamp, else reload or relaunch Hammerspoon"
-elif ! pgrep -x "Hammerspoon" >/dev/null 2>&1; then
+elif ! pgrep -u "$(id -u)" -x "Hammerspoon" >/dev/null 2>&1; then
   run open -g -a Hammerspoon
   echo "[gallery] Hammerspoon started"
 else

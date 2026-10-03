@@ -117,7 +117,7 @@ term_running() {
   esac
   # -a: macOS pgrep leaves out its own ancestors by default, so a command
   # typed inside the terminal could not see the terminal it runs in.
-  pgrep -axq "$(term_process "$1")"
+  pgrep -u "$(id -u)" -axq "$(term_process "$1")"
 }
 
 state_terminal() {
@@ -318,7 +318,7 @@ open_iterm() {
   fi
 
   if [ "${ROLE}" = float ]; then
-    if term_running iterm2 || { [ -z "${GALLERY_TERM_RUNNING:-}" ] && pgrep -afq "/iTerm.app/Contents/MacOS/iTerm2"; }; then
+    if term_running iterm2 || { [ -z "${GALLERY_TERM_RUNNING:-}" ] && pgrep -u "$(id -u)" -afq "/iTerm.app/Contents/MacOS/iTerm2"; }; then
       act osascript -e "tell application id \"com.googlecode.iterm2\" to ${create_clause}"
     else
       act osascript -e "tell application id \"com.googlecode.iterm2\"

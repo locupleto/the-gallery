@@ -140,7 +140,7 @@ lalt - b : "$HOME/.config/skhd/browser-window"
 # gallery-term does all of that; the iTerm2 branch after it is the fallback for a
 # machine where the Gallery's own install has not run yet (no ~/bin/gallery-term).
 ## new terminal window
-lalt - return : if [ -x "$HOME/bin/gallery-term" ]; then "$HOME/bin/gallery-term" open --role tile >/dev/null; elif pgrep -xq iTerm2; then osascript -e 'tell application id "com.googlecode.iterm2"' -e 'set w to (create window with default profile)' -e 'activate' -e 'select w' -e 'end tell'; else open -a iTerm; fi
+lalt - return : if [ -x "$HOME/bin/gallery-term" ]; then "$HOME/bin/gallery-term" open --role tile >/dev/null; elif pgrep -u "$(id -u)" -xq iTerm2; then osascript -e 'tell application id "com.googlecode.iterm2"' -e 'set w to (create window with default profile)' -e 'activate' -e 'select w' -e 'end tell'; else open -a iTerm; fi
 ## restart yabai, reload skhd
 shift + lalt - r : yabai --restart-service; skhd --reload
 
