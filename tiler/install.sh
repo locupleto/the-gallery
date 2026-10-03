@@ -47,6 +47,24 @@ done
 
 run() { if [ "$DRY" = 1 ]; then echo "[dry] $*"; else echo "[tiler] $*"; "$@"; fi; }
 
+# `gallery off` disables both services in launchd, so that off lasts through a
+# restart. Installing switches the tiler on and uninstalling unregisters it;
+# either way the disabled flag must go first, or --start-service fails on it
+# now and a later reinstall would find its service silently refusing to load.
+enable_services() {
+    local f p
+    for f in yabai skhd; do
+        for p in "$HOME/Library/LaunchAgents/"*".$f.plist"; do
+            [ -f "$p" ] && run launchctl enable "gui/$(id -u)/$(basename "$p" .plist)"
+        done
+    done
+    if [ -f "$HOME/.config/gallery/state/paused" ]; then
+        [ "$UNINSTALL" = 1 ] || echo "[tiler] the Gallery was off (gallery off); this switches it back on"
+        run rm -f "$HOME/.config/gallery/state/paused"
+    fi
+    return 0
+}
+
 # Backup/manifest helpers shared with the Gallery's install.sh.
 if [ ! -f ../tools/install-lib.sh ]; then
     echo "[tiler] ../tools/install-lib.sh is missing -- run this from a complete checkout" >&2; exit 1
@@ -64,6 +82,7 @@ if [ "$UNINSTALL" = 1 ]; then
     # Unregister the launchd services as well as stopping them: their plists
     # are RunAtLoad/KeepAlive, so a stopped-but-registered service would start
     # again at the next login with no rc file to read.
+    enable_services
     for f in yabai skhd; do
         if command -v "$f" >/dev/null; then
             run "$f" --stop-service || true
@@ -214,6 +233,7 @@ gl_install_file tree-guard "$YABAI_DIR/tree-guard" 755
 # service is therefore restarted only when its effective config (comments and
 # blank lines stripped) differs from what was live before the copy, or with
 # --restart. Comment-only edits are copied without touching the services.
+enable_services
 for f in yabai skhd; do
     case "$f" in
         yabai) before="$yabai_before"; after="$(effective yabairc)" ;;

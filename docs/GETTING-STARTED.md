@@ -47,23 +47,39 @@ are running.
 ## Switching it off for a while
 
 New to tiling? You do not have to live in it all day. **shift + ctrl +
-super + escape** switches the Gallery off: yabai stops (your windows stay
-exactly where they are, as ordinary macOS windows), the focus outline goes,
-and every key goes back to macOS, so left Option types characters again.
-The same key switches it back on, and every window is tiled again. Themes,
-wallpaper and terminal colours stay as they are either way.
-
-The same from a terminal:
+super + escape** switches the Gallery off, and the same key switches it back
+on. From a terminal:
 
 ```sh
 gallery off
 gallery on
 ```
 
-`gallery doctor` says when the Gallery is off. One catch: skhd forgets that
-it is switched off when it reloads its configuration (after you edit a key
-file, or switch keyboard layout), and the keys come back while the tiling
-stays off. `gallery on` puts both right.
+**Off** gives you plain macOS:
+
+- Windows go back to the size and place they had before the tiling took
+  them: the ones that were open when you last switched the Gallery on (or
+  installed it). A window you opened since has no earlier place, so it stays
+  where the tiling put it, as an ordinary window.
+- yabai, skhd and the focus outline stop. Every key goes back to macOS, and
+  left Option types characters again.
+- It stays off until you switch it on, also after you log out or restart the
+  Mac.
+
+**On** tiles again:
+
+- Every ordinary window on screen is tiled at once, Finder windows included.
+  Dialogs, System Settings and other windows the Gallery floats on purpose
+  stay floating, and minimised windows stay minimised.
+- The tiles start from even splits: split ratios you adjusted by hand before
+  switching off are not kept.
+
+Themes, wallpaper and terminal colours stay as they are either way.
+`gallery doctor` says when the Gallery is off.
+
+While it is off, the switch-on key is held by Hammerspoon, since skhd is not
+running. If Hammerspoon is not running, use `gallery on`. Running
+`./install.sh` also switches the Gallery on.
 
 ## A guided walk
 

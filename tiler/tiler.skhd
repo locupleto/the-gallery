@@ -15,17 +15,12 @@
 # (that would need the scripting addition and a partially disabled SIP).
 
 # --- on / off -------------------------------------------------------------------
-# shift+ctrl+super+escape switches the whole Gallery off and on again, to try
-# the Omarchy way of working and step back to plain macOS at will (also
-# `gallery off` / `gallery on`). "paused" is an skhd mode with only that key
-# bound, so every other key -- left Option chords included -- reaches the apps
-# untouched; entering a mode runs its command. skhd falls back to the default
-# mode whenever it reloads its config; `gallery on` puts everything right then.
-:: default : "$HOME/bin/gallery" _resume
-:: paused : "$HOME/bin/gallery" _pause
+# shift+ctrl+super+escape switches the whole Gallery off, to try the Omarchy way
+# of working and step back to plain macOS at will (also `gallery off`). Off
+# stops skhd itself, so the key that switches it back on is held by Hammerspoon
+# while the Gallery is off (Gallery.spoon, pauseKey), or use `gallery on`.
 ## switch the Gallery off (plain macOS) and on again
-shift + ctrl + lalt - escape ; paused
-paused < shift + ctrl + lalt - escape ; default
+shift + ctrl + lalt - escape : "$HOME/bin/gallery" off
 
 # --- pass the keyboard through to a VM ----------------------------------------
 # If you run Omarchy in a VM (UTM), the guest's modifier is ALSO left Option

@@ -76,7 +76,7 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + w | close window |
 | super + return | new terminal window in the configured terminal (`gallery terminal`; iTerm2 unless set otherwise), launched if it is not running (on iTerm2 and Ghostty, first press: allow "skhd wants to control iTerm2") |
 | super + shift + r | restart yabai, reload skhd |
-| shift + ctrl + super + escape | switch the Gallery off (plain macOS) and on again; also `gallery off` / `gallery on` |
+| shift + ctrl + super + escape | switch the Gallery off (plain macOS, windows back where they were, stays off across restarts) and on again; also `gallery off` / `gallery on` |
 | super + c | Calendar |
 | super + a / shift + a, e, y, x, g / shift + g | Omarchy's other app slots: not bound out of the box (they are personal); examples in `local.skhd.example` |
 | super + space | Learn menu: pick a cheat sheet (first press: allow "skhd wants to control iTerm2") |

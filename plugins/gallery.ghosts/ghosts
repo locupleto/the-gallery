@@ -268,8 +268,19 @@ state_prune() {  # keep only ids still known to the window server OR yabai
   tmp=$(mktemp); jq --argjson live "$live" 'with_entries(select((.key | startswith("owner:")) or (.key as $k | $live | index($k))))' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
 
+# Without yabai there is nothing to compare the window server's list with.
+yabai_answers() {
+  ${GHOSTS_YABAI:-yabai} -m query --spaces >/dev/null 2>&1 && return 0
+  echo "yabai is not running (is the Gallery switched off?), so ghosts cannot be told apart" >&2
+  return 1
+}
+
 cmd_check() {
   if screen_locked; then exit 0; fi   # never act behind the lock: that is what creates ghosts
+  # With the Gallery switched off, or yabai not answering, yabai's window list
+  # is empty and every window on screen would look like a ghost.
+  [ -f "$CONFIG_DIR/state/paused" ] && exit 0
+  ${GHOSTS_YABAI:-yabai} -m query --spaces >/dev/null 2>&1 || exit 0
   found=$(scan)
   state_prune
   [ -n "$found" ] || exit 0
@@ -320,6 +331,7 @@ cmd_check() {
 }
 
 cmd_list() {
+  yabai_answers || return 1
   found=$(scan)
   if [ -z "$found" ]; then echo "no ghost windows"; return 0; fi
   printf 'ID\tLAYER\tPID\tOWNER\tTITLE\tFRAME\n'
@@ -330,6 +342,7 @@ cmd_list() {
 
 cmd_fix() {
   want=${1:-}
+  yabai_answers || return 1
   found=$(scan)
   [ -n "$found" ] || { echo "no ghost windows"; return 0; }
   done_pids=" "

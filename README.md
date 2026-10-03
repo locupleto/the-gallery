@@ -50,7 +50,7 @@ with **super + return**, and browse the themes with **shift + ctrl + super +
 space**. To take a break from it:
 
 ```sh
-gallery off                # plain macOS again: no tiling, keys back to normal
+gallery off                # plain macOS: windows back where they were, keys normal
 gallery on                 # and back (or press shift + ctrl + super + escape)
 ```
 

@@ -236,6 +236,7 @@ local function preloadExtensions()
     "hs.urlevent",
     "hs.eventtap",
     "hs.timer",
+    "hs.hotkey",
   }) do
     pcall(require, name)
   end
@@ -296,6 +297,12 @@ function obj:start()
   -- The focus outline, on Macs where JankyBorders cannot run.
   pcall(Outline.start, self)
 
+  -- While the Gallery is switched off, skhd is stopped and the on/off key is
+  -- held here instead (see obj:pauseKey); that state survives a restart.
+  if hs.fs.attributes(os.getenv("HOME") .. "/.config/gallery/state/paused") then
+    pcall(self.pauseKey, self, true)
+  end
+
   pcall(function()
     hs.fs.mkdir(os.getenv("HOME") .. "/.config/gallery/state")
     local f = io.open(self.readyPath, "w")
@@ -325,6 +332,25 @@ function obj:stop()
   pcall(Outline.stop)
 
   return self
+end
+
+--- The on/off key while the Gallery is switched off. `gallery off` stops
+--- skhd, so shift+ctrl+super+escape would reach nobody; with on = true it is
+--- bound here and runs `gallery on`, which calls this with false and hands
+--- the key back to skhd. (hs.hotkey cannot tell left from right Option, so
+--- either Option works while off.) Returns "bound" or "released".
+function obj:pauseKey(on)
+  if self.pauseHotkey then
+    self.pauseHotkey:delete()
+    self.pauseHotkey = nil
+  end
+  if on then
+    self.pauseHotkey = hs.hotkey.bind({ "shift", "ctrl", "alt" }, "escape", function()
+      hs.task.new(os.getenv("HOME") .. "/bin/gallery", nil, { "on" }):start()
+    end)
+    return "bound"
+  end
+  return "released"
 end
 
 --- The focus outline drawn here when JankyBorders is not installed (see

@@ -699,6 +699,9 @@ else
     echo "[gallery] the Gallery was off (gallery off); installing switches it back on"
     run rm -f "${CONFIG_DIR}/state/paused"
   fi
+  # Where the windows are before yabai first tiles them, so that a later
+  # `gallery off` can put them back (no-op while yabai is already running).
+  [ "${DRY_RUN}" -eq 1 ] || "${SCRIPT_DIR}/bin/gallery" _snapshot || true
   tiler_args=()
   [ "${DRY_RUN}" -eq 1 ] && tiler_args+=(--dry-run)
   [ "${RESTART_TILER}" -eq 1 ] && tiler_args+=(--restart)
