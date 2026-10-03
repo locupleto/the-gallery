@@ -576,6 +576,23 @@ list.
 - [qml/README.md](qml/README.md): the QML host and its Quickshell shim.
 - [patches/README.md](patches/README.md): macOS overrides for imported plugins.
 
+## Contributing
+
+The Gallery is a personal project, built for one person's Macs and shared in
+case it is useful to others. You are welcome to use it, fork it and make it
+your own.
+
+- **Bugs and questions:** open an issue. Say which macOS version and Mac you
+  are on, and include the output of `gallery doctor`. Replies come when time
+  allows, not on any schedule.
+- **Pull requests** are welcome, but there is no promise that one will be
+  merged. Small, focused fixes stand the best chance; for anything larger,
+  open an issue first so we can agree on it before you spend the time. Run
+  `tests/run.sh` (on a Mac with the Gallery installed and the screen
+  unlocked) before sending one.
+- **Security problems:** report them privately, not in an issue; see
+  [SECURITY.md](SECURITY.md).
+
 ## Licence
 
 MIT; see `LICENSE`. The Omarchy theme colours and QML components, the Radio

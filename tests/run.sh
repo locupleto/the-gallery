@@ -172,4 +172,6 @@ say "running tests/install_test.sh"; "${SCRIPT_DIR}/install_test.sh" || fail "in
 
 say "running tests/offon_test.sh"; "${SCRIPT_DIR}/offon_test.sh" || fail "offon_test.sh failed"
 
+say "running tests/terminal_test.sh"; "${SCRIPT_DIR}/terminal_test.sh" || fail "terminal_test.sh failed"
+
 say "all checks passed"
