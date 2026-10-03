@@ -239,7 +239,11 @@ listing "${H}" > "${WORK_DIR}/A.post-dry"
 diff -q "${WORK_DIR}/A.pre-uninstall" "${WORK_DIR}/A.post-dry" >/dev/null || fail "A: dry-run uninstall changed the tree"
 
 : > "${STUB_LOG}"
-STUB_RUNNING="borders" "${INSTALL}" --uninstall > "${WORK_DIR}/A.uninstall.out" 2>&1 || { cat "${WORK_DIR}/A.uninstall.out" >&2; fail "A: uninstall failed"; }
+STUB_RUNNING="borders Hammerspoon" "${INSTALL}" --uninstall > "${WORK_DIR}/A.uninstall.out" 2>&1 || { cat "${WORK_DIR}/A.uninstall.out" >&2; fail "A: uninstall failed"; }
+# Hammerspoon still had the Gallery loaded: it is quit, and reopened only
+# for a config of the user's own (scenario A seeds one).
+assert_contains "$(cat "${STUB_LOG}")" 'osascript -e tell application id "org.hammerspoon.Hammerspoon" to quit' "A quits Hammerspoon"
+assert_contains "$(cat "${STUB_LOG}")" "open -a Hammerspoon" "A reopens Hammerspoon for the user's own init.lua"
 [ -z "${INSTALL_TEST_VERBOSE:-}" ] || cat "${WORK_DIR}/A.uninstall.out"
 for f in .config/yabai/yabairc .config/skhd/skhdrc .yabairc .hammerspoon/init.lua .config/kitty/kitty.conf \
          .config/ghostty/config .config/btop/btop.conf "Library/Application Support/superfile/config.toml" \

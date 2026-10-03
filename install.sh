@@ -487,9 +487,28 @@ EOF
     fi
   fi
 
+  # Hammerspoon still has the Gallery loaded: its services and widgets keep
+  # running (and writing ~/.config/gallery) until it restarts. Quit it, and
+  # start it again only for a config of the user's own.
+  if pgrep -u "$(id -u)" -xq Hammerspoon; then
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      echo "[dry] quit Hammerspoon (and reopen it if ~/.hammerspoon/init.lua remains)"
+    else
+      osascript -e 'tell application id "org.hammerspoon.Hammerspoon" to quit' >/dev/null 2>&1 || true
+      for _i in 1 2 3 4 5; do pgrep -u "$(id -u)" -xq Hammerspoon || break; sleep 1; done
+      pkill -u "$(id -u)" -x Hammerspoon 2>/dev/null || true
+      if [ -f "${HOME_DIR}/.hammerspoon/init.lua" ]; then
+        open -a Hammerspoon >/dev/null 2>&1 || true
+        gl_note restored "Hammerspoon restarted with your own config, without the Gallery"
+      else
+        gl_note removed "the running Hammerspoon (it ran only the Gallery; open it again when you want it)"
+      fi
+    fi
+  fi
+
   if [ "${PURGE}" -eq 1 ]; then
     run rm -rf "${CONFIG_DIR}"
-    run rm -f "${HOME_DIR}/Library/Logs/gallery.log"
+    run rm -f "${HOME_DIR}/Library/Logs/gallery.log" "${HOME_DIR}/Library/Logs/gallery-ghosts.log"
     gl_note removed "${CONFIG_DIR} (--purge)"
   else
     gl_note kept "${CONFIG_DIR} (your state; --purge deletes it)"
