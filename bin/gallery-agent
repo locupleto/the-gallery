@@ -77,6 +77,14 @@
 set -euo pipefail
 
 CONFIG_DIR="${GALLERY_CONFIG_DIR:-${HOME}/.config/gallery}"
+
+# Homebrew's folders go on the end of PATH when the shell has not put them on
+# it: the login shell only has them if .zprofile runs `brew shellenv`, which a
+# fresh account may not, and agents installed as casks live there.
+for _brew_dir in /opt/homebrew/bin /usr/local/bin; do
+  case ":${PATH}:" in *":${_brew_dir}:"*) ;; *) [ -d "${_brew_dir}" ] && PATH="${PATH}:${_brew_dir}" ;; esac
+done
+export PATH
 STATE_FILE="${CONFIG_DIR}/state/agent.json"
 AGENTS_DIR="${CONFIG_DIR}/state/agents"
 DEFAULT_AGENT="claude"
