@@ -44,6 +44,7 @@ touched. Put lasting changes in the places marked "you".
 | `~/.config/gallery/sheets/` | you, except `Tiler-Keys.md`, which is generated | yes | kept; deleted by `--purge` |
 | `~/.config/gallery/patches/`, `qml/`, `bin/render-theme.py` | Gallery | no, synced from the checkout (extra files go to `backup/<timestamp>/`) | kept; deleted by `--purge` |
 | `~/bin/gallery`, `gallery-hs`, `gallery-tui`, `gallery-term`, `gallery-menu`, `gallery-borders`, `gallery-agent`, `gallery-qml` | Gallery | no, overwritten | removed; a file of yours they replaced comes back |
+| `~/.config/gallery/agents/skills/gallery/` and the `gallery` links to it in the agents' skills folders | Gallery | no, synced from the checkout | links removed; the copy is deleted by `--purge` |
 | `~/.hammerspoon/init.lua` | you; the Gallery owns only the block between `-- gallery:begin` and `-- gallery:end` | yes; only that block is rewritten, and only if it is out of date | the block is removed, and the file is restored if nothing else changed |
 
 ### Backups
@@ -407,7 +408,11 @@ gallery home apply     # re-source rules.local and apply it live
 
 `home save` leaves terminals and the browser out (they roam; add apps with
 `--roam A,B`), previews with `--dry-run`, and keeps the previous file as
-`rules.local.prev`. Nothing saves it automatically.
+`rules.local.prev`. Nothing saves it automatically. Because `save` rewrites
+the file, keep your own non-home rules in `yabairc.local`, not in
+`rules.local`. Space numbers are one global sequence across displays and shift
+if you add or remove a Space in Mission Control. The template is
+`tiler/rules.local.example`.
 
 After a login, macOS reopens your apps while yabai is still starting, and a
 window that opens before yabai can see it misses its rule (rules act when a
@@ -415,11 +420,7 @@ window is created). So once per login the Gallery applies the rules again by
 itself, at the first quiet moment: no window opened, closed or moved for 15
 seconds and no keyboard or mouse use for 5. It waits up to 10 minutes and
 otherwise leaves the windows alone; each run is logged in
-`~/.config/gallery/gallery-home.log`. A `gallery reload` does not repeat it. Because `save` rewrites
-the file, keep your own non-home rules in `yabairc.local`, not in
-`rules.local`. Space numbers are one global sequence across displays and shift
-if you add or remove a Space in Mission Control. The template is
-`tiler/rules.local.example`.
+`~/.config/gallery/gallery-home.log`. A `gallery reload` does not repeat it.
 
 ### The focus outline
 
@@ -881,6 +882,31 @@ the start directory exactly as typed, so put the program first and its own
 newlines (use single quotes inside it), and the name may use only letters,
 digits, `.`, `_` and `-`. `set <built-in>` without `--command` goes back to
 the built-in's own command. Settings are in `state/agent.json`.
+
+### Let your agent do it
+
+The Gallery ships an agent skill, `gallery`, as Omarchy ships its `omarchy`
+skill. It tells a coding agent where each setting lives, which files are
+yours and survive updates, which `gallery` command applies a change, and the
+rules that keep it safe: change only your own files, never restart yabai
+without asking, run `gallery doctor` afterwards. So you can simply ask: "make
+the gaps smaller", "add a key that opens Spotify", "make a darker copy of
+this theme", "put Obsidian on my second display".
+
+The installer copies the skill to `~/.config/gallery/agents/skills/gallery/`
+and links it into the skills folder of every agent set up on the Mac:
+`~/.claude/skills` (Claude Code), `~/.codex/skills`, `~/.gemini/skills`,
+`~/.copilot/skills`, and the shared `~/.agents/skills`. It adds only a link
+named `gallery`, never changes an agent's settings, and leaves a skill of
+yours with that name alone. Uninstalling removes the links. An agent you set
+up after installing gets the link at the next `./install.sh`.
+
+Treat it as you would any agent change: ask it to show its plan first, and
+check what it did. `gallery doctor` and the file's backup (or `git` for your
+own config) get you back.
+
+For changing the Gallery's own code, `AGENTS.md` in the repository describes
+the layout, the tests and the house rules.
 
 ### More than one agent
 

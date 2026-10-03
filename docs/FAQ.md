@@ -210,6 +210,16 @@ agent works: the Gallery starts agents in their "do not ask" mode (see
 [Getting started](GETTING-STARTED.md#set-up-your-coding-agent)), so they act
 without stopping in whatever folder they start in.
 
+### Can my coding agent change the Gallery for me?
+
+Yes. Ask it in plain words: "smaller gaps", "a key that opens Spotify",
+"a darker version of this theme". The installer links the Gallery's agent
+skill into the skills folders of Claude Code, Codex, Gemini, Copilot and
+`~/.agents/skills`, so the agent knows which files are yours, which command
+applies a change, and not to restart the tiler without asking. Ask it to
+show its plan first. Details in
+[Let your agent do it](CUSTOMIZING.md#let-your-agent-do-it).
+
 ### My agent asks for permissions, or I want a different one
 
 The start directory is `gallery agent dir <path>` (see above). Pick the agent with

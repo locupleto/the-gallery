@@ -423,6 +423,9 @@ install manifest and the backups described under
 - removes the `include` line from your kitty config, the `config-file` line
   from your Ghostty config, and `~/.wezterm.lua` if it is still exactly what
   the Gallery wrote (a wezterm config of yours is only reported);
+- removes the agent skill's `gallery` links from the agents' skills folders
+  (only links that point at the Gallery's copy), and the skills folders it
+  created for them while they are empty;
 - gives back iTerm2's default profile and window style as they were before
   the Gallery; if iTerm2 is running, that happens by itself the moment you
   quit it (the summary prints the commands, should you log out first);

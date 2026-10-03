@@ -238,6 +238,11 @@ account, in the start directory. Choose that directory with this in mind and
 do not point it at your home folder. More in
 [AI agents](CUSTOMIZING.md#ai-agents).
 
+**Let it change the Gallery for you.** The agent knows the Gallery: the
+installer links a `gallery` skill into its skills folder, so "make the gaps
+smaller" or "add a key for Spotify" works from any folder. See
+[Let your agent do it](CUSTOMIZING.md#let-your-agent-do-it).
+
 ## Next steps
 
 - [CUSTOMIZING.md](CUSTOMIZING.md): your own keys, tiling settings, themes,

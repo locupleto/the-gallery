@@ -336,6 +336,13 @@ Learn sheets under `~/.config/gallery/`; updates never overwrite those.
 update replaces, and has recipes for keys, tiling, themes, wallpapers, fonts,
 plugins, the coding agent and sheets.
 
+Or ask your coding agent: "make the gaps between windows smaller", "put
+Spotify on super + p". Like Omarchy, the Gallery ships an agent skill that
+tells the agent where each setting lives and how to apply it safely; the
+installer links it into the skills folders of Claude Code, Codex, Gemini and
+Copilot, and `~/.agents/skills`
+([more](docs/CUSTOMIZING.md#let-your-agent-do-it)).
+
 ## Tiling and hotkeys
 
 `install.sh` installs the tiler first (yabai, skhd, JankyBorders, Learn) via
@@ -589,7 +596,8 @@ your own.
   merged. Small, focused fixes stand the best chance; for anything larger,
   open an issue first so we can agree on it before you spend the time. Run
   `tests/run.sh` (on a Mac with the Gallery installed and the screen
-  unlocked) before sending one.
+  unlocked) before sending one. [AGENTS.md](AGENTS.md) describes the code's
+  layout and house rules, for you and for a coding agent.
 - **Security problems:** report them privately, not in an issue; see
   [SECURITY.md](SECURITY.md).
 

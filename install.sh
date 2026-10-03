@@ -53,6 +53,18 @@ QML_SRC="${SCRIPT_DIR}/qml"
 QML_DEST="${CONFIG_DIR}/qml"
 PATCHES_SRC="${SCRIPT_DIR}/patches"
 PATCHES_DEST="${CONFIG_DIR}/patches"
+# The end-user agent skill (agents/skills/gallery), installed here and linked
+# into each agent's skills folder, the way Omarchy links its own skill. The
+# list is "<agent folder>|<its skills folder>"; a link is made only where the
+# agent folder exists, except for the generic ~/.agents.
+SKILL_SRC="${SCRIPT_DIR}/agents/skills/gallery"
+SKILL_DEST="${CONFIG_DIR}/agents/skills/gallery"
+SKILL_DIRS_RECORD="${CONFIG_DIR}/state/agent-skill-dirs-created"
+AGENT_SKILL_DIRS="${HOME_DIR}/.agents|${HOME_DIR}/.agents/skills
+${HOME_DIR}/.claude|${HOME_DIR}/.claude/skills
+${HOME_DIR}/.codex|${HOME_DIR}/.codex/skills
+${HOME_DIR}/.gemini|${HOME_DIR}/.gemini/skills
+${HOME_DIR}/.copilot|${HOME_DIR}/.copilot/skills"
 OMARCHY_THEME_LINK="${HOME_DIR}/.config/omarchy/current/theme"
 OMARCHY_STATE_THEME_LINK="${HOME_DIR}/.local/state/omarchy/current/theme"
 # The iTerm2 settings bin/gallery takes while the console follows the theme
@@ -383,6 +395,26 @@ uninstall_agent_work_dir() {
   run rm -f "${mark}"
 }
 
+# The agent skill's links, only those pointing at the Gallery's copy, and the
+# skills folders the installer created for them while they are empty.
+uninstall_agent_skill() {
+  local agent_dir skills_dir link d
+  while IFS='|' read -r agent_dir skills_dir; do
+    link="${skills_dir}/gallery"
+    if [ -L "${link}" ] && [ "$(readlink "${link}")" = "${SKILL_DEST}" ]; then
+      run rm -f "${link}"
+      gl_note removed "${link} (the agent skill link)"
+    fi
+  done <<< "${AGENT_SKILL_DIRS}"
+  if [ -f "${SKILL_DIRS_RECORD}" ]; then
+    # Deepest first: a skills folder before the agent folder made for it.
+    while IFS= read -r d; do
+      [ -n "${d}" ] && gl_rmdir_empty "${d}"
+    done < <(awk '{ print length($0) "\t" $0 }' "${SKILL_DIRS_RECORD}" | sort -rn | cut -f2- | uniq)
+    run rm -f "${SKILL_DIRS_RECORD}"
+  fi
+}
+
 uninstall_iterm_profiles() {
   local dir="${HOME_DIR}/Library/Application Support/iTerm2/DynamicProfiles"
   if [ -e "${dir}/gallery-theme.json" ]; then
@@ -548,6 +580,7 @@ EOF
   uninstall_terminal_wiring
   uninstall_iterm_profiles
   uninstall_agent_work_dir
+  uninstall_agent_skill
 
   # btop / superfile settings back to what they were (and their rendered
   # themes removed), from the checkout's renderer so it works without an
@@ -717,6 +750,37 @@ echo "[gallery] installing patches to ${PATCHES_DEST}"
 run mkdir -p "${PATCHES_DEST}"
 if [ -d "${PATCHES_SRC}" ]; then
   gl_rsync_delete "${PATCHES_SRC}/" "${PATCHES_DEST}/"
+fi
+
+# An agent started anywhere finds the skill when asked to change the desktop.
+# Only an entry named "gallery" that is a link of ours is ever replaced; a
+# skill of the user's by that name is left alone. Skills folders the
+# installer creates are recorded, so the uninstall removes them again.
+if [ -d "${SKILL_SRC}" ]; then
+  echo "[gallery] installing the agent skill to ${SKILL_DEST}"
+  run mkdir -p "${SKILL_DEST}"
+  gl_rsync_delete "${SKILL_SRC}/" "${SKILL_DEST}/"
+  linked=""
+  while IFS='|' read -r agent_dir skills_dir; do
+    if [ "${agent_dir}" != "${HOME_DIR}/.agents" ] && [ ! -d "${agent_dir}" ]; then
+      continue
+    fi
+    link="${skills_dir}/gallery"
+    if [ -e "${link}" ] || [ -L "${link}" ]; then
+      if [ "$(readlink "${link}" 2>/dev/null || true)" != "${SKILL_DEST}" ]; then
+        echo "[gallery] ${link} exists and is not the Gallery's; leaving it"
+        continue
+      fi
+    fi
+    if [ ! -d "${skills_dir}" ] && [ "${DRY_RUN}" -ne 1 ]; then
+      [ -d "${agent_dir}" ] || echo "${agent_dir}" >> "${SKILL_DIRS_RECORD}"
+      echo "${skills_dir}" >> "${SKILL_DIRS_RECORD}"
+    fi
+    run mkdir -p "${skills_dir}"
+    run ln -sfn "${SKILL_DEST}" "${link}"
+    linked+=" ${skills_dir/#${HOME_DIR}/~}"
+  done <<< "${AGENT_SKILL_DIRS}"
+  [ -z "${linked}" ] || echo "[gallery] agent skill 'gallery' linked into:${linked}"
 fi
 
 if [ ! -e "${THEMES_DEST}/current" ]; then
