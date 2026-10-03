@@ -375,4 +375,17 @@ grep -q 'color_theme = "Mine"' "${H}/.config/btop/btop.conf" || fail "D: the use
 assert_gone "${RECORD}" "D record is deleted after the restore"
 say "D: companion apps are only touched when installed; originals are recorded once and restored"
 
+# --- scenario E: no supported terminal ----------------------------------------------
+say "scenario E: only Apple's Terminal"
+new_home homeE
+mkdir -p "${WORK_DIR}/noterm-apps"
+before="$(cd "${HOME_DIR}" && find . | sort)"
+if out="$(GALLERY_TERM_APP_DIRS="${WORK_DIR}/noterm-apps" "${INSTALL}" --minimal 2>&1)"; then
+  fail "E: the install went ahead without a supported terminal"
+fi
+assert_contains "${out}" "no supported terminal found" "E names the problem"
+assert_contains "${out}" "brew install --cask iterm2" "E recommends iTerm2"
+[ "$(cd "${HOME_DIR}" && find . | sort)" = "${before}" ] || fail "E: files changed before the terminal check stopped the install"
+say "E: stops before touching anything, and recommends iTerm2"
+
 say "all install tests passed"

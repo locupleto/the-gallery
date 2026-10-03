@@ -20,7 +20,7 @@ The same table as the README's "Prerequisites" section, in brief:
 | Prerequisite | How | Why |
 |---|---|---|
 | Homebrew | [brew.sh](https://brew.sh) | the installer brews everything else; it stops up front if `brew` is missing |
-| A terminal: iTerm2, Ghostty, kitty or WezTerm | `brew install --cask iterm2` (or `ghostty`, `kitty`, `wezterm`) | every floating TUI window, Learn, `super+return` and the agent window; one is enough, see [Choosing the terminal](#choosing-the-terminal) |
+| A terminal: iTerm2, Ghostty, kitty or WezTerm | `brew install --cask iterm2` (or `ghostty`, `kitty`, `wezterm`) | every floating TUI window, Learn, `super+return` and the agent window; one is enough. iTerm2 is the most tested and the default whenever installed. Apple's Terminal is not supported; the installer stops if none of the four is there. See [Choosing the terminal](#choosing-the-terminal) |
 | Hammerspoon | `brew install --cask hammerspoon` | the plugin host (the installer refuses to run without `/Applications/Hammerspoon.app`) |
 | Optional: a coding agent | `brew install --cask claude-code` (or Codex, Gemini, opencode, ...) | the agent key, shift + ctrl + super + a; see `gallery agent list` |
 | Optional: chafa, uv | `brew install chafa uv` | picker previews; the venv for the `qml` kind |

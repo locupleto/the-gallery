@@ -180,6 +180,23 @@ run() {
   fi
 }
 
+# One of the four supported terminals must be installed: every Gallery window
+# (Learn, the pickers, super+return, the agent) opens in it. Apple's Terminal
+# cannot carry the per-window theme, title and live recolouring the Gallery
+# relies on. Without one the install would finish and every such key would do
+# nothing, so stop before anything is copied. bin/gallery-term owns what
+# "installed" means (it also honours GALLERY_TERM_APP_DIRS).
+require_terminal() {
+  local t
+  for t in iterm2 ghostty kitty wezterm; do
+    "${SCRIPT_DIR}/bin/gallery-term" installed "${t}" 2>/dev/null && return 0
+  done
+  echo "[gallery] no supported terminal found: the Gallery opens its windows in iTerm2, Ghostty, kitty or WezTerm (Apple's Terminal is not supported)" >&2
+  echo "[gallery] install iTerm2, the most tested one, with: brew install --cask iterm2" >&2
+  echo "[gallery] (or: brew install --cask ghostty | kitty | wezterm), then run ./install.sh again" >&2
+  exit 1
+}
+
 require_hammerspoon() {
   if [ ! -d "${HAMMERSPOON_APP}" ]; then
     echo "[gallery] Hammerspoon.app not found at ${HAMMERSPOON_APP}" >&2
@@ -525,6 +542,7 @@ if [ "${UNINSTALL}" -eq 1 ]; then
 fi
 
 require_hammerspoon
+require_terminal
 require_homebrew
 install_jq
 install_companion_apps
