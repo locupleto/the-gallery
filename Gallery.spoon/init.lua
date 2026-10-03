@@ -297,6 +297,24 @@ function obj:start()
   -- The focus outline, on Macs where JankyBorders cannot run.
   pcall(Outline.start, self)
 
+  -- iTerm2 puts its own default profile back over an outside change while it
+  -- runs, so `gallery console` queues that change and it is made here, as
+  -- soon as iTerm2 quits (and once now, in case it is not running).
+  pcall(function()
+    local gallery = os.getenv("HOME") .. "/bin/gallery"
+    local function applyPending()
+      hs.task.new(gallery, nil, { "console", "_iterm-apply" }):start()
+    end
+    if self.itermWatcher then self.itermWatcher:stop() end
+    self.itermWatcher = hs.application.watcher.new(function(name, event, app)
+      if event ~= hs.application.watcher.terminated then return end
+      local bid = app and app:bundleID()
+      if name == "iTerm2" or bid == "com.googlecode.iterm2" then applyPending() end
+    end)
+    self.itermWatcher:start()
+    applyPending()
+  end)
+
   -- While the Gallery is switched off, skhd is stopped and the on/off key is
   -- held here instead (see obj:pauseKey); that state survives a restart.
   if hs.fs.attributes(os.getenv("HOME") .. "/.config/gallery/state/paused") then
@@ -330,6 +348,7 @@ function obj:stop()
   Service.stopAll()
   Feed.stopAll()
   pcall(Outline.stop)
+  if self.itermWatcher then pcall(function() self.itermWatcher:stop() end) end
 
   return self
 end

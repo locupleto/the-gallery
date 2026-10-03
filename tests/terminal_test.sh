@@ -29,6 +29,9 @@ trap 'rm -rf "${WORK_DIR}"' EXIT
 export HOME="${WORK_DIR}/home"
 unset GALLERY_CONFIG_DIR GALLERY_TERMINAL GALLERY_TERM_RUNNING || true
 export GALLERY_NO_TERMINAL_RELOAD=1
+# iTerm2 counts as not running unless a case says otherwise (a running one
+# only gets a queued default-profile change).
+export GALLERY_ITERM_RUNNING=0
 export GALLERY_TERM_BIN="${TERM_BIN}"
 APPS="${WORK_DIR}/apps"
 export GALLERY_TERM_APP_DIRS="${APPS}"
@@ -445,5 +448,24 @@ PREFS write com.googlecode.iterm2 "Default Bookmark Guid" -string PICKED-LATER
 "${GALLERY}" console native >/dev/null
 [ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = PICKED-LATER ] || fail "native overwrote a default the user picked since"
 say "console native: everything given back; a default picked since is left alone"
+
+# A running iTerm2 puts its own default back over an outside change: the
+# change is queued and made by `console _iterm-apply` once iTerm2 has quit.
+PREFS write com.googlecode.iterm2 "Default Bookmark Guid" -string MY-OWN-GUID
+GALLERY_ITERM_RUNNING=1 "${GALLERY}" console theme > "${WORK_DIR}/q.out"
+assert_contains "$(cat "${WORK_DIR}/q.out")" "when you next quit iTerm2" "queued while iTerm2 runs"
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = MY-OWN-GUID ] || fail "the default changed while iTerm2 was running"
+grep -q '"iterm_default_pending": "take"' "${CFG}/state/console.json" || fail "the change was not queued"
+GALLERY_ITERM_RUNNING=1 "${GALLERY}" console _iterm-apply
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = MY-OWN-GUID ] || fail "_iterm-apply acted while iTerm2 was running"
+"${GALLERY}" console _iterm-apply
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = gallery-console ] || fail "_iterm-apply did not make the queued change"
+grep -q iterm_default_pending "${CFG}/state/console.json" && fail "the queue was not cleared"
+grep -q '"iterm_default_before": "MY-OWN-GUID"' "${CFG}/state/console.json" || fail "the queued take did not note the user's default"
+GALLERY_ITERM_RUNNING=1 "${GALLERY}" console native >/dev/null
+grep -q '"iterm_default_pending": "give"' "${CFG}/state/console.json" || fail "give-back was not queued"
+"${GALLERY}" console _iterm-apply
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = MY-OWN-GUID ] || fail "the queued give-back did not happen"
+say "while iTerm2 runs, default-profile changes are queued and made once it has quit"
 
 say "PASS terminal_test.sh"

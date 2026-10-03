@@ -342,8 +342,19 @@ except Exception:
 if v is not None:
     print(v)
 ' "${CONFIG_DIR}/state/console.json" 2>/dev/null || true)"
-  local prefs="${GALLERY_DEFAULTS_BIN:-defaults}"
-  if [ -n "${before}" ] && [ "$("${prefs}" read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)" = "gallery-console" ]; then
+  local prefs="${GALLERY_DEFAULTS_BIN:-defaults}" undo
+  if [ -n "${before}" ] && [ "$("${prefs}" read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)" = "gallery-console" ] \
+     && pgrep -u "$(id -u)" -xq iTerm2; then
+    # A running iTerm2 would put its default straight back: say how instead.
+    if [ "${before}" = "-" ]; then
+      undo="defaults delete com.googlecode.iterm2 'Default Bookmark Guid'"
+    else
+      undo="defaults write com.googlecode.iterm2 'Default Bookmark Guid' -string '${before}'"
+    fi
+    echo "[gallery] iTerm2 is running, so its default profile cannot be given back now. Quit iTerm2, then run:"
+    echo "[gallery]   ${undo}"
+    gl_note kept "iTerm2's default profile is still Console until you run: ${undo}"
+  elif [ -n "${before}" ] && [ "$("${prefs}" read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)" = "gallery-console" ]; then
     if [ "${before}" = "-" ]; then
       run "${prefs}" delete com.googlecode.iterm2 "Default Bookmark Guid"
     else
@@ -923,7 +934,9 @@ esac
 if [ "${DRY_RUN}" -ne 1 ] && [ -x "${HOME_DIR}/bin/gallery" ]; then
   if [ ! -f "${CONFIG_DIR}/state/console.json" ]; then
     echo "[gallery] your terminals now follow the theme (back to their own colours with: gallery console native)"
-    "${HOME_DIR}/bin/gallery" console theme 2>&1 | sed 's/^/[gallery]   /'
+    # What it did per terminal (and WezTerm's two lines), not the render log.
+    "${HOME_DIR}/bin/gallery" console theme 2>&1 \
+      | grep -E '^(iterm2|ghostty|kitty|wezterm):|^  (local|if) ' | sed 's/^/[gallery]   /' || true
   fi
   console_steps="$("${HOME_DIR}/bin/gallery" console _hint 2>/dev/null || true)"
   if [ -n "${console_steps}" ]; then

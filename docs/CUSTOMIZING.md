@@ -640,7 +640,9 @@ What following the theme changes, and how it is undone:
   "Console" profile, your own Default plus the theme's colours. The Gallery
   also makes Console iTerm2's default profile, so iTerm2's own Cmd-N windows
   follow too, after noting your own default; that comes back with `native`,
-  `gallery off` and uninstalling. If you pick another default in iTerm2's
+  `gallery off` and uninstalling. A running iTerm2 puts its own default back
+  over any outside change, so while it runs the change waits and is made the
+  moment you quit it (Hammerspoon watches for that). If you pick another default in iTerm2's
   settings later, it is yours and is left alone (`gallery doctor` mentions it).
 - **Ghostty and kitty**: one include line at the end of your config, which is
   copied to `<file>.gallery-bak` before the first edit.

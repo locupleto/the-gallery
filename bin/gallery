@@ -1900,6 +1900,14 @@ console_effective_mode() {
 # follows the theme the Gallery makes it the default, after noting the user's
 # own choice in CONSOLE_STATE_FILE ("iterm_default_before"; "-" when there was
 # none), and gives that choice back on native, gallery off and uninstall.
+#
+# A running iTerm2 puts its own default straight back over any outside change
+# (and writes it again when it quits), so the change is only made while iTerm2
+# is not running. Otherwise it is queued ("iterm_default_pending": take|give)
+# and made by `gallery console _iterm-apply`, which Hammerspoon runs when
+# iTerm2 quits (Gallery.spoon). The windows the Gallery opens name the
+# Console profile directly and follow the theme either way.
+#
 # GALLERY_DEFAULTS_BIN is a test seam: `defaults` writes the real user's
 # preferences whatever $HOME says.
 iterm_pref() {
@@ -1913,6 +1921,30 @@ iterm_pref() {
   "${GALLERY_DEFAULTS_BIN:-defaults}" "$@"
 }
 iterm_default_read() { iterm_pref read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true; }
+iterm_running() {
+  if [ -n "${GALLERY_ITERM_RUNNING+x}" ]; then [ "${GALLERY_ITERM_RUNNING}" = 1 ]; return; fi
+  pgrep -u "$(id -u)" -xq iTerm2
+}
+
+# iterm_default_change take|give -- make the change now, or queue it while
+# iTerm2 runs. Prints what happened.
+iterm_default_change() {
+  if iterm_running; then
+    console_write_key iterm_default_pending "$1"
+    if [ "$1" = take ]; then
+      echo "iterm2: Console becomes the default profile when you next quit iTerm2 (windows the Gallery opens follow the theme already)"
+    else
+      echo "iterm2: your own default profile comes back when you next quit iTerm2"
+    fi
+    return 0
+  fi
+  console_delete_key iterm_default_pending
+  if [ "$1" = take ]; then
+    iterm_default_take && echo "iterm2: Console is the default profile (your own is noted and comes back with native, off or uninstall)"
+  else
+    iterm_default_give_back && echo "iterm2: your own default profile is back"
+  fi
+}
 
 iterm_default_take() {
   [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ] || return 0
@@ -1937,6 +1969,14 @@ iterm_default_give_back() {
   console_delete_key iterm_default_before
 }
 
+# `gallery console _iterm-apply`: a queued change, once iTerm2 has quit.
+iterm_default_apply_pending() {
+  local pending
+  pending="$(console_read_key iterm_default_pending)" || return 0
+  iterm_running && return 0
+  iterm_default_change "${pending}" >/dev/null
+}
+
 # The terminals installed here (gallery-term decides what "installed" means).
 installed_terminals() {
   local t helper
@@ -1954,11 +1994,7 @@ console_apply_all() {
   local mode="$1" t
   for t in $(installed_terminals); do
     if [ "${t}" = iterm2 ]; then
-      if [ "${mode}" = theme ]; then
-        iterm_default_take && echo "iterm2: Console is the default profile (your own choice is noted and comes back with native or off)"
-      else
-        iterm_default_give_back && echo "iterm2: your own default profile is back"
-      fi
+      if [ "${mode}" = theme ]; then iterm_default_change take; else iterm_default_change give; fi
     else
       console_config_apply "${t}" "${mode}"
     fi
@@ -2202,7 +2238,8 @@ cmd_terminal() {
 console_hint() {
   [ "$(console_read_mode)" = theme ] || return 0
   [ -f "${CONFIG_DIR}/state/paused" ] && return 0
-  if installed_terminals | grep -qx iterm2 && [ "$(iterm_default_read)" != "gallery-console" ]; then
+  if installed_terminals | grep -qx iterm2 && [ "$(iterm_default_read)" != "gallery-console" ] \
+     && ! console_read_key iterm_default_pending >/dev/null; then
     echo "in iTerm2: Settings > Profiles > Console > Other Actions > Set as Default (once)"
   fi
   return 0
@@ -2359,6 +2396,10 @@ cmd_console() {
     _hint)
       # install.sh: the steps still missing, one per line
       console_hint
+      ;;
+    _iterm-apply)
+      # Gallery.spoon, when iTerm2 quits: make a queued default-profile change
+      iterm_default_apply_pending
       ;;
     "")
       echo "usage: gallery console <status|theme|native|toggle|close [ask|never]>" >&2

@@ -226,10 +226,12 @@ the later steps assume the earlier ones.
    the Gallery opens use it, and the installer makes it iTerm2's default
    profile so iTerm2's own Cmd-N windows follow the theme too, after noting
    your own default (given back by `gallery console native`, `gallery off`
-   and uninstalling). `gallery console status` prints
-   `default profile: Console (ok)`. If iTerm2 was running and its default
-   did not change, `gallery doctor` says so: Settings (Cmd-,), Profiles,
-   select "Console", Other Actions, Set as Default. Do not make "Gallery"
+   and uninstalling). If iTerm2 is running while you install, that waits
+   until you next quit it: a running iTerm2 puts its own default back over
+   any outside change. `gallery console status` prints
+   `default profile: Console (ok)` once it has happened. To do it by hand:
+   Settings (Cmd-,), Profiles, select "Console", Other Actions, Set as
+   Default. Do not make "Gallery"
    the default: it closes its session when the command ends and never
    prompts, which suits a floating TUI and not a shell.
 
