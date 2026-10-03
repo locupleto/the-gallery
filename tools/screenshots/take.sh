@@ -32,8 +32,12 @@
 # What is in each picture is set below: wallpapers per scene, the commit whose
 # tools/render-theme.py fills the editor tile, the agent prompts. To follow an
 # Omarchy wallpaper change, edit the WALL_* lines and run the affected scenes.
-# Look at every image before committing (see docs in the vault note
-# Screenshot-Regeneration): the agents' replies differ from run to run.
+# Then run only the scenes that use the changed line (WALL_MAIN: tiles and
+# terminals; WALL_THEMES: tiles; WALL_HERO, WALL_MORE: walls; WALL_AGENTS:
+# agents). Look at every image before committing -- the contact sheet the
+# build prints shows them all -- since the agents' replies differ from run to
+# run; and update README.md / THIRD_PARTY_NOTICES.md where they name a
+# wallpaper file that changed.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
