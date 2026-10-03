@@ -2087,6 +2087,24 @@ cmd_terminal() {
   esac
 }
 
+# What still stands between the theme and the user's everyday terminal, one
+# step per line (nothing once it follows the theme). The installer's last
+# lines and `gallery doctor` print it: by design the console stays native
+# until asked, and nothing else would tell a new user so.
+console_hint() {
+  local mode term
+  mode="$(console_read_mode)"
+  term="$(terminal_id)"
+  if [ "${term}" = "iterm2" ] \
+     && [ "$(defaults read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)" != "gallery-console" ]; then
+    echo "in iTerm2: Settings > Profiles > Console > Other Actions > Set as Default (once)"
+  fi
+  if [ "${mode}" != "theme" ]; then
+    echo "gallery console theme"
+  fi
+  return 0
+}
+
 cmd_console_status() {
   local mode term
   mode="$(console_read_mode)"
@@ -2230,6 +2248,10 @@ cmd_console() {
       ;;
     close)
       cmd_console_close "$@"
+      ;;
+    _hint)
+      # install.sh: the steps still missing, one per line
+      console_hint
       ;;
     "")
       echo "usage: gallery console <status|theme|native|toggle|close [ask|never]>" >&2
@@ -3989,6 +4011,12 @@ cmd_doctor() {
 
   if [ -f "${PAUSED_FILE}" ]; then
     echo "NOTE    the Gallery is off (gallery off, since $(cat "${PAUSED_FILE}")): yabai, skhd and the outline are stopped on purpose, also after a restart; gallery on (or shift+ctrl+super+escape) resumes"
+  fi
+
+  local console_steps
+  console_steps="$(console_hint 2>/dev/null | awk 'NR > 1 { printf ", then " } { printf "%s", $0 }')"
+  if [ -n "${console_steps}" ]; then
+    echo "NOTE    your own terminal windows keep their colours; to make them follow the theme: ${console_steps}"
   fi
 
   if [ -d "/Applications/Hammerspoon.app" ]; then

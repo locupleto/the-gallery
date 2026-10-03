@@ -44,6 +44,14 @@ gallery agent dir ~/Code   # the folder that holds your repos: your agent starts
 (The installer puts `gallery` in `~/bin`; if that is not on your PATH yet, it
 prints the one line to add.)
 
+Your own terminal windows keep their colours until you ask; the Gallery's
+windows follow the theme from the start. To make your terminal follow it too,
+in iTerm2 make the "Console" profile the default once (Settings, Profiles,
+Console, Other Actions, Set as Default), then run `gallery console theme`.
+Other terminals need only the command (for WezTerm it prints two lines to
+add to your config); see
+[Terminals](docs/CUSTOMIZING.md#terminals).
+
 Then press **super + space** (super is left Option) for the Learn menu, or
 **super + shift + space** for every key on one sheet, open a few windows
 with **super + return**, and browse the themes with **shift + ctrl + super +

@@ -892,3 +892,15 @@ case ":${PATH}:" in
     echo "[gallery]       (until then: ~/bin/gallery doctor)"
     ;;
 esac
+
+# By design the user's own terminal keeps its colours until asked (the
+# Gallery's floating windows follow the theme regardless). Say so, with the
+# steps still missing, or a newcomer takes it for a broken theme.
+if [ "${DRY_RUN}" -ne 1 ] && [ -x "${HOME_DIR}/bin/gallery" ]; then
+  console_steps="$("${HOME_DIR}/bin/gallery" console _hint 2>/dev/null || true)"
+  if [ -n "${console_steps}" ]; then
+    echo "[gallery] note: your own terminal windows keep their colours; the Gallery's windows follow the theme."
+    echo "[gallery]       To make your terminal follow the theme too:"
+    printf '%s\n' "${console_steps}" | awk '{ printf "[gallery]         %d. %s\n", NR, $0 }'
+  fi
+fi
