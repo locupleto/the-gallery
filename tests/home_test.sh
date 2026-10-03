@@ -55,7 +55,7 @@ cat > "${FIXTURE}" << 'EOF'
    "subrole": "AXStandardWindow", "is-floating": false},
   {"id": 101, "app": "Safari", "title": "", "space": 2,
    "subrole": "AXStandardWindow", "is-floating": false},
-  {"id": 102, "app": "Safari", "title": "Report v1.2 (final) — Urban's copy", "space": 6,
+  {"id": 102, "app": "Safari", "title": "Report v1.2 (final) — Kim's copy", "space": 6,
    "subrole": "AXStandardWindow", "is-floating": false},
   {"id": 103, "app": "iTerm2", "title": "zsh", "space": 1,
    "subrole": "AXStandardWindow", "is-floating": false},
@@ -94,7 +94,7 @@ assert_contains "yabai -m rule --add label=home-mail app='^Mail\$' space=5"
 # --- comment, plus the skipped-empty-title note -----------------------------
 assert_contains "# Safari is on several Spaces: pinned per window by title (brittle -- titles change)"
 assert_contains "1 window(s) with no title skipped"
-assert_contains "yabai -m rule --add label=home-safari-1 app='^Safari\$' title='^Report v1\\.2 \\(final\\) — Urban'\\''s copy\$' space=6"
+assert_contains "yabai -m rule --add label=home-safari-1 app='^Safari\$' title='^Report v1\\.2 \\(final\\) — Kim'\\''s copy\$' space=6"
 
 # --- exclusions: roam (iTerm2), Learn:, floating, AXDialog ------------------
 assert_not_contains "home-iterm2"
