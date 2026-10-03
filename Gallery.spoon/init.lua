@@ -346,7 +346,12 @@ function obj:pauseKey(on)
   end
   if on then
     self.pauseHotkey = hs.hotkey.bind({ "shift", "ctrl", "alt" }, "escape", function()
-      hs.task.new(os.getenv("HOME") .. "/bin/gallery", nil, { "on" }):start()
+      -- Decided by the state file, not by having been bound: should the key
+      -- ever outlive the off (an on that could not release it), it switches
+      -- off rather than doing nothing, and lets go so skhd has it again.
+      local off = hs.fs.attributes(os.getenv("HOME") .. "/.config/gallery/state/paused") ~= nil
+      if not off then self:pauseKey(false) end
+      hs.task.new(os.getenv("HOME") .. "/bin/gallery", nil, { off and "on" or "off" }):start()
     end)
     return "bound"
   end

@@ -3853,14 +3853,17 @@ service_off() {
 service_on() {
   local label; label="$(launch_label "$1")"
   [ -n "${label}" ] && launchctl enable "gui/$(id -u)/${label}" >/dev/null 2>&1
-  if command -v "$1" >/dev/null 2>&1 && ! pgrep -xq "$1"; then
+  if command -v "$1" >/dev/null 2>&1 && ! pgrep -axq "$1"; then
     "$1" --start-service >/dev/null 2>&1
   fi
   return 0
 }
 
+# pgrep -a throughout: without it macOS pgrep leaves out the caller's own
+# ancestors, so `gallery on` started by Hammerspoon's key (or `off` by skhd's)
+# would find its own parent "not running".
 hs_quiet() { # hs_quiet <lua> -- no output, and only when Hammerspoon is running
-  pgrep -xq Hammerspoon && hs_call "$1" >/dev/null 2>&1
+  pgrep -axq Hammerspoon && hs_call "$1" >/dev/null 2>&1
   return 0
 }
 
@@ -3890,7 +3893,8 @@ snapshot_windows() {
 }
 
 # Put the windows of the last snapshot back, through yabai while it still
-# runs: float each one, then move and size it. Prints how many were moved.
+# runs: float every window, then move and size each one. Prints how many
+# snapshot windows were put back.
 restore_windows() {
   if [ ! -s "${UNTILED_FILE}" ] || ! command -v python3 >/dev/null 2>&1; then
     echo 0; return 0
@@ -3907,18 +3911,27 @@ try:
 except (OSError, ValueError, KeyError, TypeError):
     print(0)
     sys.exit(0)
-moved = 0
+# Every window is floated before any is moved: floating one tile makes yabai
+# grow its neighbours, so each frame is read first and set afterwards. A
+# window opened since the snapshot keeps the frame its tile had.
+todo = []
 for w in now:
-    s = snap.get(w.get("id"))
-    if not s or w.get("is-minimized") or w.get("is-native-fullscreen") or not w.get("can-move", True):
+    if w.get("is-minimized") or w.get("is-native-fullscreen") or not w.get("can-move", True):
         continue
-    wid = str(w["id"])
+    f = snap.get(w.get("id")) or w.get("frame")
+    if not f:
+        continue
+    todo.append((w, f, w.get("id") in snap))
+for w, f, _ in todo:
     if not w.get("is-floating"):
-        yabai("window", wid, "--toggle", "float")
-    yabai("window", wid, "--move", "abs:%d:%d" % (s["x"], s["y"]))
+        yabai("window", str(w["id"]), "--toggle", "float")
+moved = 0
+for w, f, restored in todo:
+    wid = str(w["id"])
+    yabai("window", wid, "--move", "abs:%d:%d" % (f["x"], f["y"]))
     if w.get("can-resize", True):
-        yabai("window", wid, "--resize", "abs:%d:%d" % (s["w"], s["h"]))
-    moved += 1
+        yabai("window", wid, "--resize", "abs:%d:%d" % (f["w"], f["h"]))
+    moved += restored
 print(moved)
 EOF
 }
@@ -3931,7 +3944,7 @@ cmd_off() {
   mkdir -p "$(dirname "${PAUSED_FILE}")"
   date '+%Y-%m-%d %H:%M:%S' > "${PAUSED_FILE}"
   local moved=0
-  pgrep -xq yabai && moved="$(restore_windows)"
+  pgrep -axq yabai && moved="$(restore_windows)"
   service_off yabai
   pkill -x borders 2>/dev/null || true
   # The Hammerspoon outline (Macs without JankyBorders) goes too, and
@@ -3944,12 +3957,12 @@ cmd_off() {
 }
 
 cmd_on() {
-  if [ ! -f "${PAUSED_FILE}" ] && pgrep -xq yabai && pgrep -xq skhd; then
+  if [ ! -f "${PAUSED_FILE}" ] && pgrep -axq yabai && pgrep -axq skhd; then
     echo "Gallery is already on"
     return 0
   fi
   # Where every window is before yabai tiles it: what the next off restores.
-  pgrep -xq yabai || snapshot_windows
+  pgrep -axq yabai || snapshot_windows
   rm -f "${PAUSED_FILE}"
   hs_quiet "if spoon.Gallery then spoon.Gallery:pauseKey(false) end; return 1"
   service_on skhd

@@ -22,7 +22,8 @@ case "$*" in
   "-m query --windows") cat <<'JSON'
 [{"id": 11, "is-floating": false, "is-minimized": false, "can-move": true, "can-resize": true},
  {"id": 12, "is-floating": true,  "is-minimized": false, "can-move": true, "can-resize": true},
- {"id": 13, "is-floating": false, "is-minimized": false, "can-move": true, "can-resize": true},
+ {"id": 13, "is-floating": false, "is-minimized": false, "can-move": true, "can-resize": true,
+  "frame": {"x": 868.0, "y": 42.0, "w": 852.0, "h": 529.0}},
  {"id": 14, "is-floating": false, "is-minimized": true,  "can-move": true, "can-resize": true}]
 JSON
   ;;
@@ -63,7 +64,12 @@ grep -q "yabai -m window 12 --toggle float" "${LOG}" && fail "an already floatin
 grep -qx "yabai -m window 11 --move abs:100:200" "${LOG}" || fail "window 11 not moved back"
 grep -qx "yabai -m window 11 --resize abs:800:600" "${LOG}" || fail "window 11 not resized back"
 grep -qx "yabai -m window 12 --move abs:50:60" "${LOG}" || fail "window 12 not moved back"
-grep -q "yabai -m window 13 " "${LOG}" && fail "a window opened after on was moved"
+grep -qx "yabai -m window 13 --toggle float" "${LOG}" || fail "a window opened after on was not frozen"
+grep -qx "yabai -m window 13 --move abs:868:42" "${LOG}" || fail "a window opened after on did not keep its tile's place"
+grep -qx "yabai -m window 13 --resize abs:852:529" "${LOG}" || fail "a window opened after on did not keep its tile's size"
+last_toggle="$(grep -n -- "--toggle float" "${LOG}" | tail -1 | cut -d: -f1)"
+first_move="$(grep -n -- "--move" "${LOG}" | head -1 | cut -d: -f1)"
+[ "${last_toggle}" -lt "${first_move}" ] || fail "a window was moved before every window was floated (its neighbours re-tile)"
 grep -q "yabai -m window 14 " "${LOG}" && fail "a minimised window was moved"
 grep -qx "launchctl disable gui/${UID_}/com.asmvik.yabai" "${LOG}" || fail "off did not disable yabai in launchd"
 grep -qx "launchctl disable gui/${UID_}/com.koekeishiya.skhd" "${LOG}" || fail "off did not disable skhd in launchd"
@@ -74,7 +80,7 @@ last_move="$(grep -n -- "--move\|--resize" "${LOG}" | tail -1 | cut -d: -f1)"
 stop_yabai="$(grep -n -- "yabai --stop-service" "${LOG}" | cut -d: -f1)"
 [ "${last_move}" -lt "${stop_yabai}" ] || fail "windows were moved after yabai was stopped"
 [ "$(tail -1 "${LOG}")" = "skhd --stop-service" ] || fail "skhd was not stopped last (the key's own process runs under it)"
-say "off: windows from the last on put back (floated first, new and minimised ones left), both services disabled and stopped, skhd last"
+say "off: every window floated first, then the last on's windows put back and newer ones kept at their tile, minimised ones left, both services disabled and stopped, skhd last"
 
 : > "${LOG}"; : > "${RUNNING}"
 out="$("${G}" off)"
@@ -131,4 +137,11 @@ say "the key: skhd switches off, Hammerspoon switches on"
 dups="$(sed -n 's/^\([a-z_][a-z0-9_]*\)() {.*/\1/p' "${G}" | sort | uniq -d)"
 [ -z "${dups}" ] || fail "bin/gallery defines these functions twice: ${dups}"
 say "no function in bin/gallery is defined twice"
+# Run from Hammerspoon's key (or skhd's), plain `pgrep -x` cannot see its own
+# parent: the on/off code must ask with -a.
+sed -n '/^# --- off \/ on/,/^cmd_reload/p' "${G}" | grep -q 'pgrep -xq' \
+  && fail "the off/on code uses pgrep without -a (blind to its own parent process)"
+grep -q 'off and "on" or "off"' "${REPO_ROOT}/Gallery.spoon/init.lua" \
+  || fail "the Hammerspoon key does not decide on or off from the state file"
+say "pgrep -a in the off/on code; the Hammerspoon key follows the state file"
 say "PASS offon_test.sh"
