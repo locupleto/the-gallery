@@ -1,6 +1,8 @@
 # The Gallery
 
 **An Omarchy-style tiled desktop for macOS, and a fine place to run your coding agents.**
+A simple way for Mac users to get much of the Omarchy experience on top of
+macOS, without the hassle of running Linux in a virtual machine.
 
 [Omarchy](https://omarchy.org) is David Heinemeier Hansson's take on what a
 desktop should be: Arch Linux and Hyprland, set up so that windows tile
@@ -560,4 +562,6 @@ list.
 
 MIT; see `LICENSE`. The Omarchy theme colours and QML components, the Radio
 Atlas helper scripts under `patches/` and the Meteocons weather icons are MIT
-licensed by their authors; their notices are in `THIRD_PARTY_NOTICES.md`.
+licensed by their authors; their notices are in `THIRD_PARTY_NOTICES.md`,
+which also covers the Omarchy wallpapers seen in the screenshots (not
+included in this repository).
