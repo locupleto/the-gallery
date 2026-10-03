@@ -894,12 +894,14 @@ the gaps smaller", "add a key that opens Spotify", "make a darker copy of
 this theme", "put Obsidian on my second display".
 
 The installer copies the skill to `~/.config/gallery/agents/skills/gallery/`
-and links it into the skills folder of every agent set up on the Mac:
-`~/.claude/skills` (Claude Code), `~/.codex/skills`, `~/.gemini/skills`,
-`~/.copilot/skills`, and the shared `~/.agents/skills`. It adds only a link
-named `gallery`, never changes an agent's settings, and leaves a skill of
-yours with that name alone. Uninstalling removes the links. An agent you set
-up after installing gets the link at the next `./install.sh`.
+and links it into two places: the shared `~/.agents/skills`, which Codex,
+Gemini CLI, Copilot CLI, opencode and crush all read, and
+`~/.claude/skills` for Claude Code, which reads only its own folder (made
+only if Claude Code is set up; a Claude Code you set up later gets the link
+at the next `./install.sh`). One link per agent on purpose: an agent that
+finds the same skill in two of its folders may list it twice. It adds only a
+link named `gallery`, never changes an agent's settings, and leaves a skill
+of yours with that name alone. Uninstalling removes the links.
 
 Treat it as you would any agent change: ask it to show its plan first, and
 check what it did. `gallery doctor` and the file's backup (or `git` for your

@@ -339,8 +339,8 @@ plugins, the coding agent and sheets.
 Or ask your coding agent: "make the gaps between windows smaller", "put
 Spotify on super + p". Like Omarchy, the Gallery ships an agent skill that
 tells the agent where each setting lives and how to apply it safely; the
-installer links it into the skills folders of Claude Code, Codex, Gemini and
-Copilot, and `~/.agents/skills`
+installer links it into `~/.agents/skills`, which Codex, Gemini CLI, Copilot
+CLI, opencode and crush read, and into Claude Code's `~/.claude/skills`
 ([more](docs/CUSTOMIZING.md#let-your-agent-do-it)).
 
 ## Tiling and hotkeys

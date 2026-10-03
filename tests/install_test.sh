@@ -458,19 +458,22 @@ say "F: ~/Work removed only when the agent made it and it is still empty"
 
 say "scenario G: the agent skill"
 new_home homeG
+SK="${HOME_DIR}/.config/gallery/agents/skills/gallery"
 # Claude Code is set up (with a skill of the user's), Codex too but with a
-# "gallery" skill of the user's own; Gemini and Copilot are not set up.
-mkdir -p "${HOME_DIR}/.claude/skills/my-skill" "${HOME_DIR}/.codex/skills/gallery"
+# "gallery" skill of the user's own in its old folder. The first version of
+# the installer had also linked ~/.gemini/skills (a folder it created).
+mkdir -p "${HOME_DIR}/.claude/skills/my-skill" "${HOME_DIR}/.codex/skills/gallery" "${HOME_DIR}/.gemini/skills" "${HOME_DIR}/.config/gallery/state"
 echo mine > "${HOME_DIR}/.codex/skills/gallery/SKILL.md"
+ln -s "${SK}" "${HOME_DIR}/.gemini/skills/gallery"
+echo "${HOME_DIR}/.gemini/skills" > "${HOME_DIR}/.config/gallery/state/agent-skill-dirs-created"
 out="$("${INSTALL}" --minimal 2>&1)" || { echo "${out}" >&2; fail "G: install failed"; }
-assert_file "${HOME_DIR}/.config/gallery/agents/skills/gallery/SKILL.md" "G installed skill"
-[ "$(readlink "${HOME_DIR}/.claude/skills/gallery")" = "${HOME_DIR}/.config/gallery/agents/skills/gallery" ] || fail "G: no link for Claude Code"
-[ "$(readlink "${HOME_DIR}/.agents/skills/gallery")" = "${HOME_DIR}/.config/gallery/agents/skills/gallery" ] || fail "G: no link in ~/.agents"
-[ -L "${HOME_DIR}/.codex/skills/gallery" ] && fail "G: replaced the user's own gallery skill"
-[ "$(cat "${HOME_DIR}/.codex/skills/gallery/SKILL.md")" = mine ] || fail "G: the user's skill was changed"
-assert_gone "${HOME_DIR}/.gemini" "G no Gemini folder made"
+assert_file "${SK}/SKILL.md" "G installed skill"
+[ "$(readlink "${HOME_DIR}/.claude/skills/gallery")" = "${SK}" ] || fail "G: no link for Claude Code"
+[ "$(readlink "${HOME_DIR}/.agents/skills/gallery")" = "${SK}" ] || fail "G: no link in ~/.agents"
+[ "$(cat "${HOME_DIR}/.codex/skills/gallery/SKILL.md")" = mine ] || fail "G: the user's codex skill was changed"
+assert_gone "${HOME_DIR}/.gemini/skills" "G the old Gemini link and the folder made for it"
+assert_file "${HOME_DIR}/.gemini" "G the Gemini folder itself"
 assert_gone "${HOME_DIR}/.copilot" "G no Copilot folder made"
-assert_contains "${out}" "is not the Gallery's; leaving it" "G says it left the user's skill"
 "${INSTALL}" --minimal >/dev/null 2>&1 || fail "G: reinstall failed"
 [ "$(sort "${HOME_DIR}/.config/gallery/state/agent-skill-dirs-created" | uniq -d)" = "" ] || fail "G: reinstall recorded a folder twice"
 "${INSTALL}" --uninstall >/dev/null 2>&1 || fail "G: uninstall failed"
@@ -478,6 +481,13 @@ assert_gone "${HOME_DIR}/.claude/skills/gallery" "G Claude link"
 assert_gone "${HOME_DIR}/.agents" "G the ~/.agents the installer made"
 assert_file "${HOME_DIR}/.claude/skills/my-skill" "G the user's other skill"
 assert_file "${HOME_DIR}/.codex/skills/gallery/SKILL.md" "G the user's own gallery skill"
-say "G: skill linked where agents are set up, the user's own left alone, links and made folders removed on uninstall"
+# A "gallery" entry of the user's in a folder the installer links into stays.
+mkdir -p "${HOME_DIR}/.agents/skills/gallery"; echo theirs > "${HOME_DIR}/.agents/skills/gallery/SKILL.md"
+out="$("${INSTALL}" --minimal 2>&1)" || fail "G: install over a user's skill failed"
+assert_contains "${out}" "is not the Gallery's; leaving it" "G says it left the user's skill"
+[ "$(cat "${HOME_DIR}/.agents/skills/gallery/SKILL.md")" = theirs ] || fail "G: replaced the user's own gallery skill"
+"${INSTALL}" --uninstall >/dev/null 2>&1 || fail "G: last uninstall failed"
+assert_file "${HOME_DIR}/.agents/skills/gallery/SKILL.md" "G the user's skill after uninstall"
+say "G: skill linked into ~/.agents and ~/.claude, old links cleaned up, the user's own left alone, removed on uninstall"
 
 say "all install tests passed"

@@ -54,17 +54,22 @@ QML_DEST="${CONFIG_DIR}/qml"
 PATCHES_SRC="${SCRIPT_DIR}/patches"
 PATCHES_DEST="${CONFIG_DIR}/patches"
 # The end-user agent skill (agents/skills/gallery), installed here and linked
-# into each agent's skills folder, the way Omarchy links its own skill. The
+# into the agents' skills folders, the way Omarchy links its own skill. The
 # list is "<agent folder>|<its skills folder>"; a link is made only where the
-# agent folder exists, except for the generic ~/.agents.
+# agent folder exists, except for the shared ~/.agents. Codex, Gemini CLI,
+# Copilot CLI, opencode and crush all read ~/.agents/skills; Claude Code
+# reads only ~/.claude/skills. One link per agent: Codex lists a skill found
+# in two of its folders twice.
 SKILL_SRC="${SCRIPT_DIR}/agents/skills/gallery"
 SKILL_DEST="${CONFIG_DIR}/agents/skills/gallery"
 SKILL_DIRS_RECORD="${CONFIG_DIR}/state/agent-skill-dirs-created"
 AGENT_SKILL_DIRS="${HOME_DIR}/.agents|${HOME_DIR}/.agents/skills
-${HOME_DIR}/.claude|${HOME_DIR}/.claude/skills
-${HOME_DIR}/.codex|${HOME_DIR}/.codex/skills
-${HOME_DIR}/.gemini|${HOME_DIR}/.gemini/skills
-${HOME_DIR}/.copilot|${HOME_DIR}/.copilot/skills"
+${HOME_DIR}/.claude|${HOME_DIR}/.claude/skills"
+# Linked by the first version (3acb468) and redundant with ~/.agents: their
+# links are removed by every install and uninstall.
+OLD_SKILL_DIRS="${HOME_DIR}/.codex/skills
+${HOME_DIR}/.gemini/skills
+${HOME_DIR}/.copilot/skills"
 OMARCHY_THEME_LINK="${HOME_DIR}/.config/omarchy/current/theme"
 OMARCHY_STATE_THEME_LINK="${HOME_DIR}/.local/state/omarchy/current/theme"
 # The iTerm2 settings bin/gallery takes while the console follows the theme
@@ -395,17 +400,39 @@ uninstall_agent_work_dir() {
   run rm -f "${mark}"
 }
 
+# A link of ours in <skills folder>, if there is one.
+remove_skill_link() {
+  local link="$1/gallery"
+  if [ -L "${link}" ] && [ "$(readlink "${link}")" = "${SKILL_DEST}" ]; then
+    run rm -f "${link}"
+    gl_note removed "${link} (the agent skill link)"
+  fi
+}
+
+# The links the first version made in folders now covered by ~/.agents, and
+# those folders while empty if it created them.
+remove_old_skill_links() {
+  local d
+  while IFS= read -r d; do
+    remove_skill_link "${d}"
+    if [ -f "${SKILL_DIRS_RECORD}" ] && grep -qxF "${d}" "${SKILL_DIRS_RECORD}"; then
+      gl_rmdir_empty "${d}"
+      if [ ! -d "${d}" ] && [ "${DRY_RUN}" -ne 1 ]; then
+        grep -vxF "${d}" "${SKILL_DIRS_RECORD}" > "${SKILL_DIRS_RECORD}.new" || true
+        mv -f "${SKILL_DIRS_RECORD}.new" "${SKILL_DIRS_RECORD}"
+      fi
+    fi
+  done <<< "${OLD_SKILL_DIRS}"
+}
+
 # The agent skill's links, only those pointing at the Gallery's copy, and the
 # skills folders the installer created for them while they are empty.
 uninstall_agent_skill() {
-  local agent_dir skills_dir link d
+  local agent_dir skills_dir d
   while IFS='|' read -r agent_dir skills_dir; do
-    link="${skills_dir}/gallery"
-    if [ -L "${link}" ] && [ "$(readlink "${link}")" = "${SKILL_DEST}" ]; then
-      run rm -f "${link}"
-      gl_note removed "${link} (the agent skill link)"
-    fi
+    remove_skill_link "${skills_dir}"
   done <<< "${AGENT_SKILL_DIRS}"
+  remove_old_skill_links
   if [ -f "${SKILL_DIRS_RECORD}" ]; then
     # Deepest first: a skills folder before the agent folder made for it.
     while IFS= read -r d; do
@@ -781,6 +808,7 @@ if [ -d "${SKILL_SRC}" ]; then
     linked+=" ~${skills_dir#"${HOME_DIR}"}"
   done <<< "${AGENT_SKILL_DIRS}"
   [ -z "${linked}" ] || echo "[gallery] agent skill 'gallery' linked into:${linked}"
+  remove_old_skill_links
 fi
 
 if [ ! -e "${THEMES_DEST}/current" ]; then
