@@ -2304,11 +2304,15 @@ cmd_console_status() {
   default_guid="$(defaults read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)"
   if [ "${default_guid}" = "gallery-console" ]; then
     echo "default profile: Console (ok)"
+  elif [ "$(console_read_key iterm_default_pending 2>/dev/null || true)" = take ]; then
+    echo "default profile: Console, and the Minimal window style, from when you next quit iTerm2"
   else
     echo "default profile: not Console -- in iTerm2: Settings > Profiles > Console > Other Actions > Set as Default (one-time)"
   fi
   if [ "$(iterm_pref read com.googlecode.iterm2 TabStyleWithAutomaticOption 2>/dev/null || true)" = 5 ]; then
     echo "window style: Minimal (ok, the title bar follows the theme)"
+  elif [ "$(console_read_key iterm_default_pending 2>/dev/null || true)" = take ]; then
+    :
   else
     echo "window style: not Minimal -- the title bar follows the system's light or dark look (gallery console theme sets it once iTerm2 is quit)"
   fi
