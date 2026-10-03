@@ -393,7 +393,7 @@ if v is not None:
       undo_text+="defaults write com.googlecode.iterm2 '${key}' -${type} '${before}'; "
     fi
   done <<< "${ITERM_TAKEN_PREFS}"
-  if [ -n "${undo_cmds}" ] && pgrep -u "$(id -u)" -xq iTerm2; then
+  if [ -n "${undo_cmds}" ] && pgrep -u "$(id -u)" -axq iTerm2; then
     # A running iTerm2 would put its settings straight back: a small
     # background job makes the change once iTerm2 has quit, then removes the
     # Console profile. It does not survive a logout; the note says how.
@@ -404,7 +404,7 @@ if v is not None:
       waiter="$(mktemp "${TMPDIR:-/tmp}/gallery-iterm-giveback.XXXXXX")"
       {
         echo '#!/bin/bash'
-        echo 'while pgrep -u "$(id -u)" -xq iTerm2; do sleep 2; done'
+        echo 'while pgrep -u "$(id -u)" -axq iTerm2; do sleep 2; done'
         printf '%s' "${undo_cmds}"
         printf 'rm -f %q\n' "${dir}/gallery-console.json"
         printf 'rmdir %q 2>/dev/null\n' "${dir}"
@@ -562,12 +562,12 @@ EOF
   # Hammerspoon still has the Gallery loaded: its services and widgets keep
   # running (and writing ~/.config/gallery) until it restarts. Quit it, and
   # start it again only for a config of the user's own.
-  if pgrep -u "$(id -u)" -xq Hammerspoon; then
+  if pgrep -u "$(id -u)" -axq Hammerspoon; then
     if [ "${DRY_RUN}" -eq 1 ]; then
       echo "[dry] quit Hammerspoon (and reopen it if ~/.hammerspoon/init.lua remains)"
     else
       osascript -e 'tell application id "org.hammerspoon.Hammerspoon" to quit' >/dev/null 2>&1 || true
-      for _i in 1 2 3 4 5; do pgrep -u "$(id -u)" -xq Hammerspoon || break; sleep 1; done
+      for _i in 1 2 3 4 5; do pgrep -u "$(id -u)" -axq Hammerspoon || break; sleep 1; done
       pkill -u "$(id -u)" -x Hammerspoon 2>/dev/null || true
       if [ -f "${HOME_DIR}/.hammerspoon/init.lua" ]; then
         open -a Hammerspoon >/dev/null 2>&1 || true
@@ -869,7 +869,7 @@ fi
 # skhd is asked to reload if it is running, so a change to this file alone takes
 # effect without a restart.
 if [ -d "${SKHD_DIR}" ]; then
-  if pgrep -u "$(id -u)" -xq skhd; then
+  if pgrep -u "$(id -u)" -axq skhd; then
     if [ "${DRY_RUN}" -eq 1 ]; then
       echo "[dry] skhd --reload"
     else
@@ -971,7 +971,7 @@ else
   else
     echo "[gallery] theme render failed; run 'gallery theme render' by hand" >&2
   fi
-  if pgrep -u "$(id -u)" -xq borders && [ -x "${BORDERS_BIN_DEST}" ]; then
+  if pgrep -u "$(id -u)" -axq borders && [ -x "${BORDERS_BIN_DEST}" ]; then
     "${BORDERS_BIN_DEST}" apply >/dev/null 2>&1 && echo "[gallery] borders re-synced to the rendered theme" || true
   fi
 fi
@@ -985,7 +985,7 @@ READY="${CONFIG_DIR}/state/ready"
 stamp_fresh() { [ -f "${READY}" ] && [ "$(cut -d' ' -f1 "${READY}")" -ge "${INSTALL_EPOCH}" ]; }
 if [ "${DRY_RUN}" -eq 1 ]; then
   echo "[dry] wait for the Gallery ready stamp, else reload or relaunch Hammerspoon"
-elif ! pgrep -u "$(id -u)" -x "Hammerspoon" >/dev/null 2>&1; then
+elif ! pgrep -u "$(id -u)" -ax "Hammerspoon" >/dev/null 2>&1; then
   run open -g -a Hammerspoon
   echo "[gallery] Hammerspoon started"
 else

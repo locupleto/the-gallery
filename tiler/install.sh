@@ -100,7 +100,7 @@ if [ "$UNINSTALL" = 1 ]; then
     done
     # JankyBorders is started from yabairc, outside launchd. Leave it alone if
     # the user runs it as a brew service of their own.
-    if pgrep -u "$(id -u)" -xq borders; then
+    if pgrep -u "$(id -u)" -axq borders; then
         if command -v brew >/dev/null && brew services list 2>/dev/null | awk '$1 == "borders" && $2 != "none" { found = 1 } END { exit !found }'; then
             echo "[tiler] borders is registered as a brew service; leaving it running"
             gl_note kept "borders (a brew service of yours)"
@@ -171,7 +171,7 @@ if [ "$mru" != 0 ]; then
     echo "[tiler] WARNING: 'Automatically rearrange Spaces based on most recent use'"
     echo "        is ON. Turn it OFF or Space numbers will drift under you."
 fi
-if pgrep -u "$(id -u)" -xq Magnet || pgrep -u "$(id -u)" -xq Rectangle; then
+if pgrep -u "$(id -u)" -axq Magnet || pgrep -u "$(id -u)" -axq Rectangle; then
     echo "[tiler] WARNING: another window manager (Magnet/Rectangle) is running; quit it."
 fi
 
@@ -269,7 +269,7 @@ for f in yabai skhd; do
         skhd)  before="$skhd_before";  after="$(effective skhdrc)$(effective tiler.skhd)" ;;
     esac
     if [ "$DRY" = 1 ]; then echo "[dry] $f --restart-service if config changed (or --start-service)"; continue; fi
-    if ! pgrep -u "$(id -u)" -xq "$f"; then
+    if ! pgrep -u "$(id -u)" -axq "$f"; then
         "$f" --start-service && echo "[tiler] $f service started"
     elif [ "$RESTART" = 1 ] || [ "$before" != "$after" ]; then
         if [ "$f" = "yabai" ]; then

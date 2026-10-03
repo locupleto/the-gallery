@@ -152,4 +152,12 @@ unscoped="$(cd "${REPO_ROOT}" && grep -n 'pgrep -' bin/gallery bin/gallery-borde
   | grep -v -E '^[^:]+:[0-9]+: *#' | grep -v 'pgrep -u "\$(id -u)"' || true)"
 [ -z "${unscoped}" ] || fail "pgrep not scoped to the current user: ${unscoped}"
 say "every pgrep is scoped to the current user"
+# And every lookup asks with -a: macOS pgrep leaves out the caller's own
+# ancestors, so an install run from an iTerm2 window could not see iTerm2,
+# nor a command run from Hammerspoon or skhd see those.
+blind="$(cd "${REPO_ROOT}" && grep -n 'pgrep -u "\$(id -u)" -[^a ]*[ ]' bin/gallery bin/gallery-borders bin/gallery-term install.sh tiler/install.sh tiler/tiler.skhd \
+  | grep -v -E '^[^:]+:[0-9]+: *#' || true)"
+blind_py="$(grep -n '"pgrep", "-u", str(os.getuid()), "-[^a"]*"' "${REPO_ROOT}/tools/render-theme.py" || true)"
+[ -z "${blind}${blind_py}" ] || fail "pgrep without -a (blind to the caller's own parents): ${blind}${blind_py}"
+say "every pgrep sees the caller's own parents (-a)"
 say "PASS offon_test.sh"

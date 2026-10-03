@@ -1930,7 +1930,7 @@ iterm_pref() {
 iterm_default_read() { iterm_pref read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true; }
 iterm_running() {
   if [ -n "${GALLERY_ITERM_RUNNING+x}" ]; then [ "${GALLERY_ITERM_RUNNING}" = 1 ]; return; fi
-  pgrep -u "$(id -u)" -xq iTerm2
+  pgrep -u "$(id -u)" -axq iTerm2
 }
 
 # iterm_default_change take|give -- make the change now, or queue it while
@@ -4231,7 +4231,7 @@ cmd_doctor() {
     ok=0
   fi
 
-  if pgrep -u "$(id -u)" -x "Hammerspoon" >/dev/null 2>&1; then
+  if pgrep -u "$(id -u)" -ax "Hammerspoon" >/dev/null 2>&1; then
     echo "OK      Hammerspoon running"
   else
     echo "MISSING Hammerspoon running"
@@ -4372,7 +4372,7 @@ cmd_doctor() {
     ok=0
   fi
 
-  if pgrep -u "$(id -u)" -xq yabai; then
+  if pgrep -u "$(id -u)" -axq yabai; then
     echo "OK      yabai running"
   elif [ -f "${PAUSED_FILE}" ]; then
     echo "OFF     yabai stopped (gallery off)"
@@ -4388,7 +4388,7 @@ cmd_doctor() {
     ok=0
   fi
 
-  if pgrep -u "$(id -u)" -xq skhd; then
+  if pgrep -u "$(id -u)" -axq skhd; then
     echo "OK      skhd running"
   elif [ -f "${PAUSED_FILE}" ]; then
     echo "OFF     skhd stopped (gallery off)"
@@ -4411,7 +4411,7 @@ cmd_doctor() {
     echo "WARN    ${HOME}/.config/skhd/browser-window (super+b) missing (run tiler/install.sh)"
   fi
 
-  if pgrep -u "$(id -u)" -x skhd >/dev/null 2>&1 \
+  if pgrep -u "$(id -u)" -ax skhd >/dev/null 2>&1 \
     && grep -q '\.load "gallery\.skhd"' "${HOME}/.config/skhd/skhdrc" 2>/dev/null \
     && [ -f "${HOME}/.config/skhd/gallery.skhd" ]; then
     echo "OK      skhd running with gallery.skhd loaded"
@@ -4471,7 +4471,7 @@ else:
 
   # The focus outline: JankyBorders, or (before macOS 14) the Spoon's own.
   if [ -x /opt/homebrew/bin/borders ] || [ -x /usr/local/bin/borders ]; then
-    if pgrep -u "$(id -u)" -xq borders; then
+    if pgrep -u "$(id -u)" -axq borders; then
       echo "OK      focus outline (JankyBorders running)"
     elif [ ! -f "${PAUSED_FILE}" ]; then
       echo "WARN    focus outline (JankyBorders installed but not running; gallery-borders apply starts it)"
@@ -4676,7 +4676,7 @@ case "${command}" in
     ;;
   _snapshot)
     # install.sh, before the tiler first starts yabai: what a later off restores.
-    pgrep -u "$(id -u)" -xq yabai || snapshot_windows
+    pgrep -u "$(id -u)" -axq yabai || snapshot_windows
     ;;
   reload)
     cmd_reload

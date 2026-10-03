@@ -145,7 +145,7 @@ to_argb() {
 }
 
 borders_pid() {
-  pgrep -u "$(id -u)" -x borders 2>/dev/null | head -1 || true
+  pgrep -u "$(id -u)" -ax borders 2>/dev/null | head -1 || true
 }
 
 # resolve_border_style -- prints five lines: active colour expression,
@@ -200,7 +200,7 @@ launch_detached() {
 # Hammerspoon is not running.
 outline_call() {
   local hs_wrapper="${HOME}/bin/gallery-hs"
-  if [ ! -x "${hs_wrapper}" ] || ! pgrep -u "$(id -u)" -xq Hammerspoon; then
+  if [ ! -x "${hs_wrapper}" ] || ! pgrep -u "$(id -u)" -axq Hammerspoon; then
     echo "Hammerspoon is not running"
     return 1
   fi
