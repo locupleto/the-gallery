@@ -183,17 +183,34 @@ run() {
 # One of the four supported terminals must be installed: every Gallery window
 # (Learn, the pickers, super+return, the agent) opens in it. Apple's Terminal
 # cannot carry the per-window theme, title and live recolouring the Gallery
-# relies on. Without one the install would finish and every such key would do
-# nothing, so stop before anything is copied. bin/gallery-term owns what
-# "installed" means (it also honours GALLERY_TERM_APP_DIRS).
-require_terminal() {
+# relies on. With none of the four, iTerm2 -- the most tested, and the default
+# whenever it is installed -- is brewed like the other tools; only if that
+# fails does the install stop, before anything is copied. bin/gallery-term
+# owns what "installed" means (it also honours GALLERY_TERM_APP_DIRS).
+any_terminal_installed() {
   local t
   for t in iterm2 ghostty kitty wezterm; do
     "${SCRIPT_DIR}/bin/gallery-term" installed "${t}" 2>/dev/null && return 0
   done
-  echo "[gallery] no supported terminal found: the Gallery opens its windows in iTerm2, Ghostty, kitty or WezTerm (Apple's Terminal is not supported)" >&2
-  echo "[gallery] install iTerm2, the most tested one, with: brew install --cask iterm2" >&2
-  echo "[gallery] (or: brew install --cask ghostty | kitty | wezterm), then run ./install.sh again" >&2
+  return 1
+}
+
+ensure_terminal() {
+  any_terminal_installed && return 0
+  echo "[gallery] no supported terminal found (iTerm2, Ghostty, kitty or WezTerm; Apple's Terminal is not supported): installing iTerm2"
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    echo "[dry] brew install --cask iterm2"
+    return 0
+  fi
+  if command -v brew >/dev/null 2>&1 && brew install --cask iterm2 && any_terminal_installed; then
+    mkdir -p "${CONFIG_DIR}/state"
+    : > "${CONFIG_DIR}/state/iterm2-installed-by-gallery"
+    echo "[gallery] iTerm2 installed. Prefer another terminal? brew install --cask ghostty (or kitty, wezterm),"
+    echo "[gallery]   then: gallery terminal set ghostty; and brew uninstall --cask iterm2 if you no longer want it"
+    return 0
+  fi
+  echo "[gallery] could not install iTerm2. Install a terminal yourself, then run ./install.sh again:" >&2
+  echo "[gallery]   brew install --cask iterm2     (or ghostty, kitty, wezterm)" >&2
   exit 1
 }
 
@@ -504,6 +521,10 @@ EOF
     fi
   fi
 
+  # Read before --purge deletes it: whether the install added iTerm2.
+  local iterm2_ours=0
+  [ -f "${CONFIG_DIR}/state/iterm2-installed-by-gallery" ] && iterm2_ours=1
+
   # Hammerspoon still has the Gallery loaded: its services and widgets keep
   # running (and writing ~/.config/gallery) until it restarts. Quit it, and
   # start it again only for a config of the user's own.
@@ -531,6 +552,9 @@ EOF
     gl_note kept "${CONFIG_DIR} (your state; --purge deletes it)"
   fi
   gl_note kept "the Homebrew formulae installed for the Gallery (yabai, skhd, borders, fzf, glow, btop, superfile): brew uninstall them if you want"
+  if [ "${iterm2_ours}" -eq 1 ]; then
+    gl_note kept "iTerm2, which the install added because no terminal was present: brew uninstall --cask iterm2 if you want"
+  fi
 
   echo "[gallery] uninstall complete"
   gl_summary
@@ -542,8 +566,8 @@ if [ "${UNINSTALL}" -eq 1 ]; then
 fi
 
 require_hammerspoon
-require_terminal
 require_homebrew
+ensure_terminal
 install_jq
 install_companion_apps
 advise_optional_tools

@@ -51,6 +51,11 @@ EOF
 cat > "${STUBS}/brew" <<EOF
 #!/bin/sh
 echo "brew \$*" >> "${STUB_LOG}"
+case "\$1 \$2 \$3" in
+  "install --cask iterm2")
+    [ -n "\${STUB_BREW_FAIL_CASK:-}" ] && exit 1
+    mkdir -p "\${GALLERY_TERM_APP_DIRS}/iTerm.app"; exit 0 ;;
+esac
 case "\$1 \$2" in
   "list --formula") exit 0 ;;
   "list --versions") echo "\$3 1.0"; exit 0 ;;
@@ -379,13 +384,21 @@ say "D: companion apps are only touched when installed; originals are recorded o
 say "scenario E: only Apple's Terminal"
 new_home homeE
 mkdir -p "${WORK_DIR}/noterm-apps"
+# iTerm2 cannot be installed (offline, a password prompt): stop, untouched.
 before="$(cd "${HOME_DIR}" && find . | sort)"
-if out="$(GALLERY_TERM_APP_DIRS="${WORK_DIR}/noterm-apps" "${INSTALL}" --minimal 2>&1)"; then
-  fail "E: the install went ahead without a supported terminal"
+if out="$(STUB_BREW_FAIL_CASK=1 GALLERY_TERM_APP_DIRS="${WORK_DIR}/noterm-apps" "${INSTALL}" --minimal 2>&1)"; then
+  fail "E: the install went ahead without a terminal"
 fi
-assert_contains "${out}" "no supported terminal found" "E names the problem"
-assert_contains "${out}" "brew install --cask iterm2" "E recommends iTerm2"
-[ "$(cd "${HOME_DIR}" && find . | sort)" = "${before}" ] || fail "E: files changed before the terminal check stopped the install"
-say "E: stops before touching anything, and recommends iTerm2"
+assert_contains "${out}" "could not install iTerm2" "E names the problem"
+assert_contains "${out}" "brew install --cask iterm2" "E says how to fix it"
+[ "$(cd "${HOME_DIR}" && find . | sort)" = "${before}" ] || fail "E: files changed before the install stopped"
+# The normal case: iTerm2 is brewed like the other tools and the install goes on.
+: > "${STUB_LOG}"
+out="$(GALLERY_TERM_APP_DIRS="${WORK_DIR}/noterm-apps" "${INSTALL}" --minimal 2>&1)" || { echo "${out}" >&2; fail "E: install with iTerm2 brewed failed"; }
+assert_contains "$(cat "${STUB_LOG}")" "brew install --cask iterm2" "E brews iTerm2"
+assert_contains "${out}" "iTerm2 installed" "E says it installed iTerm2"
+out="$(GALLERY_TERM_APP_DIRS="${WORK_DIR}/noterm-apps" "${INSTALL}" --uninstall --purge --yes 2>&1)" || fail "E: uninstall failed"
+assert_contains "${out}" "brew uninstall --cask iterm2 if you want" "E's uninstall mentions the iTerm2 it added"
+say "E: iTerm2 brewed when no terminal is present; stops untouched if that fails; uninstall mentions it"
 
 say "all install tests passed"

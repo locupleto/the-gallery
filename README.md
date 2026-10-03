@@ -31,9 +31,10 @@ the Mac you already have.
   unmodified Omarchy QML plugins such as Radio Atlas.
 
 **Try it without committing.** Getting in, trying it and getting out again
-are each one command. You need [Homebrew](https://brew.sh), Hammerspoon and
-one of iTerm2 (recommended), Ghostty, kitty or WezTerm first; Apple's
-Terminal is not enough (see [Prerequisites](#prerequisites)):
+are each one command. You need [Homebrew](https://brew.sh) and Hammerspoon
+first. The Gallery's windows open in iTerm2 (recommended), Ghostty, kitty or
+WezTerm, not Apple's Terminal; if you have none of them, the installer adds
+iTerm2 (see [Prerequisites](#prerequisites)):
 
 ```sh
 git clone https://github.com/locupleto/the-gallery && cd the-gallery
@@ -277,7 +278,7 @@ runs on macOS 12 Monterey and later, on Apple silicon and Intel alike:
 | Prerequisite | How | Why |
 |---|---|---|
 | **Homebrew** | [brew.sh](https://brew.sh) | the installer brews everything else; it stops up front if `brew` is missing |
-| A terminal: iTerm2, Ghostty, kitty or WezTerm | `brew install --cask iterm2` (or `ghostty`, `kitty`, `wezterm`) | every floating TUI window, Learn, `super+return` and the agent window open in it; iTerm2 is the most tested and the default whenever it is installed. Apple's Terminal is not supported, and the installer stops if none of the four is installed. See Terminals |
+| A terminal: iTerm2, Ghostty, kitty or WezTerm | `brew install --cask iterm2` (or `ghostty`, `kitty`, `wezterm`) | every floating TUI window, Learn, `super+return` and the agent window open in it; iTerm2 is the most tested and the default whenever it is installed. Apple's Terminal is not supported; with none of the four installed, the installer brews iTerm2. See Terminals |
 | Hammerspoon | `brew install --cask hammerspoon` | the plugin host (the installer refuses to run without Hammerspoon.app) |
 | *Optional:* a folder of markdown sheets | — | the Learn menu reads them; Obsidian is not required (see Learn) |
 | *Optional:* a coding agent | `brew install --cask claude-code` (or Codex, Gemini, opencode, ...) | the agent key, shift + ctrl + super + a; see `gallery agent list` |
