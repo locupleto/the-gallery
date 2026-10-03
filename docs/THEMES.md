@@ -324,7 +324,7 @@ own for every theme that has none yet (`--no-wallpapers` skips that), and
 the same script it uses can be run by hand:
 
 ```sh
-tools/fetch-omarchy-backgrounds.sh <theme-name>      # one vendored theme
+tools/fetch-omarchy-backgrounds.sh <theme-name>...   # one or more vendored themes
 tools/fetch-omarchy-backgrounds.sh --all [--force]   # every vendored theme
 ```
 

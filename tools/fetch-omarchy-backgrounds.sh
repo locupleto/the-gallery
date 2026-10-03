@@ -13,9 +13,10 @@
 # to pull the matching wallpapers onto a given machine.
 #
 # Usage:
-#   fetch-omarchy-backgrounds.sh <theme-name>|--all [--force]
+#   fetch-omarchy-backgrounds.sh <theme-name>...|--all [--force]
 #
-#   <theme-name>  one theme already present under themes/<name>/ in this repo
+#   <theme-name>  one or more themes already present under themes/<name>/ in
+#                 this repo
 #   --all         fetch backgrounds for every vendored theme
 #   --force       re-download files that already exist locally (default:
 #                 skip files already present)
@@ -25,6 +26,12 @@
 # ref is pinned there, so none is pinned here either -- both scripts always
 # fetch from whatever is current upstream). curl only, no git clone of the
 # whole upstream repo.
+#
+# GitHub allows 60 API requests an hour without signing in. Upstream is
+# resolved with three of them, once per run however many themes are asked
+# for; the images themselves come from raw.githubusercontent.com, which is
+# not counted. (Run once per theme, a first install of every theme needed
+# 66 and ran out.)
 #
 set -euo pipefail
 
@@ -39,34 +46,59 @@ command -v curl >/dev/null 2>&1 || { echo "fetch-omarchy-backgrounds: curl not f
 command -v python3 >/dev/null 2>&1 || { echo "fetch-omarchy-backgrounds: python3 not found" >&2; exit 1; }
 
 usage() {
-  echo "usage: fetch-omarchy-backgrounds.sh <theme-name>|--all [--force]" >&2
+  echo "usage: fetch-omarchy-backgrounds.sh <theme-name>...|--all [--force]" >&2
   exit 1
 }
 
 [ "$#" -ge 1 ] || usage
 
 FORCE=0
-TARGET=""
+ALL=0
+TARGETS=()
 for arg in "$@"; do
   case "${arg}" in
     --force)
       FORCE=1
       ;;
     --all)
-      TARGET="--all"
+      ALL=1
       ;;
     -*)
       usage
       ;;
     *)
-      if [ -n "${TARGET}" ] && [ "${TARGET}" != "--all" ]; then
-        usage
-      fi
-      [ "${TARGET}" = "--all" ] || TARGET="${arg}"
+      TARGETS+=("${arg}")
       ;;
   esac
 done
-[ -n "${TARGET}" ] || usage
+if [ "${ALL}" -eq 1 ]; then
+  [ "${#TARGETS[@]}" -eq 0 ] || usage
+  for dir in "${THEMES_DIR}"/*/; do
+    [ -d "${dir}" ] && TARGETS+=("$(basename "${dir}")")
+  done
+fi
+[ "${#TARGETS[@]}" -gt 0 ] || usage
+
+# api_failed <what> -- explain a failed API call, naming the rate limit when
+# that is the cause (asking for the limit is itself free).
+api_failed() {
+  local reset
+  reset="$(curl -s -m 10 https://api.github.com/rate_limit | python3 -c '
+import json, sys, time
+try:
+    c = json.load(sys.stdin)["resources"]["core"]
+except Exception:
+    sys.exit(0)
+if c.get("remaining", 1) == 0:
+    print(time.strftime("%H:%M", time.localtime(c["reset"])))
+' 2>/dev/null || true)"
+  if [ -n "${reset}" ]; then
+    echo "[fetch-bg] $1: GitHub's limit of 60 requests an hour for this address is used up; try again after ${reset}" >&2
+  else
+    echo "[fetch-bg] $1" >&2
+  fi
+  exit 1
+}
 
 SCRATCH="${TMPDIR:-/tmp}/fetch-omarchy-backgrounds.$$"
 mkdir -p "${SCRATCH}"
@@ -75,7 +107,7 @@ trap 'rm -rf "${SCRATCH}"' EXIT
 echo "[fetch-bg] resolving ${UPSTREAM_OWNER_REPO} repo metadata"
 REPO_JSON="${SCRATCH}/repo.json"
 curl -sf -m 20 -L "${API_ROOT}" -o "${REPO_JSON}" \
-  || { echo "[fetch-bg] could not reach GitHub API for repo metadata" >&2; exit 1; }
+  || api_failed "could not reach GitHub API for repo metadata"
 
 DEFAULT_BRANCH="$(python3 -c '
 import json, sys
@@ -95,7 +127,7 @@ RESOLVED_FULL_NAME="${RESOLVED_FULL_NAME:-${UPSTREAM_OWNER_REPO}}"
 echo "[fetch-bg] resolving latest commit on ${DEFAULT_BRANCH}"
 COMMIT_JSON="${SCRATCH}/commit.json"
 curl -sf -m 20 -L "${API_ROOT}/commits/${DEFAULT_BRANCH}" -o "${COMMIT_JSON}" \
-  || { echo "[fetch-bg] could not resolve latest commit" >&2; exit 1; }
+  || api_failed "could not resolve latest commit"
 COMMIT_SHA="$(python3 -c '
 import json, sys
 with open(sys.argv[1]) as f:
@@ -107,7 +139,7 @@ print(d.get("sha", ""))
 echo "[fetch-bg] listing full tree at ${COMMIT_SHA}"
 TREE_JSON="${SCRATCH}/tree.json"
 curl -sf -m 30 -L "${API_ROOT}/git/trees/${COMMIT_SHA}?recursive=1" -o "${TREE_JSON}" \
-  || { echo "[fetch-bg] could not list repo tree" >&2; exit 1; }
+  || api_failed "could not list repo tree"
 
 # list_backgrounds <theme-name> -- prints "path\tsize" lines (one per file)
 # for everything under themes/<name>/backgrounds/ in the tree, or nothing
@@ -169,14 +201,8 @@ fetch_theme_backgrounds() {
 }
 
 overall_failed=0
-if [ "${TARGET}" = "--all" ]; then
-  for dir in "${THEMES_DIR}"/*/; do
-    [ -d "${dir}" ] || continue
-    theme_name="$(basename "${dir}")"
-    fetch_theme_backgrounds "${theme_name}" || overall_failed=1
-  done
-else
-  fetch_theme_backgrounds "${TARGET}" || overall_failed=1
-fi
+for theme_name in "${TARGETS[@]}"; do
+  fetch_theme_backgrounds "${theme_name}" || overall_failed=1
+done
 
 exit "${overall_failed}"

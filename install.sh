@@ -517,15 +517,29 @@ else
   done
   if [ "${#missing[@]}" -gt 0 ]; then
     echo "[gallery] fetching Omarchy's wallpapers for ${#missing[@]} theme(s) from github.com/basecamp/omarchy"
-    for name in "${missing[@]}"; do
-      if [ "${DRY_RUN}" -eq 1 ]; then
-        echo "[dry] tools/fetch-omarchy-backgrounds.sh ${name}"
-      elif "${SCRIPT_DIR}/tools/fetch-omarchy-backgrounds.sh" "${name}" >/dev/null 2>&1; then
-        WALLPAPERS_FETCHED="${WALLPAPERS_FETCHED}${name} "
-      else
-        echo "[gallery] could not fetch the wallpapers for ${name}; later: tools/fetch-omarchy-backgrounds.sh ${name}" >&2
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      echo "[dry] tools/fetch-omarchy-backgrounds.sh ${missing[*]}"
+    else
+      # One run for all of them: upstream is resolved once (GitHub's API
+      # allows 60 requests an hour), and each theme reports its own result.
+      fetch_log="$(mktemp "${TMPDIR:-/tmp}/gallery-fetch.XXXXXX")"
+      "${SCRIPT_DIR}/tools/fetch-omarchy-backgrounds.sh" "${missing[@]}" > "${fetch_log}" 2>&1 || true
+      failed_names=()
+      for name in "${missing[@]}"; do
+        if grep -Eq "^\[fetch-bg\] ${name}: (fetched [0-9]+, skipped [0-9]+, failed 0|no backgrounds/ upstream)" "${fetch_log}"; then
+          WALLPAPERS_FETCHED="${WALLPAPERS_FETCHED}${name} "
+        else
+          failed_names+=("${name}")
+        fi
+      done
+      if [ "${#failed_names[@]}" -gt 0 ]; then
+        # The script's own reason (e.g. the rate limit and when it resets), once.
+        grep -E "^\[fetch-bg\] (could not|GitHub)|limit" "${fetch_log}" | head -1 >&2 || true
+        echo "[gallery] could not fetch the wallpapers for: ${failed_names[*]}" >&2
+        echo "[gallery] later: tools/fetch-omarchy-backgrounds.sh ${failed_names[*]}" >&2
       fi
-    done
+      rm -f "${fetch_log}"
+    fi
   fi
 fi
 

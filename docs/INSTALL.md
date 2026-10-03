@@ -326,7 +326,7 @@ the folder with that in mind. More in
   `--no-wallpapers`. To fetch them later, or again:
 
   ```sh
-  tools/fetch-omarchy-backgrounds.sh --all        # or one theme name; --force re-downloads
+  tools/fetch-omarchy-backgrounds.sh --all        # or theme names; --force re-downloads
   ```
 
   Images land in `~/.config/gallery/themes/<name>/backgrounds/`. Without them
