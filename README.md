@@ -41,8 +41,9 @@ gallery doctor             # check that everything is in place
 gallery agent dir ~/Code   # the folder that holds your repos: your agent starts there
 ```
 
-(The installer puts `gallery` in `~/bin`; if that is not on your PATH yet, it
-prints the one line to add.)
+(The installer puts `gallery` in `~/bin`. If that is not on your PATH yet,
+it prints the one line to add; until you have added it and opened a new
+terminal, type `~/bin/gallery` instead.)
 
 Your own terminal windows keep their colours until you ask; the Gallery's
 windows follow the theme from the start. To make your terminal follow it too,

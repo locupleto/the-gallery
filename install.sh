@@ -901,6 +901,11 @@ if [ "${DRY_RUN}" -ne 1 ] && [ -x "${HOME_DIR}/bin/gallery" ]; then
   if [ -n "${console_steps}" ]; then
     echo "[gallery] note: your own terminal windows keep their colours; the Gallery's windows follow the theme."
     echo "[gallery]       To make your terminal follow the theme too:"
+    # Until ~/bin is on PATH (see the note above) the command needs its path.
+    case ":${PATH}:" in
+      *":${HOME_DIR}/bin:"*) ;;
+      *) console_steps="$(printf '%s\n' "${console_steps}" | sed 's|^gallery |~/bin/gallery |')" ;;
+    esac
     printf '%s\n' "${console_steps}" | awk '{ printf "[gallery]         %d. %s\n", NR, $0 }'
   fi
 fi
