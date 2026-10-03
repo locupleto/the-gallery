@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""fake-defaults -- stands in for `defaults` in tests (GALLERY_DEFAULTS_BIN).
+
+The real `defaults` writes the real user's preferences whatever $HOME says
+(and through cfprefsd's cache, so even a plist path is unreliable). This
+keeps "defaults read|write|delete <domain> <key> [-string <value>]" in a
+JSON file in the test's own $HOME, with the same exit codes for a missing
+key (1).
+"""
+import json
+import os
+import sys
+
+path = os.path.join(os.environ["HOME"], ".fake-defaults.json")
+try:
+    with open(path) as fh:
+        store = json.load(fh)
+except (OSError, ValueError):
+    store = {}
+
+args = sys.argv[1:]
+if len(args) < 3:
+    sys.exit(2)
+verb, domain, key = args[0], args[1], args[2]
+values = store.setdefault(domain, {})
+if verb == "read":
+    if key not in values:
+        sys.exit(1)
+    print(values[key])
+    sys.exit(0)
+if verb == "write":
+    rest = args[3:]
+    if rest and rest[0] == "-string":
+        rest = rest[1:]
+    values[key] = rest[0] if rest else ""
+elif verb == "delete":
+    if key not in values:
+        sys.exit(1)
+    del values[key]
+else:
+    sys.exit(2)
+with open(path, "w") as fh:
+    json.dump(store, fh)

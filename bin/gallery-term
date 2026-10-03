@@ -27,7 +27,9 @@
 # --config glass. Where it has not (Ghostty), and for the palette on wezterm,
 # the window's wrapper loads state/terminals/gallery-osc.sh, which sets the
 # palette with OSC 4/10/11/12 escapes. --profile only matters to iTerm (float
-# defaults to its Gallery profile, tile to its default profile).
+# defaults to its Gallery profile; tile and `default` to the Console profile,
+# the user's own Default plus the theme's colours while the console follows
+# the theme, or iTerm's default profile when Console has not been rendered).
 #
 # TITLE. yabai rules and gallery-tui find windows by title, so the window
 # must end up with it. kitty has --title (permanent). Ghostty and wezterm
@@ -275,12 +277,19 @@ cmd_wrap() {
 # --- iTerm2 ---------------------------------------------------------------------
 
 ITERM_GALLERY_PROFILE_JSON="${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json"
+ITERM_CONSOLE_PROFILE_JSON="${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"
 
-# The Gallery dynamic profile's name, read fresh from the JSON render-theme.py
+# A Gallery dynamic profile's name, read fresh from the JSON render-theme.py
 # writes. Empty means "use the default profile" (file missing, unreadable or
 # mid-write).
-iterm_gallery_profile_name() {
-  [ -f "${ITERM_GALLERY_PROFILE_JSON}" ] || return 0
+iterm_gallery_profile_name() { iterm_profile_name "${ITERM_GALLERY_PROFILE_JSON}"; }
+# The Console profile: a child of the user's Default that carries the theme's
+# colours while the console follows the theme and nothing of its own
+# otherwise. Tiles open with it, so they follow the theme even while iTerm's
+# own default profile is something else.
+iterm_console_profile_name() { iterm_profile_name "${ITERM_CONSOLE_PROFILE_JSON}"; }
+iterm_profile_name() {
+  [ -f "$1" ] || return 0
   python3 -c '
 import json, sys
 try:
@@ -291,7 +300,7 @@ try:
         print(name)
 except Exception:
     pass
-' "${ITERM_GALLERY_PROFILE_JSON}" 2>/dev/null || true
+' "$1" 2>/dev/null || true
 }
 
 # iTerm is addressed by bundle id, never by name: while it is NOT running,
@@ -303,7 +312,10 @@ open_iterm() {
   if [ -z "${profile}" ]; then
     if [ "${ROLE}" = float ]; then profile=gallery; else profile=default; fi
   fi
-  [ "${profile}" = gallery ] && pname="$(iterm_gallery_profile_name)"
+  case "${profile}" in
+    gallery) pname="$(iterm_gallery_profile_name)" ;;
+    default) pname="$(iterm_console_profile_name)" ;;
+  esac
   if [ -n "${pname}" ]; then
     create_clause="create window with profile \"${pname}\""
   else

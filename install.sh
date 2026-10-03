@@ -330,8 +330,29 @@ uninstall_iterm_profiles() {
     run rm -f "${dir}/gallery-theme.json"
     gl_note removed "${dir}/gallery-theme.json"
   fi
+  # The user's own default profile, noted when the Gallery made Console the
+  # default (bin/gallery, iterm_default_take), goes back first.
+  local before
+  before="$(python3 -c '
+import json, sys
+try:
+    v = json.load(open(sys.argv[1])).get("iterm_default_before")
+except Exception:
+    v = None
+if v is not None:
+    print(v)
+' "${CONFIG_DIR}/state/console.json" 2>/dev/null || true)"
+  local prefs="${GALLERY_DEFAULTS_BIN:-defaults}"
+  if [ -n "${before}" ] && [ "$("${prefs}" read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)" = "gallery-console" ]; then
+    if [ "${before}" = "-" ]; then
+      run "${prefs}" delete com.googlecode.iterm2 "Default Bookmark Guid"
+    else
+      run "${prefs}" write com.googlecode.iterm2 "Default Bookmark Guid" -string "${before}"
+    fi
+    gl_note restored "iTerm2's default profile (your own, from before the Gallery)"
+  fi
   if [ -e "${dir}/gallery-console.json" ]; then
-    default_guid="$(defaults read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)"
+    default_guid="$("${prefs}" read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)"
     if [ "${default_guid}" = "gallery-console" ]; then
       echo "[gallery] iTerm2's default profile is still Console; keeping ${dir}/gallery-console.json"
       echo "[gallery] set your own profile as the default (iTerm2: Settings > Profiles > pick one > Other Actions > Set as Default), then delete that file"
@@ -893,19 +914,20 @@ case ":${PATH}:" in
     ;;
 esac
 
-# By design the user's own terminal keeps its colours until asked (the
-# Gallery's floating windows follow the theme regardless). Say so, with the
-# steps still missing, or a newcomer takes it for a broken theme.
+# The user's terminals follow the theme from the first install: every
+# installed terminal is wired to it (iTerm2 also gets the Console profile as
+# its default), each config file is backed up as <file>.gallery-bak before
+# its first edit, and the user's own iTerm2 default is noted. `gallery off`
+# puts them all back while off, `gallery console native` for good, and
+# --uninstall restores them. An existing choice (console.json) is kept.
 if [ "${DRY_RUN}" -ne 1 ] && [ -x "${HOME_DIR}/bin/gallery" ]; then
+  if [ ! -f "${CONFIG_DIR}/state/console.json" ]; then
+    echo "[gallery] your terminals now follow the theme (back to their own colours with: gallery console native)"
+    "${HOME_DIR}/bin/gallery" console theme 2>&1 | sed 's/^/[gallery]   /'
+  fi
   console_steps="$("${HOME_DIR}/bin/gallery" console _hint 2>/dev/null || true)"
   if [ -n "${console_steps}" ]; then
-    echo "[gallery] note: your own terminal windows keep their colours; the Gallery's windows follow the theme."
-    echo "[gallery]       To make your terminal follow the theme too:"
-    # Until ~/bin is on PATH (see the note above) the command needs its path.
-    case ":${PATH}:" in
-      *":${HOME_DIR}/bin:"*) ;;
-      *) console_steps="$(printf '%s\n' "${console_steps}" | sed 's|^gallery |~/bin/gallery |')" ;;
-    esac
-    printf '%s\n' "${console_steps}" | awk '{ printf "[gallery]         %d. %s\n", NR, $0 }'
+    echo "[gallery] note: the windows the Gallery opens follow the theme; for iTerm2's own new windows too:"
+    printf '%s\n' "${console_steps}" | sed 's/^/[gallery]         /'
   fi
 fi

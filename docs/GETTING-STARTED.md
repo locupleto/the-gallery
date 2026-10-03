@@ -65,6 +65,8 @@ gallery on
   on, they too stay where the tiling put them.
 - yabai, skhd and the focus outline stop. Every key goes back to macOS, and
   left Option types characters again.
+- Your terminals go back to their own colours (and iTerm2 to your own
+  default profile).
 - It stays off until you switch it on, also after you log out or restart the
   Mac.
 
@@ -75,8 +77,9 @@ gallery on
   stay floating, and minimised windows stay minimised.
 - The tiles start from even splits: split ratios you adjusted by hand before
   switching off are not kept.
+- Your terminals follow the theme again.
 
-Themes, wallpaper and terminal colours stay as they are either way.
+The theme and wallpaper stay as they are either way.
 `gallery doctor` says when the Gallery is off.
 
 While it is off, the switch-on key is held by Hammerspoon, since skhd is not
@@ -164,7 +167,7 @@ gallery theme list                 # installed themes
 gallery theme set tokyo-night      # switch theme (also: gallery theme next)
 gallery bg next                    # next wallpaper of the current theme
 gallery terminal set ghostty       # which terminal the Gallery opens (iterm2, ghostty, kitty, wezterm)
-gallery console theme              # make your everyday terminal follow the theme (native undoes it)
+gallery console native             # your terminals back to their own colours (theme: follow it again)
 gallery font set "MesloLGS NFM" 14 # one monospace font for everything (gallery font list shows candidates)
 gallery glass set 0.2 12           # terminal transparency 0-0.9 and blur 0-64
 gallery borders width 8            # focus outline width, 1 to 12

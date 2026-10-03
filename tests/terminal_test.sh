@@ -13,6 +13,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# `defaults` writes the real preferences whatever $HOME is: a stand-in.
+export GALLERY_DEFAULTS_BIN="${SCRIPT_DIR}/fake-defaults"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 GALLERY="${REPO_ROOT}/bin/gallery"
 TERM_BIN="${REPO_ROOT}/bin/gallery-term"
@@ -105,12 +107,14 @@ python3 "${RENDER}" >/dev/null
 out="$(open_dry iterm2 float 1 --title "Gallery: Foo" -- /x/gallery-tui run Foo)"
 assert_contains "${out}" 'create window with profile "Gallery" command' "iterm float uses the Gallery profile once rendered"
 out="$(open_dry iterm2 float 1 --profile default --title "Learn: menu" -- /x/learn menu)"
-assert_contains "${out}" "create window with default profile command" "--profile default"
+# "default" means the user's own profile as the Console profile carries it
+# (their Default plus the theme's colours while the console follows it).
+assert_contains "${out}" 'create window with profile "Console" command' "--profile default uses Console once rendered"
 assert_lacks "${out}" 'profile "Gallery"' "--profile default"
 out="$(open_dry iterm2 tile 0)"
 [ "${out}" = "open -a iTerm" ] || fail "cold iTerm tile with no command should only launch iTerm: ${out}"
 out="$(open_dry iterm2 tile 1)"
-assert_contains "${out}" "set w to (create window with default profile)" "iterm tile running"
+assert_contains "${out}" 'set w to (create window with profile "Console")' "iterm tile running uses the Console profile"
 assert_contains "${out}" "select w" "iterm tile selects the new window"
 out="$(open_dry iterm2 tile 0 -- /bin/zsh -l -c 'exec "$0" launch' /a/agent)"
 assert_contains "${out}" "open -a iTerm" "iterm tile+command cold launches first"
@@ -388,17 +392,58 @@ cmp -s "${HOME}/.wezterm.lua" "${WORK_DIR}/wez.orig" || fail "an existing wezter
 grep -q '^return {}$' "${TERMDIR}/wezterm.lua" || fail "wezterm native should empty the module"
 say "console theme|native on wezterm: prints, creates only when absent, never edits"
 
-# iTerm2 console behaviour: no config file is touched
+# Every installed terminal follows the theme, not only the one the Gallery
+# opens windows in: here iTerm2 is chosen and Ghostty and kitty are installed.
 "${GALLERY}" terminal set iterm2 >/dev/null
 rm -f "${GH_CONF}" "${KT_CONF}"
+PREFS() { "${GALLERY_DEFAULTS_BIN}" "$@"; }
+PREFS write com.googlecode.iterm2 "Default Bookmark Guid" -string MY-OWN-GUID
 "${GALLERY}" console theme >/dev/null
-[ ! -e "${GH_CONF}" ] && [ ! -e "${KT_CONF}" ] || fail "iTerm2 console mode must not create terminal config files"
+[ "$(count_line "${GH_CONF}" "${GH_LINE}")" = 1 ] || fail "console theme should wire every installed terminal (ghostty)"
+[ "$(count_line "${KT_CONF}" "${KT_LINE}")" = 1 ] || fail "console theme should wire every installed terminal (kitty)"
 grep -q '"Background Color"' "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" \
   || fail "iTerm2 console profile should carry colours in theme mode"
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = gallery-console ] \
+  || fail "theme should make Console iTerm2's default profile"
+grep -q '"iterm_default_before": "MY-OWN-GUID"' "${CFG}/state/console.json" || fail "the user's own iTerm2 default was not noted"
+"${GALLERY}" console theme >/dev/null
+grep -q '"iterm_default_before": "MY-OWN-GUID"' "${CFG}/state/console.json" || fail "a second theme overwrote the noted default"
+say "console theme: every installed terminal wired, iTerm2 default taken and the user's own noted"
+
+# gallery off puts every terminal back (the render reads the paused file);
+# gallery on applies the theme again. Services stubbed.
+mkdir -p "${WORK_DIR}/stub"
+for c in yabai skhd launchctl pkill; do printf '#!/bin/sh\nexit 0\n' > "${WORK_DIR}/stub/$c"; done
+printf '#!/bin/sh\nexit 1\n' > "${WORK_DIR}/stub/pgrep"
+chmod +x "${WORK_DIR}/stub/"*
+PATH="${WORK_DIR}/stub:${PATH}" "${GALLERY}" off >/dev/null
+[ "$(count_line "${GH_CONF}" "${GH_LINE}")" = 0 ] || fail "off should take the theme out of ghostty"
+[ "$(count_line "${KT_CONF}" "${KT_LINE}")" = 0 ] || fail "off should take the theme out of kitty"
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = MY-OWN-GUID ] || fail "off should give back the user's iTerm2 default"
+if grep -q '"Background Color"' "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"; then
+  fail "off should render the Console profile bare"
+fi
+grep -q '"mode": "theme"' "${CFG}/state/console.json" || fail "off must not forget that the console follows the theme"
+PATH="${WORK_DIR}/stub:${PATH}" "${GALLERY}" on >/dev/null
+[ "$(count_line "${GH_CONF}" "${GH_LINE}")" = 1 ] || fail "on should wire ghostty again"
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = gallery-console ] || fail "on should make Console the default again"
+grep -q '"Background Color"' "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" \
+  || fail "on should render the theme into the Console profile"
+say "gallery off / on: terminals back to their own colours and themed again, preference kept"
+
 "${GALLERY}" console native >/dev/null
+[ "$(count_line "${GH_CONF}" "${GH_LINE}")" = 0 ] && [ "$(count_line "${KT_CONF}" "${KT_LINE}")" = 0 ] \
+  || fail "native should unwire every installed terminal"
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = MY-OWN-GUID ] || fail "native should give back the user's iTerm2 default"
+grep -q iterm_default_before "${CFG}/state/console.json" && fail "the noted default should be cleared once given back"
 if grep -q '"Background Color"' "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json"; then
   fail "iTerm2 console profile should be bare in native mode"
 fi
-say "iTerm2 console mode unchanged"
+# a default the user picked themselves while themed is theirs: not overwritten
+"${GALLERY}" console theme >/dev/null
+PREFS write com.googlecode.iterm2 "Default Bookmark Guid" -string PICKED-LATER
+"${GALLERY}" console native >/dev/null
+[ "$(PREFS read com.googlecode.iterm2 "Default Bookmark Guid")" = PICKED-LATER ] || fail "native overwrote a default the user picked since"
+say "console native: everything given back; a default picked since is left alone"
 
 say "PASS terminal_test.sh"

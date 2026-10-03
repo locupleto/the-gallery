@@ -333,7 +333,13 @@ def read_console_mode() -> str:
     console theme|native|toggle` records in CONSOLE_STATE_PATH. Defaults to
     "native" (untouched Default colours) if the file is missing, unreadable,
     or carries anything other than {"mode": "theme"|"native"} -- same
-    missing-file-means-default tolerance as bg_read_choice in bin/gallery."""
+    missing-file-means-default tolerance as bg_read_choice in bin/gallery.
+
+    While the Gallery is switched off (STATE_DIR/paused, written by `gallery
+    off`) every terminal shows its own colours, so the answer is "native"
+    whatever is recorded (bin/gallery, console_effective_mode)."""
+    if (STATE_DIR / "paused").exists():
+        return "native"
     try:
         data = json.loads(CONSOLE_STATE_PATH.read_text())
     except (OSError, ValueError):

@@ -45,13 +45,11 @@ gallery agent dir ~/Code   # the folder that holds your repos: your agent starts
 it prints the one line to add; until you have added it and opened a new
 terminal, type `~/bin/gallery` instead.)
 
-Your own terminal windows keep their colours until you ask; the Gallery's
-windows follow the theme from the start. To make your terminal follow it too,
-in iTerm2 make the "Console" profile the default once (Settings, Profiles,
-Console, Other Actions, Set as Default), then run `gallery console theme`.
-Other terminals need only the command (for WezTerm it prints two lines to
-add to your config); see
-[Terminals](docs/CUSTOMIZING.md#terminals).
+Your terminals follow the theme from the start: every installed iTerm2,
+Ghostty, kitty and WezTerm (for a WezTerm config of your own, the installer
+prints the two lines to add). Their settings are backed up first and come
+back with `gallery off`, with `gallery console native`, or when you
+uninstall. See [Terminals](docs/CUSTOMIZING.md#terminals).
 
 Then press **super + space** (super is left Option) for the Learn menu, or
 **super + shift + space** for every key on one sheet, open a few windows
@@ -364,15 +362,15 @@ Floating Gallery windows always get the Gallery theme; tiled windows
 
 | | floating window theme | title (for yabai) | theme change in running windows | `gallery console theme` |
 |---|---|---|---|---|
-| iTerm2 | the "Gallery" dynamic profile | set by the command | dynamic profiles reload themselves | the "Console" profile (set as default once, see below) |
+| iTerm2 | the "Gallery" dynamic profile | set by the command | dynamic profiles reload themselves | the "Console" profile: tiles open with it, and it is made iTerm2's default (your own default is noted and given back) |
 | Ghostty | palette set by escape sequences in that window (opacity and blur are yours) | set by a wrapper | `reload_config` over AppleScript, if running | one `config-file = ?...` line in `~/.config/ghostty/config` |
 | kitty | `--config` with the rendered `kitty.conf` | `--title` | kitty re-reads the changed include itself; `kitty @ set-colors` too, if remote control is on | one `include ...` line in `~/.config/kitty/kitty.conf` |
 | WezTerm | `--config` glass plus escape-sequence palette | set by a wrapper | automatic (the module is on wezterm's reload watch list) | two Lua lines in your `wezterm.lua` |
 
 The renderer writes `ghostty.conf`, `kitty.conf` and `wezterm.lua` into
 `~/.config/gallery/state/terminals/` on every render, whatever terminal is
-configured. `console theme` adds exactly one marked include line to the config
-of Ghostty or kitty (creating the file if missing, with a `.gallery-bak` copy
+configured. `console theme` (the state a fresh install starts in) adds exactly
+one marked include line to the config of every installed Ghostty and kitty (creating the file if missing, with a `.gallery-bak` copy
 before the first edit of an existing one); `console native` removes it. For
 WezTerm it never edits your Lua: it prints the two lines to add, and writes
 `~/.wezterm.lua` with them only when you have no wezterm config at all. Running

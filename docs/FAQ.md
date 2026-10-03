@@ -130,9 +130,9 @@ Control's shortcuts ([tiler/README.md](../tiler/README.md#install)).
 
 Yes: `gallery terminal list`, then `gallery terminal set ghostty` (or
 `kitty`, `wezterm`). Floating windows, Learn, super + return and the agent
-use it, and all four take the theme. To make your everyday terminal follow
-the theme too, `gallery console theme`, which needs a one-time step per
-terminal ([Terminals](CUSTOMIZING.md#terminals)).
+use it, and all four take the theme. Your everyday terminals follow it too,
+every installed one; `gallery console native` gives them back their own
+colours ([Terminals](CUSTOMIZING.md#terminals)).
 
 ### super + w asks before closing a terminal window
 

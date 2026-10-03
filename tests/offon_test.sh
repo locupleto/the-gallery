@@ -4,6 +4,8 @@
 # real desktop is touched. $RUNNING lists the processes pgrep reports.
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# `defaults` writes the real preferences whatever $HOME is: a stand-in.
+export GALLERY_DEFAULTS_BIN="${REPO_ROOT}/tests/fake-defaults"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/gallery-offon-test.XXXXXX")"
 trap 'rm -rf "${WORK}"' EXIT
 fail() { echo "[offon_test] FAIL: $*" >&2; exit 1; }

@@ -1844,7 +1844,10 @@ try:
         data = loaded
 except Exception:
     pass
-data[key] = value
+if os.environ.get("CONSOLE_DELETE_KEY"):
+    data.pop(key, None)
+else:
+    data[key] = value
 
 d = os.path.dirname(path) or "."
 fd, tmp = tempfile.mkstemp(prefix=".console.", suffix=".json", dir=d)
@@ -1857,6 +1860,109 @@ except Exception:
     os.unlink(tmp)
     raise
 ' "${CONSOLE_STATE_FILE}" "${key}" "${value}"
+}
+
+console_delete_key() { CONSOLE_DELETE_KEY=1 console_write_key "$1" ""; }
+
+# console_read_key <key> -- prints a key of CONSOLE_STATE_FILE; exits 1 when
+# the key is absent (an empty value is still a value).
+console_read_key() {
+  [ -f "${CONSOLE_STATE_FILE}" ] || return 1
+  python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(1)
+if not isinstance(data, dict) or sys.argv[2] not in data:
+    sys.exit(1)
+sys.stdout.write(str(data[sys.argv[2]]))
+' "${CONSOLE_STATE_FILE}" "$1"
+}
+
+# console_effective_mode -- what the terminals show right now: the recorded
+# mode, except native while the Gallery is switched off (gallery off puts
+# every terminal back to its own colours; tools/render-theme.py reads the
+# same rule).
+console_effective_mode() {
+  if [ -f "${CONFIG_DIR}/state/paused" ]; then
+    printf 'native'
+  else
+    console_read_mode
+  fi
+}
+
+# --- iTerm2's default profile ---------------------------------------------------
+#
+# The Console profile only reaches the windows iTerm opens by itself (its own
+# Cmd-N, a fresh launch) when it is iTerm's default profile. While the console
+# follows the theme the Gallery makes it the default, after noting the user's
+# own choice in CONSOLE_STATE_FILE ("iterm_default_before"; "-" when there was
+# none), and gives that choice back on native, gallery off and uninstall.
+# GALLERY_DEFAULTS_BIN is a test seam: `defaults` writes the real user's
+# preferences whatever $HOME says.
+iterm_pref() {
+  # Never the real preferences from a sandboxed $HOME (a test that forgot
+  # its stand-in): reads are harmless, writes are skipped.
+  if [ -z "${GALLERY_DEFAULTS_BIN:-}" ] && [ "$1" != read ] \
+     && [ "${HOME}" != "$(eval echo "~$(id -un)")" ]; then
+    echo "gallery: not changing iTerm2's preferences from a HOME that is not yours (${HOME})" >&2
+    return 0
+  fi
+  "${GALLERY_DEFAULTS_BIN:-defaults}" "$@"
+}
+iterm_default_read() { iterm_pref read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true; }
+
+iterm_default_take() {
+  [ -f "${HOME}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ] || return 0
+  local cur
+  cur="$(iterm_default_read)"
+  [ "${cur}" = "gallery-console" ] && return 0
+  console_read_key iterm_default_before >/dev/null || console_write_key iterm_default_before "${cur:--}"
+  iterm_pref write com.googlecode.iterm2 "Default Bookmark Guid" -string gallery-console
+}
+
+iterm_default_give_back() {
+  local before
+  before="$(console_read_key iterm_default_before)" || return 0
+  # Only if it is still ours: a default the user picked since is theirs.
+  if [ "$(iterm_default_read)" = "gallery-console" ]; then
+    if [ "${before}" = "-" ]; then
+      iterm_pref delete com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true
+    else
+      iterm_pref write com.googlecode.iterm2 "Default Bookmark Guid" -string "${before}"
+    fi
+  fi
+  console_delete_key iterm_default_before
+}
+
+# The terminals installed here (gallery-term decides what "installed" means).
+installed_terminals() {
+  local t helper
+  helper="$(resolve_helper_bin gallery-term)"
+  for t in iterm2 ghostty kitty wezterm; do
+    "${helper}" installed "${t}" 2>/dev/null && echo "${t}"
+  done
+  return 0
+}
+
+# console_apply_all <theme|native> -- wire (or unwire) every installed
+# terminal, not only the one the Gallery opens windows in: the user's
+# everyday terminal may be another.
+console_apply_all() {
+  local mode="$1" t
+  for t in $(installed_terminals); do
+    if [ "${t}" = iterm2 ]; then
+      if [ "${mode}" = theme ]; then
+        iterm_default_take && echo "iterm2: Console is the default profile (your own choice is noted and comes back with native or off)"
+      else
+        iterm_default_give_back && echo "iterm2: your own default profile is back"
+      fi
+    else
+      console_config_apply "${t}" "${mode}"
+    fi
+  done
 }
 
 # --- terminal-specific console wiring ------------------------------------------
@@ -2088,19 +2194,16 @@ cmd_terminal() {
 }
 
 # What still stands between the theme and the user's everyday terminal, one
-# step per line (nothing once it follows the theme). The installer's last
-# lines and `gallery doctor` print it: by design the console stays native
-# until asked, and nothing else would tell a new user so.
+# step per line, for the installer's last lines and `gallery doctor`. Since
+# the installer starts the console following the theme, "native" is the
+# user's own choice and is left alone; what can still be missing is iTerm's
+# default profile (iTerm's own settings can change it back), without which
+# the windows the Gallery opens follow the theme and iTerm's Cmd-N does not.
 console_hint() {
-  local mode term
-  mode="$(console_read_mode)"
-  term="$(terminal_id)"
-  if [ "${term}" = "iterm2" ] \
-     && [ "$(defaults read com.googlecode.iterm2 "Default Bookmark Guid" 2>/dev/null || true)" != "gallery-console" ]; then
+  [ "$(console_read_mode)" = theme ] || return 0
+  [ -f "${CONFIG_DIR}/state/paused" ] && return 0
+  if installed_terminals | grep -qx iterm2 && [ "$(iterm_default_read)" != "gallery-console" ]; then
     echo "in iTerm2: Settings > Profiles > Console > Other Actions > Set as Default (once)"
-  fi
-  if [ "${mode}" != "theme" ]; then
-    echo "gallery console theme"
   fi
   return 0
 }
@@ -2177,7 +2280,11 @@ console_set_mode() {
     return 1
   fi
   echo "console: ${label}"
-  console_config_apply "${term}" "${mode}"
+  if [ "$(console_effective_mode)" != "${mode}" ]; then
+    echo "console: the Gallery is off; your terminals follow the theme again with gallery on"
+    return 0
+  fi
+  console_apply_all "${mode}"
 }
 
 cmd_console_theme() {
@@ -3850,7 +3957,9 @@ cmd_theme() {
 # and hands the key back to skhd. Hand-tuned split ratios from before the off
 # are not kept: yabai builds every Space's layout afresh.
 #
-# Themes, wallpaper and terminal colours are left as they are either way.
+# The terminals go back to their own colours while off (and iTerm2 to the
+# user's own default profile) and follow the theme again with on; the theme
+# and the wallpaper are left as they are either way.
 PAUSED_FILE="${CONFIG_DIR}/state/paused"
 UNTILED_FILE="${CONFIG_DIR}/state/untiled.json"
 
@@ -3967,6 +4076,12 @@ cmd_off() {
   date '+%Y-%m-%d %H:%M:%S' > "${PAUSED_FILE}"
   local moved=0
   pgrep -u "$(id -u)" -axq yabai && moved="$(restore_windows)"
+  # Every terminal back to its own colours (the render reads the paused file
+  # and writes native profiles; the wiring comes out of their configs).
+  if [ "$(console_read_mode)" = theme ]; then
+    run_theme_render >/dev/null 2>&1 || true
+    console_apply_all native >/dev/null 2>&1 || true
+  fi
   service_off yabai
   pkill -x borders 2>/dev/null || true
   # The Hammerspoon outline (Macs without JankyBorders) goes too, and
@@ -3986,6 +4101,10 @@ cmd_on() {
   # Where every window is before yabai tiles it: what the next off restores.
   pgrep -u "$(id -u)" -axq yabai || snapshot_windows
   rm -f "${PAUSED_FILE}"
+  if [ "$(console_read_mode)" = theme ]; then
+    run_theme_render >/dev/null 2>&1 || true
+    console_apply_all theme >/dev/null 2>&1 || true
+  fi
   hs_quiet "if spoon.Gallery then spoon.Gallery:pauseKey(false) end; return 1"
   service_on skhd
   # yabai's own rc starts the borders again.
@@ -4016,7 +4135,7 @@ cmd_doctor() {
   local console_steps
   console_steps="$(console_hint 2>/dev/null | awk 'NR > 1 { printf ", then " } { printf "%s", $0 }')"
   if [ -n "${console_steps}" ]; then
-    echo "NOTE    your own terminal windows keep their colours; to make them follow the theme: ${console_steps}"
+    echo "NOTE    the windows the Gallery opens follow the theme, but iTerm2's own new windows (Cmd-N) do not: ${console_steps}"
   fi
 
   if [ -d "/Applications/Hammerspoon.app" ]; then

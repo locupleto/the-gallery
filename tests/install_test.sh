@@ -67,6 +67,9 @@ case "\$*" in
 esac
 echo 0
 EOF
+# bin/gallery and the installer reach `defaults` through GALLERY_DEFAULTS_BIN
+# (the real one writes the real preferences whatever $HOME is): this stub too.
+export GALLERY_DEFAULTS_BIN="${STUBS}/defaults"
 chmod +x "${STUBS}"/*
 export PATH="${STUBS}:${PATH}"
 export GALLERY_NO_TERMINAL_RELOAD=1
@@ -288,12 +291,22 @@ sed -i '' 's/^require("hs.ipc")$/require("hs.ipc") -- stale/' "${H}/.hammerspoon
 grep -q -- '-- stale' "${H}/.hammerspoon/init.lua" && fail "B: the stale block was not refreshed"
 assert_same "${H}/.config/skhd/local.skhd" "${REPO_ROOT}/tiler/local.skhd.example" "B seeds local.skhd"
 assert_file "${H}/.config/skhd/tiler.skhd" "B tiler.skhd"
+# The user's own iTerm2 default, as `gallery console theme` notes it when it
+# makes Console the default: the uninstall must give it back.
+python3 - "${H}/.config/gallery/state/console.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["iterm_default_before"] = "MY-OWN-GUID"
+json.dump(d, open(p, "w"))
+PY
 # brew services shows borders registered: it must be left running.
 : > "${STUB_LOG}"
 STUB_RUNNING="borders" STUB_BREW_SERVICES="borders started" STUB_ITERM_GUID="gallery-console" \
   "${INSTALL}" --uninstall > "${WORK_DIR}/B.uninstall.out" 2>&1 || { cat "${WORK_DIR}/B.uninstall.out" >&2; fail "B: uninstall failed"; }
 assert_lacks "$(cat "${STUB_LOG}")" "killall borders" "B leaves a brew-managed borders alone"
 [ -f "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-console.json" ] || fail "B: Console profile removed while it is iTerm2's default"
+assert_contains "$(cat "${STUB_LOG}")" "defaults write com.googlecode.iterm2 Default Bookmark Guid -string MY-OWN-GUID" "B gives iTerm2's own default back"
 assert_contains "$(cat "${WORK_DIR}/B.uninstall.out")" "set your own profile as the default" "B tells how to release the Console profile"
 assert_gone "${H}/Library/Application Support/iTerm2/DynamicProfiles/gallery-theme.json" "B gallery-theme.json"
 assert_gone "${H}/.config/skhd/local.skhd" "B removes the unedited local.skhd seed"

@@ -624,26 +624,39 @@ gallery terminal set ghostty
 ```
 
 With nothing chosen it is iTerm2 if installed, otherwise the first installed of
-the others. Floating windows always take the theme. Whether your everyday
-terminal follows it too is a separate choice:
+the others. Floating windows always take the theme, and so do your everyday
+terminals, every installed one, from the first install:
 
 ```sh
 gallery console status
-gallery console theme       # your terminal follows the theme
-gallery console native      # back to its own colours (the default)
+gallery console theme       # your terminals follow the theme (how an install starts)
+gallery console native      # back to their own colours, for good
 gallery console toggle
 ```
 
-`console theme` needs a one-time step per terminal (iTerm2: make the "Console"
-profile your default; WezTerm: two lines in your Lua; Ghostty and kitty: one
-include line the Gallery adds for you). They are described in
+What following the theme changes, and how it is undone:
+
+- **iTerm2**: windows the Gallery opens (super + return, the agent) use the
+  "Console" profile, your own Default plus the theme's colours. The Gallery
+  also makes Console iTerm2's default profile, so iTerm2's own Cmd-N windows
+  follow too, after noting your own default; that comes back with `native`,
+  `gallery off` and uninstalling. If you pick another default in iTerm2's
+  settings later, it is yours and is left alone (`gallery doctor` mentions it).
+- **Ghostty and kitty**: one include line at the end of your config, which is
+  copied to `<file>.gallery-bak` before the first edit.
+- **WezTerm**: your Lua is never edited. Without a wezterm config the Gallery
+  writes `~/.wezterm.lua`; with one, it prints the two lines to add.
+
+`gallery off` puts every terminal back to its own colours while the Gallery is
+off, and `gallery on` themes them again. Details per terminal are in
 [INSTALL.md](INSTALL.md#choosing-the-terminal) and the README's
 [Terminals](../README.md#terminals) section. In the theme picker, `ctrl-t`
 toggles the console.
 
 ### Which settings win
 
-The Gallery never rewrites your terminal's own settings. It renders its own
+The Gallery never rewrites your terminal's own settings (only the one include
+line above, and iTerm2's choice of default profile). It renders its own
 file for each terminal (colours, the font from `gallery font`, the glass) and
 places it next to yours:
 

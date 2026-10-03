@@ -166,8 +166,8 @@ keeping it.
   older install, from before the manifest existed, is recognised by its
   header: it is overwritten with a `.gallery-edited` safety copy, not treated
   as yours.
-- **Files it edits in place** (`init.lua`, the Ghostty and kitty configs when
-  you run `gallery console theme`, btop's `btop.conf`, superfile's
+- **Files it edits in place** (`init.lua`, the Ghostty and kitty configs while
+  the console follows the theme, btop's `btop.conf`, superfile's
   `config.toml`): copied to `<name>.gallery-bak` before the first edit, and
   never again. For btop and superfile the renderer also records the original
   value of each key it sets in `state/conf-originals.json`, and only touches
@@ -220,17 +220,18 @@ the later steps assume the earlier ones.
    - "skhd wants to control System Events" (`super+b`);
    - "Learn wants to control iTerm2" (launching Learn from Spotlight; again
      Ghostty on a Ghostty setup).
-6. **iTerm2: default profile (only for `gallery console`).** The renderer
-   writes two iTerm2 dynamic profiles. "Gallery" is used by the floating
-   windows and needs no setup. "Console" is a child of your own "Default"
-   profile and is what makes your everyday terminal follow the theme. In iTerm2:
-   Settings (Cmd-,), Profiles, select "Console", Other Actions, Set as Default.
-   Do not make "Gallery" the default: it closes its session when the command
-   ends and never prompts, which suits a floating TUI and not a shell.
-   `gallery console theme` then switches Console to the theme's colours
-   (`native`, the default, leaves it identical to Default), and
-   `gallery console status` prints `default profile: Console (ok)` once the
-   setting has taken.
+6. **iTerm2: nothing to do.** The renderer writes two iTerm2 dynamic
+   profiles. "Gallery" is used by the floating windows. "Console" is a child
+   of your own "Default" profile carrying the theme's colours; the windows
+   the Gallery opens use it, and the installer makes it iTerm2's default
+   profile so iTerm2's own Cmd-N windows follow the theme too, after noting
+   your own default (given back by `gallery console native`, `gallery off`
+   and uninstalling). `gallery console status` prints
+   `default profile: Console (ok)`. If iTerm2 was running and its default
+   did not change, `gallery doctor` says so: Settings (Cmd-,), Profiles,
+   select "Console", Other Actions, Set as Default. Do not make "Gallery"
+   the default: it closes its session when the command ends and never
+   prompts, which suits a floating TUI and not a shell.
 
 ### Choosing the terminal
 

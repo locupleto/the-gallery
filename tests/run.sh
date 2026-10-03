@@ -15,6 +15,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# `defaults` writes the real preferences whatever $HOME is: a stand-in.
+export GALLERY_DEFAULTS_BIN="${SCRIPT_DIR}/fake-defaults"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 GALLERY_HS="${REPO_ROOT}/bin/gallery-hs"
 
