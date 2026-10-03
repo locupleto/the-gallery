@@ -778,7 +778,7 @@ if [ -d "${SKILL_SRC}" ]; then
     fi
     run mkdir -p "${skills_dir}"
     run ln -sfn "${SKILL_DEST}" "${link}"
-    linked+=" ${skills_dir/#${HOME_DIR}/~}"
+    linked+=" ~${skills_dir#"${HOME_DIR}"}"
   done <<< "${AGENT_SKILL_DIRS}"
   [ -z "${linked}" ] || echo "[gallery] agent skill 'gallery' linked into:${linked}"
 fi
