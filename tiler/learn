@@ -167,15 +167,21 @@ page() {
         >/dev/null || true
 }
 
+# The floating window is still being sized by the tiler when fzf draws the
+# first preview, so the preview is redrawn on every resize (at its final width
+# rather than the first one).
 menu() {
     trap linger EXIT
     set_title "menu"
     float_me "menu"
     command -v fzf >/dev/null || die "fzf is not installed (brew install fzf)"
-    local pick
+    local pick resize_bind=""
+    # The resize event is fzf 0.46 or later; an older fzf would refuse to start.
+    printf '%s\n' 0.46 "$(fzf --version | cut -d' ' -f1)" | sort -C -V 2>/dev/null && resize_bind='resize:refresh-preview'
     pick="$(list_sheets | fzf --height=100% --layout=reverse --border=rounded \
         --prompt='Learn > ' --header='Enter shows a sheet • Shift+Up/Down or Alt+Up/Down scroll preview • Esc closes' \
         --bind 'shift-up:preview-up,shift-down:preview-down,alt-up:preview-half-page-up,alt-down:preview-half-page-down' \
+        ${resize_bind:+--bind "$resize_bind"} \
         --preview "\"$SELF\" preview {}" \
         --preview-window=right:60%:wrap)" || exit 0
     [ -n "$pick" ] && exec "$SELF" ${LEARN_DISPLAY:+--display "$LEARN_DISPLAY"} show "$pick"
