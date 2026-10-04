@@ -344,18 +344,37 @@ open_iterm() {
   # tile. A cold iTerm opens its own startup window anyway, so with no
   # command it is only launched (an Apple Event would start it hidden and
   # unactivated, adding an invisible window per press); with a command it is
-  # launched, waited for, then driven. The select matters: activate alone
-  # re-raises iTerm's previous key window. The new window's id is printed --
-  # it is the CGWindowID yabai uses (gallery-agent reads it).
+  # launched, waited for, then driven, and its startup window is closed once
+  # ours exists, so one keypress leaves one window (as for Ghostty). Only a
+  # lone startup window with a single session is closed: a cold launch that
+  # restored windows from an earlier session keeps them. The select matters:
+  # activate alone re-raises iTerm's previous key window. The new window's id
+  # is printed -- it is the CGWindowID yabai uses (gallery-agent reads it).
+  local cold=0
   if ! term_running iterm2; then
     cold_start iterm2
+    cold=1
     [ "${#RUN[@]}" -gt 0 ] || return 0
   fi
   act osascript \
     -e 'tell application id "com.googlecode.iterm2"' \
+    -e 'set coldWindows to {}' \
+    -e "if ${cold} is 1 then" \
+    -e 'repeat 50 times' \
+    -e 'if (count of windows) > 0 then exit repeat' \
+    -e 'delay 0.1' \
+    -e 'end repeat' \
+    -e 'if (count of windows) is 1 then' \
+    -e 'set w0 to window 1' \
+    -e 'if (count of tabs of w0) is 1 and (count of sessions of current tab of w0) is 1 then set coldWindows to {id of w0}' \
+    -e 'end if' \
+    -e 'end if' \
     -e "set w to (${create_clause})" \
     -e 'activate' \
     -e 'select w' \
+    -e 'repeat with i in coldWindows' \
+    -e 'close (first window whose id is (contents of i))' \
+    -e 'end repeat' \
     -e 'return id of w' \
     -e 'end tell'
 }
