@@ -824,6 +824,16 @@ echo "[gallery] installing CLI to ${BIN_DEST}"
 run mkdir -p "${HOME_DIR}/bin"
 gl_install_file "${BIN_SRC}" "${BIN_DEST}" 755
 
+# What `gallery version` reports: the release in VERSION and, from a git
+# checkout, the commit it was installed from.
+gallery_version="$(cat "${SCRIPT_DIR}/VERSION" 2>/dev/null || echo unknown)"
+gallery_commit="$(git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
+if [ "${DRY_RUN}" -ne 1 ]; then
+  mkdir -p "${CONFIG_DIR}/state"
+  printf '%s%s\n' "${gallery_version}" "${gallery_commit:+ (${gallery_commit})}" > "${CONFIG_DIR}/state/version"
+fi
+echo "[gallery] version ${gallery_version}${gallery_commit:+ (${gallery_commit})}"
+
 echo "[gallery] installing hs watchdog CLI to ${HS_BIN_DEST}"
 gl_install_file "${HS_BIN_SRC}" "${HS_BIN_DEST}" 755
 

@@ -582,6 +582,7 @@ list.
 - [tiler/README.md](tiler/README.md): the tiling layer, key table and Learn.
 - [qml/README.md](qml/README.md): the QML host and its Quickshell shim.
 - [patches/README.md](patches/README.md): macOS overrides for imported plugins.
+- [CHANGELOG.md](CHANGELOG.md): what changed in each release.
 
 ## Contributing
 
@@ -590,7 +591,7 @@ case it is useful to others. You are welcome to use it, fork it and make it
 your own.
 
 - **Bugs and questions:** open an issue. Say which macOS version and Mac you
-  are on, and include the output of `gallery doctor`. Replies come when time
+  are on, and include the output of `gallery version` and `gallery doctor`. Replies come when time
   allows, not on any schedule.
 - **Pull requests** are welcome, but there is no promise that one will be
   merged. Small, focused fixes stand the best chance; for anything larger,

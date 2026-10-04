@@ -59,5 +59,7 @@ before committing; a piped `| tail` hides a failing exit code.
   `~/.config/gallery` must be recorded and removed again on uninstall.
 - **Docs change with the code**, in the same commit: README, `docs/`, and the
   agent skill when a user-facing command or file changes.
+- **Releases**: bump `VERSION`, add a `CHANGELOG.md` entry, then tag
+  `v<version>` on that commit. A published tag is never moved.
 - Shell: bash with `set -euo pipefail`, two-space indent, `local` variables,
   comments that say why. Match the surrounding code.

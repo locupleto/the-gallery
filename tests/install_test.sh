@@ -175,6 +175,10 @@ assert_file "${H}/.config/gallery/state/conf-originals.json" "A conf record"
 grep -q 'color_theme = \\"Default\\"' "${H}/.config/gallery/state/conf-originals.json" || fail "A: original btop line not recorded"
 say "A: install backs up every file of the user's and records its own"
 
+[ "$("${H}/bin/gallery" version)" = "gallery $(cat "${REPO_ROOT}/VERSION")$(c="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null)" && echo " (${c})")" ] \
+  || fail "A: gallery version does not match VERSION and the checkout's commit"
+say "A: gallery version reports what was installed"
+
 # Console wiring (what `gallery console theme` adds) for every terminal, the
 # wallpaper hook's first apply, and a theme re-render.
 GAL="${H}/bin/gallery"

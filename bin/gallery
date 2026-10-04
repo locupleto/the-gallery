@@ -70,6 +70,7 @@
 #   gallery log
 #   gallery doctor
 #   gallery install
+#   gallery version
 #
 set -euo pipefail
 
@@ -222,6 +223,7 @@ commands:
   log                             tail the Gallery log
   doctor                          check the local Gallery install
   install                         run install.sh
+  version                         print the Gallery version (and the commit it was installed from)
 EOF
 }
 
@@ -4715,6 +4717,22 @@ else:
   fi
 }
 
+# Run from a checkout: its VERSION file and HEAD. Installed: what install.sh
+# recorded in state/version.
+cmd_version() {
+  local root="${SCRIPT_DIR}/.."
+  if [ -f "${root}/VERSION" ] && [ -f "${root}/install.sh" ]; then
+    local commit
+    commit="$(git -C "${root}" rev-parse --short HEAD 2>/dev/null || true)"
+    echo "gallery $(cat "${root}/VERSION")${commit:+ (${commit})}"
+  elif [ -f "${CONFIG_DIR}/state/version" ]; then
+    echo "gallery $(cat "${CONFIG_DIR}/state/version")"
+  else
+    echo "gallery: version unknown (installed before versions were recorded; re-run install.sh)" >&2
+    exit 1
+  fi
+}
+
 cmd_install() {
   local candidate="${SCRIPT_DIR}/../install.sh"
   if [ -f "${candidate}" ]; then
@@ -4838,6 +4856,9 @@ case "${command}" in
     ;;
   install)
     cmd_install
+    ;;
+  version|--version|-V)
+    cmd_version
     ;;
   *)
     usage

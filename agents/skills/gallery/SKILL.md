@@ -25,8 +25,9 @@ for developing The Gallery itself.
 
 ## The rules
 
-1. **Look before you change.** Start with `gallery doctor` (health) and the
-   matching status command (`gallery theme current`, `gallery home show`,
+1. **Look before you change.** Start with `gallery doctor` (health),
+   `gallery version` (which release is installed) and the matching status
+   command (`gallery theme current`, `gallery home show`,
    `gallery borders status`, `gallery glass`, `gallery console status`,
    `gallery agent status`, ...). If the user asks for something you cannot
    find a place for, say so rather than inventing one.

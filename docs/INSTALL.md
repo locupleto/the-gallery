@@ -393,6 +393,11 @@ Updating from a release older than 2026-10-02 (before the install manifest):
   key file. Copy the ones you used from `tiler/local.skhd.example` into
   `~/.config/skhd/local.skhd` before you update, and they carry on working.
 
+`gallery version` prints the version you have and the commit it was
+installed from. [CHANGELOG.md](../CHANGELOG.md) says what changed in each
+release; to stay on a release rather than the latest commit, check out its
+tag (`git checkout v0.1.0`) before `./install.sh`.
+
 Plugins added with `gallery add` update separately: `gallery update [id]`
 fast-forwards git-managed plugins and re-applies any macOS patches from
 `patches/`.
