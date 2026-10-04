@@ -173,4 +173,38 @@ grep -q "home rules applied" "${LP_HOME}/.config/gallery/gallery-home.log" || fa
 applied && fail "login pass: ran twice in one login session"
 say "login pass: once per fresh login, after a quiet moment; never while busy, off, or without a layout"
 
+# The pass then rebuilds the saved tile shapes and, if a Desktop shows another
+# wallpaper than the main one, re-applies the current wallpaper. Stubs: the
+# layout tool and `gallery bg apply` log their calls; a fake wallpaper store.
+LP_CALLS="${WORK_DIR}/lp-calls.log"
+printf '#!/bin/sh\necho "layout $*" >> "%s"\n' "${LP_CALLS}" > "${LP_STUB}/layout-tool"
+printf '#!/bin/sh\necho "gallery $*" >> "%s"\n' "${LP_CALLS}" > "${LP_STUB}/gallery-self"
+chmod +x "${LP_STUB}/layout-tool" "${LP_STUB}/gallery-self"
+echo '{}' > "${LP_HOME}/.config/yabai/home-layout.json"
+mkdir -p "${LP_HOME}/.config/gallery/themes/jade"; ln -sfn jade "${LP_HOME}/.config/gallery/themes/current"
+store() {  # store <picture for Desktop 2>: the main Desktop shows a.jpg
+  python3 - "${WORK_DIR}/Index.plist" "$1" <<'PY'
+import plistlib, sys
+def desk(url):
+    return {"Desktop": {"Content": {"Choices": [{"Configuration": plistlib.dumps({"url": {"relative": url}})}]}}}
+data = {"Spaces": {"": {"Default": desk("file:///a.jpg")},
+                   "UUID-2": {"Default": desk(sys.argv[2]), "Displays": {"D1": desk(sys.argv[2])}}}}
+with open(sys.argv[1], "wb") as fh:
+    plistlib.dump(data, fh, fmt=plistlib.FMT_BINARY)
+PY
+}
+lp2() {
+  rm -f "${LP_HOME}/.config/gallery/state/home-login-pass"; : > "${LP_CALLS}"
+  GALLERY_LAYOUT_TOOL="${LP_STUB}/layout-tool" GALLERY_SELF="${LP_STUB}/gallery-self" \
+    GALLERY_WALLPAPER_STORE="${WORK_DIR}/Index.plist" GALLERY_HOME_SETTLE=0 lp 30 60
+}
+store "file:///old-tokyo.jpg"; lp2
+grep -q "layout restore --remap --file ${LP_HOME}/.config/yabai/home-layout.json" "${LP_CALLS}" || fail "login pass: the tile shapes were not restored: $(cat "${LP_CALLS}")"
+grep -q "gallery bg apply" "${LP_CALLS}" || fail "login pass: a Desktop with an old wallpaper was not re-synced"
+store "file:///a.jpg"; lp2
+grep -q "gallery bg apply" "${LP_CALLS}" && fail "login pass: re-applied the wallpaper although every Desktop matched"
+rm -f "${LP_HOME}/.config/yabai/home-layout.json"; lp2
+grep -q "layout restore" "${LP_CALLS}" && fail "login pass: restored shapes without a saved layout"
+say "login pass: tile shapes restored when saved; wallpaper re-applied only when a Desktop differs"
+
 say "PASS home_test.sh"

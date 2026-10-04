@@ -31,7 +31,7 @@ touched. Put lasting changes in the places marked "you".
 | `~/.config/skhd/learn`, `focus-dir`, `browser-window`, `learn.style.json`; `~/.config/yabai/yabai-layout`, `tree-guard` | Gallery | no, overwritten | removed |
 | `~/.config/yabai/yabairc` | Gallery | no, overwritten | removed; your original comes back from `.gallery-bak` |
 | `~/.config/yabai/yabairc.local` | you | yes, the installer never creates or touches it | yes |
-| `~/.config/yabai/rules.local` | you (written by `gallery home save`) | yes | yes |
+| `~/.config/yabai/rules.local`, `home-layout.json` | you (written by `gallery home save`) | yes | yes |
 | `~/.config/gallery/state/*.json` (font, glass, borders, console, terminal, agent, backgrounds, weather, widgets) | you, written by the `gallery` verbs | yes | yes; deleted by `--purge` |
 | `~/.config/gallery/state/theme.*`, `terminals/`, `crystal.css` | Gallery, generated | rewritten on every render | kept; deleted by `--purge` |
 | `~/.config/gallery/themes/<theme>` for a theme the Gallery ships | Gallery | `colors.toml` is overwritten; files you added (such as `backgrounds/`) stay | kept; deleted by `--purge` |
@@ -406,6 +406,10 @@ gallery home save      # write rules.local from the current layout and apply it
 gallery home apply     # re-source rules.local and apply it live
 ```
 
+`home save` also records each Desktop's tile shape (which window is full
+height, how the rest are split, the ratios) in
+`~/.config/yabai/home-layout.json`.
+
 `home save` leaves terminals and the browser out (they roam; add apps with
 `--roam A,B`), previews with `--dry-run`, and keeps the previous file as
 `rules.local.prev`. Nothing saves it automatically. Because `save` rewrites
@@ -421,6 +425,15 @@ itself, at the first quiet moment: no window opened, closed or moved for 15
 seconds and no keyboard or mouse use for 5. It waits up to 10 minutes and
 otherwise leaves the windows alone; each run is logged in
 `~/.config/gallery/gallery-home.log`. A `gallery reload` does not repeat it.
+
+The same pass then rebuilds the saved tile shapes. Windows are matched to
+their saved places by app, and by title where that is unique; a Desktop is
+rebuilt only when its tiled windows are the same apps as when you saved, and
+left as it is otherwise (or when it is already in shape). Of several windows
+of one app, which lands in which place is not guaranteed; the shape is.
+Finally, if a Desktop shows a different wallpaper from the main one (macOS
+keeps one per Desktop, and a Desktop added after the last theme change keeps
+an old picture), it re-applies the current wallpaper to all of them.
 
 ### The focus outline
 

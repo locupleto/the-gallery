@@ -129,6 +129,16 @@ itself at the first quiet moment after you log in (nothing opening or moving,
 and you not typing or using the mouse), and `gallery home apply` does it by
 hand any time. `~/.config/gallery/gallery-home.log` shows when it ran.
 
+The tiles on a Desktop can also come back in another shape (the full-height
+window on the other side, say), because the tiler builds each Desktop in the
+order macOS reopens the windows. `gallery home save` records the shapes too,
+and the same pass rebuilds them, as long as the Desktop holds the same apps
+as when you saved. With several windows of one app (three terminals, say) the
+shape comes back but which window sits where may differ.
+
+A Desktop showing another wallpaper than the rest is put right by the same
+pass, or at once with `gallery bg apply`.
+
 ### How do I use more than one display?
 
 super + h / j / k / l continues onto the neighbouring display when there is

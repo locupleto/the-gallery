@@ -3763,6 +3763,13 @@ for r in data:
   roam_display="$(printf '%s\n' "${content}" | sed -n 's/^# Roaming (no rule): //p')"
 
   echo "home: ${apps_pinned} apps pinned, ${windows_pinned} windows pinned by title, roaming: ${roam_display} -> ${RULES_LOCAL_FILE}"
+
+  # The tile shapes too (which side is full height, the split ratios), so the
+  # after-login pass can rebuild them (tiler/yabai-layout restore --remap).
+  if [ -x "${HOME_LAYOUT_TOOL}" ] && command -v yabai >/dev/null 2>&1 \
+     && "${HOME_LAYOUT_TOOL}" save --file "${HOME_LAYOUT_FILE}" >/dev/null 2>&1; then
+    echo "home: tile shapes saved -> ${HOME_LAYOUT_FILE}"
+  fi
 }
 
 cmd_home_apply() {
@@ -3792,6 +3799,8 @@ HOME_QUIET_FOR="${GALLERY_HOME_QUIET_FOR:-15}"
 HOME_IDLE_FOR=5
 HOME_QUIET_TIMEOUT="${GALLERY_HOME_QUIET_TIMEOUT:-600}"
 HOME_LOG="${CONFIG_DIR}/gallery-home.log"
+HOME_LAYOUT_TOOL="${GALLERY_LAYOUT_TOOL:-${HOME}/.config/yabai/yabai-layout}"
+HOME_LAYOUT_FILE="${HOME}/.config/yabai/home-layout.json"
 
 home_log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "${HOME_LOG}" 2>/dev/null || true; }
 
@@ -3829,6 +3838,55 @@ except Exception:
 print(" ".join(sorted("%s:%s" % (w.get("id"), w.get("space")) for w in ws)))'
 }
 
+# The saved tile shapes, once the apps are on their Desktops (a moment for
+# the moves to land first). Each Desktop the tool rebuilt or left is logged.
+home_login_shapes() {
+  [ -f "${HOME_LAYOUT_FILE}" ] && [ -x "${HOME_LAYOUT_TOOL}" ] || return 0
+  sleep "${GALLERY_HOME_SETTLE:-2}"
+  local out
+  out="$("${HOME_LAYOUT_TOOL}" restore --remap --file "${HOME_LAYOUT_FILE}" --wait 10 2>&1)" || true
+  printf '%s\n' "${out}" | sed -n 's/^  \(space .*\)/\1/p' | while IFS= read -r line; do
+    home_log "login pass: shapes: ${line}"
+  done
+}
+
+# macOS keeps a wallpaper per Desktop, and a Desktop added after the last
+# theme or wallpaper change keeps whatever picture it got (an update leaves
+# the wallpaper alone). If any Desktop's picture differs from the main one,
+# re-apply the current wallpaper, which syncs them all (30-wallpaper.sh).
+home_login_wallpaper() {
+  local store="${GALLERY_WALLPAPER_STORE:-${HOME}/Library/Application Support/com.apple.wallpaper/Store/Index.plist}"
+  [ -f "${store}" ] || return 0
+  [ "$(readlink "${CONFIG_DIR}/themes/current" 2>/dev/null)" ] || return 0
+  if python3 - "${store}" <<'PY' 2>/dev/null
+import plistlib, sys
+with open(sys.argv[1], "rb") as fh:
+    spaces = plistlib.load(fh).get("Spaces") or {}
+def pictures(entry):
+    found = []
+    def walk(desk):
+        try:
+            cfg = plistlib.loads(desk["Content"]["Choices"][0]["Configuration"])
+            found.append(cfg["url"]["relative"])
+        except Exception:
+            pass
+    walk((entry.get("Default") or {}).get("Desktop") or {})
+    for disp in (entry.get("Displays") or {}).values():
+        walk((disp or {}).get("Desktop") or {})
+    return found
+main = pictures(spaces.get("") or {})
+if not main:
+    sys.exit(1)
+stale = any(p != main[0] for e in spaces.values() for p in pictures(e))
+sys.exit(0 if stale else 1)
+PY
+  then
+    if "${GALLERY_SELF:-$0}" bg apply >/dev/null 2>&1; then
+      home_log "login pass: a Desktop showed another wallpaper; re-applied the current one"
+    fi
+  fi
+}
+
 cmd_home_login_pass() {
   local session age marker="${CONFIG_DIR}/state/home-login-pass"
   [ -f "${RULES_LOCAL_FILE}" ] || return 0
@@ -3853,6 +3911,8 @@ cmd_home_login_pass() {
       sh "${RULES_LOCAL_FILE}" >/dev/null 2>&1 || true
       yabai -m rule --apply
       home_log "login pass: home rules applied after ${waited}s"
+      home_login_shapes
+      home_login_wallpaper
       return 0
     fi
   done

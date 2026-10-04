@@ -160,6 +160,8 @@ say "running tests/import_test.sh"; "${SCRIPT_DIR}/import_test.sh" || fail "impo
 
 say "running tests/home_test.sh"; "${SCRIPT_DIR}/home_test.sh" || fail "home_test.sh failed"
 
+say "running tests/layout_test.sh"; "${SCRIPT_DIR}/layout_test.sh" || fail "layout_test.sh failed"
+
 say "running tests/tree_guard_test.sh"; "${SCRIPT_DIR}/tree_guard_test.sh" || fail "tree_guard_test.sh failed"
 
 say "running tests/agent_test.sh"; "${SCRIPT_DIR}/agent_test.sh" || fail "agent_test.sh failed"

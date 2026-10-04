@@ -10,7 +10,17 @@ rebuilds every tree from scratch and loses all of that) can be undone.
 
     yabai-layout save    [--file PATH]              # PATH default: see below
     yabai-layout restore [--file PATH] [--wait SEC]  # SEC default: 30
+    yabai-layout restore --remap [--file PATH]       # after a login, see below
     yabai-layout verify  [--file PATH]
+
+--remap (used by `gallery home save` / the Gallery's after-login pass): window
+ids change at every login, so the saved windows are first matched to the
+windows open now, Space by Space -- by app and title where that pair is
+unique, then by app in id order. Only a Space whose saved tiled windows all
+find a match, with nothing extra tiled there now, is rebuilt; any other Space
+is left as it is, and so is one already in the saved shape. Floating windows
+are not touched. Which of several windows of one app lands in which slot is
+therefore not guaranteed; the shape (splits, sides, ratios) is.
 
 Default snapshot file: ~/.config/yabai/layout-snapshot.json
 
@@ -239,6 +249,12 @@ def cmd_save(args) -> int:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(snapshot, indent=2) + "\n")
+    # Put back the zoom undone above: saving must not change the desktop.
+    for wid, (fz, pz) in zoom_state.items():
+        if fz:
+            yabai("window", str(wid), "--toggle", "zoom-fullscreen", check=False)
+        if pz:
+            yabai("window", str(wid), "--toggle", "zoom-parent", check=False)
     n_windows = sum(len(s["windows"]) for s in spaces_out.values())
     print(f"[yabai-layout] saved {n_windows} windows across {len(spaces_out)} spaces -> {path}")
     return 0
@@ -560,6 +576,85 @@ def rezoom(snapshot, live_by_id, summary: list[str]):
         summary.append(f"zoom: {n} windows re-zoomed")
 
 
+# --------------------------------------------------------------------------- #
+# remap (ids change at every login)
+# --------------------------------------------------------------------------- #
+
+def _tiled_live(windows, space_index):
+    return [w for w in windows
+            if w["space"] == space_index and not w["is-floating"] and not w["is-minimized"]
+            and w.get("has-ax-reference", True) and w.get("stack-index", 0) == 0]
+
+
+def remap_snapshot(snapshot, live_windows):
+    """Return (snapshot with each restorable Space's saved ids replaced by the
+    matching live ids, notes). Spaces that cannot be matched completely are
+    dropped from the returned snapshot (so restore leaves them alone), as
+    are floating and minimized windows. Pure: no yabai calls."""
+    out = dict(snapshot)
+    out["spaces"] = {}
+    out["focused_window"] = None
+    notes = []
+    for key, space in snapshot["spaces"].items():
+        index = space.get("space_index")
+        clean, orphans, stacked, _floats = _classify(space["windows"])
+        if not clean:
+            continue
+        if stacked:
+            notes.append(f"space {index}: stacked windows unsupported -- left as it is")
+            continue
+        live = _tiled_live(live_windows, index)
+        if len(live) != len(clean):
+            notes.append(f"space {index}: {len(clean)} tiled windows saved, {len(live)} open now -- left as it is")
+            continue
+        unmatched = sorted(live, key=lambda w: w["id"])
+        mapping = {}
+        # 1. app and title, where that pair is unique on both sides
+        def pairs(ws, app_key, title_key):
+            seen = {}
+            for w in ws:
+                seen.setdefault((w[app_key], w[title_key]), []).append(w)
+            return seen
+        saved_pairs = pairs(clean, "app", "title")
+        live_pairs = pairs(unmatched, "app", "title")
+        for pair, ws in saved_pairs.items():
+            if len(ws) == 1 and len(live_pairs.get(pair, [])) == 1:
+                lw = live_pairs[pair][0]
+                mapping[ws[0]["id"]] = lw["id"]
+                unmatched.remove(lw)
+        # 2. app alone, saved windows top-left first, live ones in id order
+        rest = sorted((w for w in clean if w["id"] not in mapping),
+                      key=lambda w: (w["frame"]["y"], w["frame"]["x"]))
+        ok = True
+        for w in rest:
+            lw = next((x for x in unmatched if x["app"] == w["app"]), None)
+            if lw is None:
+                ok = False
+                break
+            mapping[w["id"]] = lw["id"]
+            unmatched.remove(lw)
+        if not ok or unmatched:
+            notes.append(f"space {index}: the open windows are not the saved apps -- left as it is")
+            continue
+        new_space = dict(space)
+        new_space["windows"] = [dict(w, id=mapping[w["id"]]) for w in clean]
+        out["spaces"][key] = new_space
+    return out, notes
+
+
+def in_shape(space_snap, live_by_id, eps) -> bool:
+    """True if every saved tiled window already sits on its saved frame."""
+    for w in space_snap["windows"]:
+        lw = live_by_id.get(w["id"])
+        if lw is None:
+            return False
+        sf, lf = w["frame"], lw["frame"]
+        if max(abs(sf["x"] - lf["x"]), abs(sf["y"] - lf["y"]),
+               abs(sf["w"] - lf["w"]), abs(sf["h"] - lf["h"])) > eps:
+            return False
+    return True
+
+
 def cmd_restore(args) -> int:
     path = Path(args.file).expanduser()
     if not path.exists():
@@ -567,17 +662,25 @@ def cmd_restore(args) -> int:
         return 1
     snapshot = json.loads(path.read_text())
 
-    saved_ids = {w["id"] for space in snapshot["spaces"].values() for w in space["windows"]}
+    summary: list[str] = []
+    if args.remap:
+        snapshot, notes = remap_snapshot(snapshot, query_windows())
+        summary.extend(notes)
+        saved_ids = set()
+    else:
+        saved_ids = {w["id"] for space in snapshot["spaces"].values() for w in space["windows"]}
     if not wait_for_yabai(args.wait, saved_ids):
         print(f"[yabai-layout] yabai did not answer within {args.wait}s", file=sys.stderr)
         return 1
 
     gap = snapshot["config"]["window_gap"]
     eps = gap + EPS_MARGIN
-    summary: list[str] = []
 
     for space in sorted(snapshot["spaces"].values(), key=lambda s: (s["space_index"] or 0)):
         live_by_id = {w["id"]: w for w in query_windows()}
+        if args.remap and in_shape(space, live_by_id, eps):
+            summary.append(f"space {space['space_index']}: already in the saved shape")
+            continue
         restore_space(space, live_by_id, gap, eps, summary)
 
     live_by_id = {w["id"]: w for w in query_windows()}
@@ -655,6 +758,8 @@ def main() -> int:
     p_restore = sub.add_parser("restore", help="replay a saved yabai layout")
     p_restore.add_argument("--file", default=str(DEFAULT_FILE))
     p_restore.add_argument("--wait", type=float, default=30.0)
+    p_restore.add_argument("--remap", action="store_true",
+                           help="match saved windows to the open ones by app (after a login)")
 
     p_verify = sub.add_parser("verify", help="compare live frames to a saved snapshot")
     p_verify.add_argument("--file", default=str(DEFAULT_FILE))

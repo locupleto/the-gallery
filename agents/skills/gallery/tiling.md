@@ -48,8 +48,13 @@ gallery home apply               # re-apply it live
 - Terminals and the browser roam (`--roam A,B` changes the list). An app on
   several Desktops is pinned per window by title, which breaks when the title
   changes.
-- After a login the Gallery applies the rules once more at the first quiet
-  moment (logged in `~/.config/gallery/gallery-home.log`).
+- `home save` also records each Desktop's tile shape in
+  `~/.config/yabai/home-layout.json`. After a login the Gallery applies the
+  rules once more at the first quiet moment, then rebuilds the shapes where
+  the Desktop holds the same apps (logged in
+  `~/.config/gallery/gallery-home.log`).
+- A Desktop showing a different wallpaper from the rest: `gallery bg apply`
+  syncs them all (the after-login pass does it too).
 - Keep other rules in `yabairc.local`, not `rules.local`.
 
 ## Floating
