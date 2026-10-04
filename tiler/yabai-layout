@@ -396,6 +396,19 @@ def _unfloat_here(win_id: int):
     yabai("window", str(win_id), "--toggle", "float", check=False)
 
 
+def _placed(win_id: int, anchor_id: int, axis: str) -> bool:
+    """True if win_id is tiled on anchor_id's Space, directly east (axis x)
+    or south (axis y) of it -- where an insert east|south puts it."""
+    w, a = query_window_by_id(win_id), query_window_by_id(anchor_id)
+    if not w or not a or w.get("space") != a.get("space") or w.get("is-floating"):
+        return False
+    wf, af = w["frame"], a["frame"]
+    eps = 2 * EPS_MARGIN + 8
+    if axis == "x":
+        return abs(wf["x"] - (af["x"] + af["w"])) <= eps and abs(wf["y"] - af["y"]) <= eps
+    return abs(wf["y"] - (af["y"] + af["h"])) <= eps and abs(wf["x"] - af["x"]) <= eps
+
+
 def _build(node, anchor_id, gap):
     """Pre-order replay: split anchor_id's current cell to place the
     "second" side, recurse into both sides. See module docstring for the
@@ -410,8 +423,13 @@ def _build(node, anchor_id, gap):
     yabai("window", str(anchor_id), "--insert", direction, check=False)
     _unfloat_here(a2)
     time.sleep(0.15)
-    yabai("window", str(a2), "--warp", str(anchor_id), check=False)
-    time.sleep(0.15)
+    # On the Space in view the un-float itself honours the anchor's pending
+    # insert and puts a2 in place; warping it then would move it to the
+    # other side. Only a window that landed elsewhere (another Space, the
+    # case after a restart with focus away) is warped home.
+    if not _placed(a2, anchor_id, axis):
+        yabai("window", str(a2), "--warp", str(anchor_id), check=False)
+        time.sleep(0.15)
     yabai("window", str(anchor_id), "--ratio", f"abs:{node['ratio']:.4f}", check=False)
     # No "clear" toggle here: the warp consumes the pending insert, and
     # `--insert` is a toggle, so re-issuing the direction would re-arm it
