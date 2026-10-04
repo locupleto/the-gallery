@@ -26,6 +26,11 @@ the Mac you already have.
   agent of choice (Claude Code, Codex, Gemini, opencode, or any other CLI) in a
   new tile, started in the folder you keep your projects in. Run three side
   by side, each on its own task, and move between them with the keyboard.
+- **An agent that knows the Gallery.** The Gallery installs a skill that
+  shows your agent every key, setting and `gallery` command. New to it? Ask
+  "how do I move this window to Desktop 3?" or "what can I change about the
+  outline?". Know your way around? Ask for the tweak itself: "make the gaps
+  smaller", "put Spotify on super + p".
 - **Omarchy plugins on a Mac.** A small plugin host, modelled on Omarchy 4's
   plugin system, runs floating terminal tools, background services and
   unmodified Omarchy QML plugins such as Radio Atlas.
@@ -59,7 +64,8 @@ uninstall. See [Terminals](docs/CUSTOMIZING.md#terminals).
 Then press **super + space** (super is left Option) for the Learn menu, or
 **super + shift + space** for every key on one sheet, open a few windows
 with **super + return**, and browse the themes with **shift + ctrl + super +
-space**. To take a break from it:
+space**. Wondering how something works? Press **shift + ctrl + super + a**
+and ask your agent. To take a break from it:
 
 ```sh
 gallery off                # plain macOS: windows back where they were, keys normal
@@ -336,9 +342,11 @@ Learn sheets under `~/.config/gallery/`; updates never overwrite those.
 update replaces, and has recipes for keys, tiling, themes, wallpapers, fonts,
 plugins, the coding agent and sheets.
 
-Or ask your coding agent: "make the gaps between windows smaller", "put
-Spotify on super + p". Like Omarchy, the Gallery ships an agent skill that
-tells the agent where each setting lives and how to apply it safely; the
+Or ask your coding agent, to explain ("what does super + t do?", "where do
+my own keys go?") or to make the change ("make the gaps between windows
+smaller", "put Spotify on super + p"). Like Omarchy, the Gallery ships an
+agent skill that tells the agent how the Gallery works, where each setting
+lives and how to apply a change safely; the
 installer links it into `~/.agents/skills`, which Codex, Gemini CLI, Copilot
 CLI, opencode and crush read, and into Claude Code's `~/.claude/skills`
 ([more](docs/CUSTOMIZING.md#let-your-agent-do-it)).

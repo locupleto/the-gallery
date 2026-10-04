@@ -1,8 +1,9 @@
 ---
 name: gallery
 description: >
-  REQUIRED for customizing The Gallery, the Omarchy-style macOS desktop
-  (yabai tiling, skhd keys, Hammerspoon, themes) installed on this Mac. Use
+  REQUIRED for explaining and customizing The Gallery, the Omarchy-style
+  macOS desktop (yabai tiling, skhd keys, Hammerspoon, themes) installed on
+  this Mac. Use for any question about how it works or what a key does, and
   when editing ~/.config/skhd/, ~/.config/yabai/ or ~/.config/gallery/, or
   when the user asks about keybindings, hotkeys, tiling, gaps, padding,
   window rules, which Desktop/Space an app lives on, the focus outline or
@@ -20,8 +21,12 @@ skhd files), JankyBorders draws the focus outline, Hammerspoon hosts the
 plugins, and one theme colours the terminals, outline, wallpaper and TUIs.
 Everything is driven by the `gallery` command in `~/bin`.
 
-This skill is for changing an installed Gallery to suit its user. It is not
-for developing The Gallery itself.
+This skill is for explaining an installed Gallery to its user and changing
+it to suit them; many users are new to tiling and will ask how things work
+before they ask for changes. Answer from these files and the live state
+(`gallery home show`, `gallery theme current`, the key list in
+`~/.config/skhd/Tiler-Keys.md`, see `keys.md`). It is not for
+developing The Gallery itself.
 
 ## The rules
 

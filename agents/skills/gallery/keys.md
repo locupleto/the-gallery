@@ -10,6 +10,15 @@ this order:
 skhd keeps the first definition of a hotkey and silently drops later ones, so
 a key bound in `local.skhd` replaces the shipped one and a new key is added.
 
+## Which key does what
+
+`~/.config/skhd/Tiler-Keys.md` lists every live key with its description,
+the user's own included, grouped as on the key sheet (super + shift + space).
+Answer "how do I ..." and "what does super + x do?" from it, not from
+memory: the user's `local.skhd` may have changed a shipped key. It is
+rebuilt by `~/.config/skhd/learn install`. The other Learn sheets (super +
+space) are in `~/.config/gallery/sheets/`.
+
 ## Syntax
 
 `lalt` is left Option ("super"); right Option is deliberately unbound so it

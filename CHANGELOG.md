@@ -5,6 +5,12 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## Unreleased
+
+- The agent skill now covers questions as well as changes: it tells the
+  agent to answer "which key does what" from the live key list
+  (`~/.config/skhd/Tiler-Keys.md`), and the README says so.
+
 ## 0.1.0 (2026-10-04)
 
 The first public release.

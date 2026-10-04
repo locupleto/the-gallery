@@ -906,6 +906,11 @@ without asking, run `gallery doctor` afterwards. So you can simply ask: "make
 the gaps smaller", "add a key that opens Spotify", "make a darker copy of
 this theme", "put Obsidian on my second display".
 
+It is just as good for learning your way around. Ask it what a key does,
+which keys move windows between Desktops, why a window does not tile, or
+what you could change about the theme, and it answers from the same skill,
+for the Gallery you have installed.
+
 The installer copies the skill to `~/.config/gallery/agents/skills/gallery/`
 and links it into two places: the shared `~/.agents/skills`, which Codex,
 Gemini CLI, Copilot CLI, opencode and crush all read, and
