@@ -105,7 +105,7 @@ say "exclusions OK (iTerm2/Learn:/floating/AXDialog produced no rules)"
 
 # --- title-changed signal: removed first, re-added scoped to Safari, ---------
 # --- re-applying exactly the title rules -------------------------------------
-assert_contains "yabai -m signal --remove home-title-changed >/dev/null 2>&1"
+assert_contains "yabai -m signal --remove home-title-changed >/dev/null 2>&1 || true"
 assert_contains "yabai -m signal --add label=home-title-changed event=window_title_changed app='^(Safari)\$' action='yabai -m rule --apply home-safari-1'"
 say "title-changed signal OK"
 
@@ -116,6 +116,13 @@ printf '%s\n' "${OUT_ONE}" | grep -F -q -- "yabai -m signal --remove home-title-
 if printf '%s\n' "${OUT_ONE}" | grep -F -q -- "yabai -m signal --add"; then
   fail "signal added although no title rules exist"
 fi
+# ... and such a file must run cleanly when that signal does not exist (a
+# failing last line made `home save` exit silently).
+printf '%s\n' "${OUT_ONE}" > "${WORK_DIR}/rules-one.sh"
+mkdir -p "${WORK_DIR}/failstub"
+printf '#!/bin/sh\ncase "$*" in *"signal --remove"*) exit 1 ;; esac\nexit 0\n' > "${WORK_DIR}/failstub/yabai"
+chmod +x "${WORK_DIR}/failstub/yabai"
+PATH="${WORK_DIR}/failstub:${PATH}" sh "${WORK_DIR}/rules-one.sh" || fail "a rules file without title rules fails when the signal is absent"
 say "signal absent without title rules OK"
 
 # --- header sanity -----------------------------------------------------------

@@ -3641,8 +3641,10 @@ for app in sorted(by_app.keys(), key=str.lower):
 # Rules match a window's title only at creation; re-apply the title rules
 # whenever one of their apps changes a title (see the section comment in
 # bin/gallery). The remove comes first so a save without title rules also
-# drops the signal a previous save installed.
-signal_lines = ["yabai -m signal --remove home-title-changed >/dev/null 2>&1"]
+# drops the signal a previous save installed. `|| true`: removing a signal
+# that is not there fails, and the file must still run cleanly (it is the
+# last line when there are no title rules).
+signal_lines = ["yabai -m signal --remove home-title-changed >/dev/null 2>&1 || true"]
 if title_rules:
     apps_re = "|".join(escape_regex(a) for a in sorted(set(a for a, _l in title_rules), key=str.lower))
     action = "; ".join("yabai -m rule --apply %s" % l for _a, l in title_rules)
