@@ -1,7 +1,7 @@
 # The Gallery
 
 **An Omarchy-style tiled desktop for macOS, and a fine place to run your coding agents.**
-A simple way for Mac users to get much of the Omarchy experience on top of
+A simple way for Mac users to get a taste of the Omarchy experience on top of
 macOS, without the hassle of running Linux in a virtual machine.
 
 [Omarchy](https://omarchy.org) is David Heinemeier Hansson's take on what a
