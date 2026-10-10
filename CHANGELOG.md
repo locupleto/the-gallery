@@ -10,6 +10,10 @@ to carry your setup across. `gallery version` prints the version you have.
 - The agent skill now covers questions as well as changes: it tells the
   agent to answer "which key does what" from the live key list
   (`~/.config/skhd/Tiler-Keys.md`), and the README says so.
+- Fixed: the windows on a second display could be re-tiled in a new order
+  when windows opened or closed elsewhere. The tiler's gap repair had
+  remembered that display as larger than it is, after a window once hung
+  over its edge; the remembered area is now kept within the display.
 
 ## 0.1.0 (2026-10-04)
 

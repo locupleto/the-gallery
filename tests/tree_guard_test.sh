@@ -171,4 +171,16 @@ run_guard_auto "${BROKEN2}" "${WORK_DIR}/state-auto" "${WORK_DIR}/repairs-change
 [ -s "${WORK_DIR}/repairs-changed" ] || fail "a hole with a changed window set was skipped"
 say "the skip is void once the window set changes -- a real hole is still repaired"
 
+# --- 9. a remembered rect past the display's edge is cut back to it -------------
+# Recorded 2026-10-10: a window that had once hung over the right and bottom
+# edges left the cache 319 x 264 pt larger than the display. Every Space there
+# then read as 74% covered and was rebuilt on each signal, shuffling its windows.
+POISONED="${WORK_DIR}/state-poisoned"
+echo "1 0,0,2560,1440 8 39 2879 1704" > "${POISONED}"
+out="$(run_guard "${HEALTHY}" "${POISONED}")" || fail "a rect cached past the display edge made a whole Space read as a hole: ${out}"
+grep -q "space 1: whole" <<<"${out}" || fail "expected 'whole' with the poisoned cache, got: ${out}"
+read -r _ _ _ _ cr cb < "${POISONED}"
+[ "${cr}" -le 2560 ] && [ "${cb}" -le 1440 ] || fail "the cache still reaches past the display: $(cat "${POISONED}")"
+say "a cached rect past the display edge is clamped to it -- ${out}"
+
 say "PASS"
