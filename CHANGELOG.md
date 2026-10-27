@@ -7,6 +7,8 @@ to carry your setup across. `gallery version` prints the version you have.
 
 ## Unreleased
 
+- super + shift + f opens Finder at the home folder: Omarchy's file-manager
+  key. The super + o keys (home, Downloads, Desktop) stay.
 - The agent skill now covers questions as well as changes: it tells the
   agent to answer "which key does what" from the live key list
   (`~/.config/skhd/Tiler-Keys.md`), and the README says so.

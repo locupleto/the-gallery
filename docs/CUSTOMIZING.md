@@ -147,7 +147,7 @@ arrows and `1` to `9`):
 grep -hE '^[a-z].* : ' ~/.config/skhd/tiler.skhd ~/.config/skhd/gallery.skhd
 ```
 
-Calendar (`super + c`) and the Finder keys (`super + o`) are in
+Calendar (`super + c`) and the Finder keys (`super + shift + f`, `super + o`) are in
 `tiler.skhd` too, and you can override them the same way. Web apps saved from
 Safari live in `~/Applications`; `open -a` raises the window they already
 have.

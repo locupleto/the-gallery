@@ -78,6 +78,8 @@ animations and opacity, which this setup does not need. SIP stays enabled.
 | super + shift + r | restart yabai, reload skhd |
 | shift + ctrl + super + escape | switch the Gallery off (plain macOS, windows back where they were, stays off across restarts) and on again; also `gallery off` / `gallery on` |
 | super + c | Calendar |
+| super + shift + f | file manager: Finder at your home folder (Omarchy's key) |
+| super + o / shift + o / ctrl + o | Finder at your home folder / Downloads / Desktop |
 | super + a / shift + a, e, y, x, g / shift + g | Omarchy's other app slots: not bound out of the box (they are personal); examples in `local.skhd.example` |
 | super + space | Learn menu: pick a cheat sheet (first press: allow "skhd wants to control iTerm2") |
 | super + shift + space | the key sheet, generated from `local.skhd`, `tiler.skhd` and `gallery.skhd` |

@@ -154,9 +154,12 @@ shift + lalt - r : yabai --restart-service; skhd --reload
 lalt - c : open -a Calendar
 
 # --- folders (Finder) ------------------------------------------------------------
-# Omarchy's super+F opens the file manager; F is zoom here, so folders live on O.
+# Omarchy's file manager is super+shift+F (super+F is full screen, zoom here).
+# The O family is the Gallery's own extra: home, Downloads and Desktop.
 # `open <dir>` needs no Automation grant: it raises an existing Finder window on
 # that folder or opens a new one, which yabai tiles like any other window.
+## file manager: Finder at the home folder
+shift + lalt - f : open "$HOME"
 ## Finder: home folder
 lalt - o : open "$HOME"
 ## Finder: Downloads

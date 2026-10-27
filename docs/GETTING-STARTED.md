@@ -147,6 +147,7 @@ The first press of a key that opens something may raise a macOS prompt such as
 | super + s | stacked / tiled for this Space |
 | super + m | minimize |
 | super + w | close the window |
+| super + shift + f | file manager: your home folder in Finder |
 | super + o | open your home folder in Finder |
 | super + shift + ctrl + space | theme picker |
 | super + shift + ctrl + b | background picker |
