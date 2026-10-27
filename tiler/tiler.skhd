@@ -149,9 +149,11 @@ shift + lalt - r : yabai --restart-service; skhd --reload
 # y YouTube, x X, g messaging. Which apps those are is personal, so only Calendar
 # is bound here; the rest are examples in tiler/local.skhd.example -- copy them
 # into ~/.config/skhd/local.skhd and point them at your own apps. (Split toggle
-# moved to shift+e to free super+e.)
+# moved to shift+e to free super+e.) Each goes through tiler/app-focus: a running
+# app's window is focused on whichever Desktop it is, which `open -a` alone does
+# not do when macOS is set not to follow an activated app.
 ## Calendar
-lalt - c : open -a Calendar
+lalt - c : "$HOME/.config/skhd/app-focus" Calendar
 
 # --- folders (Finder) ------------------------------------------------------------
 # Omarchy's file manager is super+shift+F (super+F is full screen, zoom here).

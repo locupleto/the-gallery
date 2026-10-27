@@ -28,7 +28,7 @@ touched. Put lasting changes in the places marked "you".
 |---|---|---|---|
 | `~/.config/skhd/local.skhd` | you | yes, never overwritten | yes if you edited it; removed only while it is still the untouched seed copy |
 | `~/.config/skhd/skhdrc`, `tiler.skhd`, `gallery.skhd` | Gallery | no, overwritten (an edited copy is saved first, see below) | removed; your original `skhdrc` comes back from `.gallery-bak` |
-| `~/.config/skhd/learn`, `focus-dir`, `browser-window`, `learn.style.json`; `~/.config/yabai/yabai-layout`, `tree-guard` | Gallery | no, overwritten | removed |
+| `~/.config/skhd/learn`, `focus-dir`, `browser-window`, `app-focus`, `learn.style.json`; `~/.config/yabai/yabai-layout`, `tree-guard` | Gallery | no, overwritten | removed |
 | `~/.config/yabai/yabairc` | Gallery | no, overwritten | removed; your original comes back from `.gallery-bak` |
 | `~/.config/yabai/yabairc.local` | you | yes, the installer never creates or touches it | yes |
 | `~/.config/yabai/rules.local`, `home-layout.json` | you (written by `gallery home save`) | yes | yes |
@@ -132,11 +132,11 @@ personal. `local.skhd.example` has them ready to uncomment; this is the shape:
 
 ```sh
 ## AI assistant
-lalt - a : open -a "/Applications/Claude.app"
+lalt - a : "$HOME/.config/skhd/app-focus" "/Applications/Claude.app"
 ## Email web app
-lalt - e : open -a "$HOME/Applications/Gmail.app"
+lalt - e : "$HOME/.config/skhd/app-focus" "$HOME/Applications/Gmail.app"
 ## messaging
-lalt - g : open -a Telegram
+lalt - g : "$HOME/.config/skhd/app-focus" Telegram
 ```
 
 Before choosing a key, see what is taken (`lalt` plus a letter is mostly in
@@ -149,8 +149,10 @@ grep -hE '^[a-z].* : ' ~/.config/skhd/tiler.skhd ~/.config/skhd/gallery.skhd
 
 Calendar (`super + c`) and the Finder keys (`super + shift + f`, `super + o`) are in
 `tiler.skhd` too, and you can override them the same way. Web apps saved from
-Safari live in `~/Applications`; `open -a` raises the window they already
-have.
+Safari live in `~/Applications`. `app-focus` takes you to the app's window
+on whichever Desktop it is, and starts the app when it is not running; plain
+`open -a` only activates a running app, which on another Desktop can look
+like nothing happened.
 
 ### Keyboard layouts
 
@@ -410,9 +412,16 @@ gallery home apply     # re-source rules.local and apply it live
 height, how the rest are split, the ratios) in
 `~/.config/yabai/home-layout.json`.
 
-`home save` leaves terminals and the browser out (they roam; add apps with
-`--roam A,B`), previews with `--dry-run`, and keeps the previous file as
-`rules.local.prev`. Nothing saves it automatically. Because `save` rewrites
+`home save` leaves terminals out (they roam; add apps with `--roam A,B`),
+previews with `--dry-run`, and keeps the previous file as `rules.local.prev`.
+With `--keep-absent` an app that has no window open right now keeps the
+plain home rule the previous file gave it (a nightly save uses this).
+
+A home is for an app's first window. yabai applies a rule to every new
+window, so `rules.local` also installs a `home-keep-here` signal: a later
+window of an app that has been running for a minute (super + b, Cmd-N)
+is brought back to the Desktop you opened it on and focused. The windows an
+app restores as it starts still go home. Nothing saves it automatically. Because `save` rewrites
 the file, keep your own non-home rules in `yabairc.local`, not in
 `rules.local`. Space numbers are one global sequence across displays and shift
 if you add or remove a Space in Mission Control. The template is

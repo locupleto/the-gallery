@@ -44,8 +44,13 @@ gallery home apply               # re-apply it live
 ```
 
 - Only apps with a window open when saving get a home; an app that is not
-  running loses its old rule. Say so before saving.
-- Terminals and the browser roam (`--roam A,B` changes the list). An app on
+  running loses its old rule (unless `--keep-absent`). Say so before saving.
+- Terminals roam (`--roam A,B` adds to the list). `--keep-absent` keeps
+  the old plain rule of an app with no window open now.
+- A home is for an app's first window: the `home-keep-here` signal in
+  rules.local brings a later window (super + b, Cmd-N) back to the Desktop
+  it was opened on (`gallery home _keep-here`). App keys bound to
+  `~/.config/skhd/app-focus` take the user to the app's window wherever it is. An app on
   several Desktops is pinned per window by title, which breaks when the title
   changes.
 - `home save` also records each Desktop's tile shape in

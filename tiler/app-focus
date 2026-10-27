@@ -1,0 +1,98 @@
+#!/usr/bin/env sh
+# app-focus — take the view to an app's window, wherever it is (the app keys).
+#
+#   app-focus <app name or path>      as `open -a` takes it
+#   app-focus -b <bundle id>
+#
+# `open -a` alone only activates a running app. When its windows are on another
+# Desktop and macOS is set not to follow an activated app (System Settings >
+# Desktop & Dock, AppleSpacesSwitchOnActivate = 0), the key pressed on an empty
+# Desktop seemed to do nothing. yabai's window focus switches to the window's
+# Desktop (and display) whatever that setting says, so:
+#   - the app has a window: focus it -- one on a Desktop in view first, else the
+#     first yabai lists; a minimized one is brought back, a hidden app unhidden;
+#   - running without a window, or not running: `open` it (a reopen makes the
+#     new window), wait for that window and focus it, so the view follows it to
+#     its home Desktop when a home rule sends it there.
+#
+# Installed by tiler/install.sh next to skhdrc (launchd cannot read an external
+# volume, and the checkout may live on one). Test seam: APP_FOCUS_WAIT, the
+# seconds to wait for a new window (default 10).
+
+set -eu
+# skhd's PATH may lack Homebrew; appended, so a test's stubs still come first.
+PATH="${PATH}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+usage() { echo "usage: app-focus <app name or path> | -b <bundle id>" >&2; exit 2; }
+
+if [ "${1:-}" = "-b" ]; then
+  [ -n "${2:-}" ] || usage
+  bid="$2"
+  set -- -b "$2"
+else
+  [ -n "${1:-}" ] || usage
+  case "$1" in
+    */*) bid=$(plutil -extract CFBundleIdentifier raw -o - "${1%/}/Contents/Info.plist" 2>/dev/null || true) ;;
+    *)   bid=$(osascript -e "id of application \"$1\"" 2>/dev/null || true) ;;
+  esac
+  set -- -a "$1"
+fi
+
+# Without a bundle id there is nothing to find windows by: plain open.
+[ -n "${bid}" ] || exec open "$@"
+
+# pids of the running app (several for an app with more than one instance).
+pids() {
+  for asn in $(lsappinfo find "bundleid=${bid}" 2>/dev/null); do
+    lsappinfo info -only pid "${asn}" 2>/dev/null | sed -nE 's/.*pid = ([0-9]+).*/\1/p'
+  done | paste -sd, -
+}
+
+# pick <pids> -- prints "<window id> <minimized> <hidden>" for the window to
+# focus, nothing when the app has no standard window.
+pick() {
+  yabai -m query --windows 2>/dev/null | python3 -c '
+import json, sys
+pids = {int(p) for p in sys.argv[1].split(",") if p}
+try:
+    wins = json.load(sys.stdin)
+except Exception:
+    wins = []
+wins = [w for w in wins if w.get("pid") in pids and w.get("subrole") == "AXStandardWindow"]
+def rank(w):
+    return (bool(w.get("is-minimized")), not w.get("is-visible"))
+if wins:
+    w = sorted(wins, key=rank)[0]
+    print(w["id"], int(bool(w.get("is-minimized"))), int(bool(w.get("is-hidden"))))
+' "$1"
+}
+
+running=$(pids)
+if [ -n "${running}" ]; then
+  found=$(pick "${running}")
+  if [ -n "${found}" ]; then
+    id=${found%% *}; rest=${found#* }; min=${rest%% *}; hid=${rest#* }
+    # A hidden app's window cannot take focus until open unhides the app.
+    if [ "${hid}" = 1 ]; then open "$@" >/dev/null 2>&1 || true; fi
+    if [ "${min}" = 1 ]; then yabai -m window "${id}" --deminimize >/dev/null 2>&1 || true; fi
+    yabai -m window --focus "${id}" >/dev/null 2>&1 && exit 0
+  fi
+fi
+
+open "$@"
+# Ten seconds covers a cold start of a big app; a menu-bar app never shows a
+# window and the wait just ends.
+tries=$(( ${APP_FOCUS_WAIT:-10} * 5 ))
+while [ "${tries}" -gt 0 ]; do
+  running=$(pids)
+  if [ -n "${running}" ]; then
+    found=$(pick "${running}")
+    if [ -n "${found}" ]; then
+      yabai -m window --focus "${found%% *}" >/dev/null 2>&1 || true
+      exit 0
+    fi
+  fi
+  tries=$(( tries - 1 ))
+  sleep 0.2
+done
+exit 0

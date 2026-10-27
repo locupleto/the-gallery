@@ -62,7 +62,7 @@
 #   gallery weather icons --set meteocons-line|meteocons-fill
 #   gallery weather key --set <key> | --clear
 #   gallery home show
-#   gallery home save [--roam A,B] [--dry-run]
+#   gallery home save [--roam A,B] [--keep-absent] [--dry-run]
 #   gallery home apply
 #   gallery ghosts [list|fix [OWNER|ID]|forget]
 #   gallery agent [open [<name>]|inline [<name>]|status|list|set <name> [--command "<line>"]|add <name> --command "<line>"|remove <name>|dir [<path>|--clear]]
@@ -199,7 +199,7 @@ commands:
   weather key --set <key>         store the OpenWeatherMap API key (mode 600, never echoed)
   weather key --clear             remove the stored API key
   home show                       print the window -> Space map and live home-* rules
-  home save [--roam A,B] [--dry-run]
+  home save [--roam A,B] [--keep-absent] [--dry-run]
                                    snapshot the current layout into ~/.config/yabai/rules.local
   home apply                      re-source ~/.config/yabai/rules.local and apply it live
   ghosts [list]                   windows yabai cannot see (born behind the lock screen)
@@ -3565,6 +3565,7 @@ def regex_value(s):
 
 
 roam_csv, hostname, timestamp = sys.argv[1], sys.argv[2], sys.argv[3]
+previous_file = sys.argv[4] if len(sys.argv) > 4 else ""
 roam_list = []
 seen = set()
 for name in roam_csv.split(","):
@@ -3640,6 +3641,34 @@ for app in sorted(by_app.keys(), key=str.lower):
             )
     blocks.append("\n".join(lines))
 
+# --keep-absent: an app missing from this snapshot (closed, minimized, a
+# window with no readable title) keeps the plain home rule the previous file
+# gave it, unless it roams now. Title rules are never carried -- titles change
+# too often to keep blind -- and neither is a plain rule for an app this save
+# pinned some other way. The app pattern stops at the first unescaped quote,
+# so a title rule cannot pass for a plain one (the nightly script's greedy
+# `.+` did exactly that, 2026-10-27).
+carried = []
+if previous_file:
+    plain = re.compile(r"^yabai -m rule --add label=(home-\S+) app='\^((?:[^'\\]|\\.)*)\$' space=(\d+)$")
+    try:
+        prev_lines = open(previous_file, encoding="utf-8").read().splitlines()
+    except OSError:
+        prev_lines = []
+    seen_carry = set()
+    for line in prev_lines:
+        m = plain.match(line)
+        if not m:
+            continue
+        app = re.sub(r"\\(.)", r"\1", m.group(2))
+        if app in by_app or app in roam or app in seen_carry:
+            continue
+        seen_carry.add(app)
+        carried.append((app, line))
+if carried:
+    blocks.append("# Carried forward from the previous save (app absent now)\n"
+                  + "\n".join(line for _app, line in carried))
+
 # Rules match a window's title only at creation; re-apply the title rules
 # whenever one of their apps changes a title (see the section comment in
 # bin/gallery). The remove comes first so a save without title rules also
@@ -3658,6 +3687,23 @@ if title_rules:
     )
 blocks.append("\n".join(signal_lines))
 
+# A rule also acts on every LATER window of its app: a second Safari window
+# opened on Desktop 5 was thrown onto Safari's home Desktop and seemed never
+# to open. This signal hands each new window of a pinned app to `gallery home
+# _keep-here`, which brings such a window back to the Desktop in view (see
+# cmd_home_keep_here). Removed first for the same reason as the one above.
+keep_lines = ["yabai -m signal --remove home-keep-here >/dev/null 2>&1 || true"]
+pinned_apps = sorted(set(by_app.keys()) | set(a for a, _l in carried), key=str.lower)
+if pinned_apps:
+    keep_re = "|".join(escape_regex(a) for a in pinned_apps)
+    keep_lines.append(
+        "yabai -m signal --add label=home-keep-here event=window_created "
+        "app='^(%s)$' action='PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+        "\"$HOME/bin/gallery\" home _keep-here \"$YABAI_WINDOW_ID\" >/dev/null 2>&1'"
+        % shell_single_quote_body(keep_re)
+    )
+blocks.append("\n".join(keep_lines))
+
 header_lines = [
     "#!/usr/bin/env sh",
     "# Machine-local yabai rules: each app's home Space.",
@@ -3674,7 +3720,7 @@ sys.stdout.write(out)
 PYEOF
 
 cmd_home_save() {
-  local roam_extra="" dry_run=0
+  local roam_extra="" dry_run=0 keep_absent=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --roam)
@@ -3688,8 +3734,12 @@ cmd_home_save() {
       --dry-run)
         dry_run=1
         ;;
+      --keep-absent)
+        # the nightly save: apps not open right now keep their home
+        keep_absent=1
+        ;;
       *)
-        echo "usage: gallery home save [--roam A,B] [--dry-run]" >&2
+        echo "usage: gallery home save [--roam A,B] [--keep-absent] [--dry-run]" >&2
         exit 1
         ;;
     esac
@@ -3707,7 +3757,9 @@ cmd_home_save() {
   timestamp="$(date '+%Y-%m-%dT%H:%M:%S%z')"
 
   local content
-  if ! content="$(printf '%s' "${windows}" | python3 -c "${PY_HOME_SAVE_GENERATE}" "${roam_csv}" "${hostname_s}" "${timestamp}")"; then
+  local previous=""
+  [ "${keep_absent}" -eq 1 ] && [ -f "${RULES_LOCAL_FILE}" ] && previous="${RULES_LOCAL_FILE}"
+  if ! content="$(printf '%s' "${windows}" | python3 -c "${PY_HOME_SAVE_GENERATE}" "${roam_csv}" "${hostname_s}" "${timestamp}" ${previous:+"${previous}"})"; then
     echo "gallery: failed to generate rules.local from the current window layout" >&2
     exit 1
   fi
@@ -3785,6 +3837,72 @@ cmd_home_apply() {
   sh "${RULES_LOCAL_FILE}"
   yabai -m rule --apply
   echo "home: applied ${RULES_LOCAL_FILE}"
+}
+
+# `gallery home _keep-here <window id>` (the home-keep-here signal that
+# rules.local installs, on window_created for the home-pinned apps). A home
+# rule acts on EVERY new window of its app, so a second Safari window opened
+# on Desktop 5 (super+b, Cmd-N) landed on Safari's home Desktop instead and
+# seemed never to open. This puts such a window back on the Desktop in view
+# and focuses it. The rule still wins for an app's first window (a launch, a
+# reopen from the Dock: what the home Desktop is for, and tiler/app-focus
+# follows it there) and while the app is younger than HOME_KEEP_GRACE seconds
+# (the windows it restores at launch or login all go home). Test seam:
+# GALLERY_APP_AGE, the app's age in seconds instead of asking ps.
+HOME_KEEP_GRACE="${GALLERY_HOME_KEEP_GRACE:-60}"
+
+# PY_HOME_KEEP_HERE -- argv: window id, grace, app age override; stdin: a JSON
+# object {"windows": [...], "space": {...}}. Prints "<space index>" when the
+# window should come back to that Desktop, nothing otherwise.
+read -r -d '' PY_HOME_KEEP_HERE <<'PYEOF' || true
+import json, re, subprocess, sys
+
+wid, grace, age_override = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+try:
+    data = json.load(sys.stdin)
+    windows, here = data["windows"], data["space"]
+except Exception:
+    sys.exit(0)
+win = next((w for w in windows if w.get("id") == wid), None)
+if not win or win.get("subrole") != "AXStandardWindow" or win.get("is-floating"):
+    sys.exit(0)
+target = here.get("index")
+if not isinstance(target, int) or win.get("space") == target:
+    sys.exit(0)
+pid = win.get("pid")
+# Only a later window: the app already had another one before this.
+if not any(w.get("pid") == pid and w.get("id") != wid for w in windows):
+    sys.exit(0)
+if age_override:
+    age = int(age_override)
+else:
+    try:
+        etime = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
+                               capture_output=True, text=True).stdout.strip()
+    except OSError:
+        sys.exit(0)
+    m = re.match(r"^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$", etime)
+    if not m:
+        sys.exit(0)
+    d, h, mi, se = (int(x or 0) for x in m.groups())
+    age = ((d * 24 + h) * 60 + mi) * 60 + se
+if age < grace:
+    sys.exit(0)
+print(target)
+PYEOF
+
+cmd_home_keep_here() {
+  local wid="${1:-}"
+  case "${wid}" in ''|*[!0-9]*) return 0 ;; esac
+  command -v yabai >/dev/null 2>&1 || return 0
+  local windows space target
+  windows="$(yabai -m query --windows 2>/dev/null)" || return 0
+  space="$(yabai -m query --spaces --space 2>/dev/null)" || return 0
+  target="$(printf '{"windows": %s, "space": %s}' "${windows}" "${space}" \
+    | python3 -c "${PY_HOME_KEEP_HERE}" "${wid}" "${HOME_KEEP_GRACE}" "${GALLERY_APP_AGE:-}")" || return 0
+  [ -n "${target}" ] || return 0
+  yabai -m window "${wid}" --space "${target}" >/dev/null 2>&1 || return 0
+  yabai -m window --focus "${wid}" >/dev/null 2>&1 || true
 }
 
 # `gallery home _login-pass` (Gallery.spoon starts it in the background when
@@ -3971,8 +4089,12 @@ cmd_home() {
       # Gallery.spoon, when Hammerspoon starts: once per login (see above)
       cmd_home_login_pass
       ;;
+    _keep-here)
+      # the home-keep-here yabai signal, for each new window (see above)
+      cmd_home_keep_here "$@"
+      ;;
     "")
-      echo "usage: gallery home <show|save [--roam A,B] [--dry-run]|apply>" >&2
+      echo "usage: gallery home <show|save [--roam A,B] [--keep-absent] [--dry-run]|apply>" >&2
       exit 1
       ;;
     *)

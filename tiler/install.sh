@@ -109,7 +109,7 @@ if [ "$UNINSTALL" = 1 ]; then
             gl_note removed "the running borders process"
         fi
     fi
-    for f in "$YABAI_RC" "$SKHD_RC" "$SKHD_DIR/tiler.skhd" "$SKHD_DIR/gallery.skhd" "$SKHD_DIR/learn" "$SKHD_DIR/learn.style.json"              "$SKHD_DIR/focus-dir" "$SKHD_DIR/browser-window" "$YABAI_DIR/yabai-layout" "$YABAI_DIR/tree-guard"; do
+    for f in "$YABAI_RC" "$SKHD_RC" "$SKHD_DIR/tiler.skhd" "$SKHD_DIR/gallery.skhd" "$SKHD_DIR/learn" "$SKHD_DIR/learn.style.json"              "$SKHD_DIR/focus-dir" "$SKHD_DIR/browser-window" "$SKHD_DIR/app-focus" "$YABAI_DIR/yabai-layout" "$YABAI_DIR/tree-guard"; do
         gl_uninstall_file "$f"
     done
     # local.skhd is the user's: removed only while it is still the untouched
@@ -246,6 +246,8 @@ gl_install_file learn "$SKHD_DIR/learn" 755
 gl_install_file focus-dir "$SKHD_DIR/focus-dir" 755
 # browser-window: super+b's new window in the default browser.
 gl_install_file browser-window "$SKHD_DIR/browser-window" 755
+# app-focus: the app keys' "take me to its window, or start it".
+gl_install_file app-focus "$SKHD_DIR/app-focus" 755
 gl_install_file learn.style.json "$SKHD_DIR/learn.style.json" 644 1
 if [ "$DRY" = 1 ]; then echo "[dry] learn install skhdrc"; else "$SKHD_DIR/learn" install "$PWD/skhdrc"; fi
 # yabai-layout: installed next to yabairc (same TCC reasoning) so the save/restore

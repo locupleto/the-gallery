@@ -113,7 +113,7 @@ say "title-changed signal OK"
 OUT_ONE="$(GALLERY_HOME_WINDOWS_JSON="${FIXTURE}" HOME="${FAKE_HOME}" "${GALLERY_BIN}" home save --dry-run --roam Safari)"
 printf '%s\n' "${OUT_ONE}" | grep -F -q -- "yabai -m signal --remove home-title-changed" \
   || fail "signal remove line missing when no title rules"
-if printf '%s\n' "${OUT_ONE}" | grep -F -q -- "yabai -m signal --add"; then
+if printf '%s\n' "${OUT_ONE}" | grep -F -q -- "yabai -m signal --add label=home-title-changed"; then
   fail "signal added although no title rules exist"
 fi
 # ... and such a file must run cleanly when that signal does not exist (a
@@ -124,6 +124,122 @@ printf '#!/bin/sh\ncase "$*" in *"signal --remove"*) exit 1 ;; esac\nexit 0\n' >
 chmod +x "${WORK_DIR}/failstub/yabai"
 PATH="${WORK_DIR}/failstub:${PATH}" sh "${WORK_DIR}/rules-one.sh" || fail "a rules file without title rules fails when the signal is absent"
 say "signal absent without title rules OK"
+
+# --- home-keep-here: the signal (a home rule acts on every LATER window too) -
+# Every pinned app is in the filter, the old signal is removed first, and the
+# action hands the new window to `gallery home _keep-here`.
+assert_contains "yabai -m signal --remove home-keep-here >/dev/null 2>&1 || true"
+assert_contains "yabai -m signal --add label=home-keep-here event=window_created app='^(Mail|Safari)\$' action='PATH=\"/opt/homebrew/bin:/usr/local/bin:\$PATH\" \"\$HOME/bin/gallery\" home _keep-here \"\$YABAI_WINDOW_ID\" >/dev/null 2>&1'"
+printf '[{"id": 1, "app": "iTerm2", "title": "zsh", "space": 1, "subrole": "AXStandardWindow", "is-floating": false}]' > "${WORK_DIR}/roam-only.json"
+OUT_NONE="$(GALLERY_HOME_WINDOWS_JSON="${WORK_DIR}/roam-only.json" HOME="${FAKE_HOME}" "${GALLERY_BIN}" home save --dry-run)"
+printf '%s\n' "${OUT_NONE}" | grep -F -q "yabai -m signal --remove home-keep-here" || fail "keep-here: no remove line without pinned apps"
+if printf '%s\n' "${OUT_NONE}" | grep -F -q "label=home-keep-here event"; then
+  fail "keep-here: signal added although no app is pinned"
+fi
+printf '%s\n' "${OUT}" > "${WORK_DIR}/rules-full.sh"
+PATH="${WORK_DIR}/failstub:${PATH}" sh "${WORK_DIR}/rules-full.sh" || fail "a rules file fails when its signals are absent"
+say "keep-here signal: every pinned app, removed first, absent without pins"
+
+# --- T1: _keep-here moves a LATER window back to the Desktop in view ---------
+# A stub yabai serves the windows and the focused Space, and logs the moves.
+KH_STUB="${WORK_DIR}/kh-stub"; KH_LOG="${WORK_DIR}/kh.log"
+mkdir -p "${KH_STUB}"
+cat > "${KH_STUB}/yabai" <<EOF
+#!/bin/sh
+case "\$*" in
+  "-m query --windows") cat "${WORK_DIR}/kh-windows.json" ;;
+  "-m query --spaces --space") cat "${WORK_DIR}/kh-space.json" ;;
+  *) echo "yabai \$*" >> "${KH_LOG}" ;;
+esac
+exit 0
+EOF
+chmod +x "${KH_STUB}/yabai"
+# The desktop: Desktops 1-9 on display 1, 10-13 on display 2. Safari (pid 700)
+# is pinned to Desktop 10; the user is on the empty Desktop 5.
+kh_windows() { printf '%s\n' "$1" > "${WORK_DIR}/kh-windows.json"; }
+kh_space() { printf '{"index": %s, "display": %s}\n' "$1" "$2" > "${WORK_DIR}/kh-space.json"; }
+kh() {  # kh <window id> [app age]
+  : > "${KH_LOG}"
+  HOME="${FAKE_HOME}" PATH="${KH_STUB}:${PATH}" GALLERY_APP_AGE="${2:-}" "${GALLERY_BIN}" home _keep-here "$1" \
+    || fail "_keep-here exited non-zero"
+}
+moved() { grep -qx -- "yabai -m window $1 --space $2" "${KH_LOG}" && grep -qx -- "yabai -m window --focus $1" "${KH_LOG}"; }
+still() { [ ! -s "${KH_LOG}" ] || fail "$1 -- but it moved: $(tr '\n' '|' < "${KH_LOG}")"; }
+OLD='{"id": 701, "pid": 700, "app": "Safari", "space": 10, "subrole": "AXStandardWindow", "is-floating": false}'
+NEW='{"id": 702, "pid": 700, "app": "Safari", "space": 10, "subrole": "AXStandardWindow", "is-floating": false}'
+kh_space 5 1
+
+kh_windows "[${OLD}, ${NEW}]"; kh 702 3600
+moved 702 5 || fail "T1: a second window of a running app was not brought back to Desktop 5: $(cat "${KH_LOG}")"
+say "T1 a second Safari window (super+b, Cmd-N) comes back to the Desktop in view and is focused"
+
+kh_windows "[${OLD}, ${NEW}]"; kh 702 5
+still "a young app's windows (restored at launch or login) must go home"
+kh_windows "[${NEW}]"; kh 702 3600
+still "an app's first window (a launch, a Dock reopen) must go home"
+kh_windows "[${OLD}, $(printf '%s' "${NEW}" | sed 's/"space": 10/"space": 5/')]"; kh 702 3600
+still "a window already on the Desktop in view needs no move"
+kh_windows "[${OLD}, $(printf '%s' "${NEW}" | sed 's/"is-floating": false/"is-floating": true/')]"; kh 702 3600
+still "a floating window (a dialog, a panel) is left alone"
+kh_windows "[${OLD}, $(printf '%s' "${NEW}" | sed 's/AXStandardWindow/AXDialog/')]"; kh 702 3600
+still "a non-standard window is left alone"
+kh_windows "[${OLD}, ${NEW}]"; kh "abc" 3600
+still "a malformed window id is ignored"
+kh_windows "[${OLD}]"; kh 702 3600
+still "a window yabai no longer lists is ignored"
+say "T1 left home: a young app, a first window, already here, floating, a dialog, a bad id"
+
+# Several Desktops on two displays: the user on Desktop 12 (display 2), a
+# window thrown onto Desktop 3 (display 1) comes to 12 -- the global index.
+kh_space 12 2
+kh_windows "[$(printf '%s' "${OLD}" | sed 's/"space": 10/"space": 3/'), $(printf '%s' "${NEW}" | sed 's/"space": 10/"space": 3/')]"; kh 702 3600
+moved 702 12 || fail "T9: the window did not come to Desktop 12 on the second display: $(cat "${KH_LOG}")"
+# The app's age from ps when no seam is set: launchd (pid 1) is old.
+kh_space 5 1
+kh_windows "[$(printf '%s' "${OLD}" | sed 's/"pid": 700/"pid": 1/'), $(printf '%s' "${NEW}" | sed 's/"pid": 700/"pid": 1/')]"; kh 702
+moved 702 5 || fail "_keep-here: the app's age from ps was not read: $(cat "${KH_LOG}")"
+say "T9 the second display's Desktops (10-13) and the app age from ps"
+
+# T9 for the save: a window on the second display's Desktop 12 gets space=12,
+# yabai's one global index across displays.
+printf '[{"id": 1, "app": "Obsidian", "title": "Vault", "space": 12, "display": 2, "subrole": "AXStandardWindow", "is-floating": false}]' > "${WORK_DIR}/display2.json"
+GALLERY_HOME_WINDOWS_JSON="${WORK_DIR}/display2.json" HOME="${FAKE_HOME}" "${GALLERY_BIN}" home save --dry-run \
+  | grep -F -q "yabai -m rule --add label=home-obsidian app='^Obsidian\$' space=12" || fail "T9: a second-display Desktop lost its global index"
+say "T9 a Desktop on the second display keeps its global index (space=12)"
+
+# --- T8: --keep-absent carries plain rules, never title rules ----------------
+# The previous file holds what the nightly save had piled up by 2026-10-27:
+# plain rules, title rules (carried by mistake, a greedy pattern), a plain
+# rule for an app this save pins by title, a now-roaming app, a dotted name.
+KA_HOME="${WORK_DIR}/ka-home"; mkdir -p "${KA_HOME}/.config/yabai"
+cat > "${KA_HOME}/.config/yabai/rules.local" <<'EOF'
+#!/usr/bin/env sh
+yabai -m rule --add label=home-claude app='^Claude$' space=2
+yabai -m rule --add label=home-safari app='^Safari$' space=10
+yabai -m rule --add label=home-safari-2 app='^Safari$' title='^The Observatory$' space=10
+yabai -m rule --add label=home-preview-1 app='^Preview$' title='^JARVIS-mech\.png$' space=9
+yabai -m rule --add label=home-iterm2 app='^iTerm2$' space=1
+yabai -m rule --add label=home-mail app='^Mail$' space=3
+yabai -m rule --add label=home-microsoft-word app='^Microsoft\ Word\.x$' space=4
+yabai -m rule --add label=home-claude app='^Claude$' space=2
+EOF
+OUT_KA="$(GALLERY_HOME_WINDOWS_JSON="${FIXTURE}" HOME="${KA_HOME}" "${GALLERY_BIN}" home save --dry-run --keep-absent)"
+ka_has() { printf '%s\n' "${OUT_KA}" | grep -F -q -- "$1" || fail "keep-absent: expected '$1' in: ${OUT_KA}"; }
+ka_not() { if printf '%s\n' "${OUT_KA}" | grep -F -q -- "$1"; then fail "keep-absent: unexpected '$1'"; fi; }
+ka_has "# Carried forward from the previous save (app absent now)"
+ka_has "yabai -m rule --add label=home-claude app='^Claude\$' space=2"
+ka_has "yabai -m rule --add label=home-microsoft-word app='^Microsoft\\ Word\\.x\$' space=4"
+[ "$(printf '%s\n' "${OUT_KA}" | grep -c 'label=home-claude ')" = 1 ] || fail "keep-absent: a duplicate rule was carried twice"
+ka_not "The Observatory"
+ka_not "home-preview-1"
+ka_not "label=home-safari app="
+ka_not "home-iterm2"
+ka_has "yabai -m rule --add label=home-mail app='^Mail\$' space=5"
+[ "$(printf '%s\n' "${OUT_KA}" | grep -c 'label=home-mail ')" = 1 ] || fail "keep-absent: Mail's old Desktop was carried beside its new one"
+ka_has "app='^(Claude|Mail|Microsoft Word\\.x|Safari)\$'"
+OUT_NOKA="$(GALLERY_HOME_WINDOWS_JSON="${FIXTURE}" HOME="${KA_HOME}" "${GALLERY_BIN}" home save --dry-run)"
+if printf '%s\n' "${OUT_NOKA}" | grep -F -q "home-claude"; then fail "a save without --keep-absent carried a rule"; fi
+say "T8 --keep-absent: absent apps keep plain rules once; title, superseded and roaming rules dropped"
 
 # --- header sanity -----------------------------------------------------------
 assert_contains "# Roaming (no rule): iTerm2"

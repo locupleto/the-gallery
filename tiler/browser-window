@@ -4,7 +4,9 @@
 #   browser-window
 #
 # The default browser is whatever handles https in LaunchServices. If it is not
-# running, launching it is enough (it opens its own first window). If it is,
+# running, launching it is enough (it opens its own first window); app-focus
+# does the launch and then focuses that window, so the view follows it when a
+# home rule (gallery home) sends it to another Desktop. If it is running,
 # ask it for a new window over AppleScript: Safari's "make new document", the
 # Chromium family's "make new window". Anything else gets Cmd+N via System
 # Events -- after a short pause, because skhd fires while left Option (super)
@@ -12,14 +14,20 @@
 # different command in most browsers). First use of that fallback asks once
 # for "skhd wants to control System Events".
 #
+# That new window is created on the Desktop in view. A home rule would throw it
+# onto the browser's home Desktop; the home-keep-here signal (`gallery home
+# _keep-here`) brings a second window of a running app back here.
+#
 # Installed by tiler/install.sh next to skhdrc (launchd cannot read an external
 # volume, and the checkout may live on one).
 
 set -eu
+# Plain names, so a test can stub them; the system tools stay reachable.
+PATH="${PATH}:/usr/bin:/bin"
 
 handlers="$HOME/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist"
-bid=$(/usr/bin/plutil -convert json -o - "$handlers" 2>/dev/null \
-  | /usr/bin/python3 -c '
+bid=$(plutil -convert json -o - "$handlers" 2>/dev/null \
+  | python3 -c '
 import json, sys
 for h in json.load(sys.stdin).get("LSHandlers", []):
     if h.get("LSHandlerURLScheme") == "https":
@@ -28,9 +36,9 @@ for h in json.load(sys.stdin).get("LSHandlers", []):
 ' 2>/dev/null || true)
 bid=${bid:-com.apple.Safari}
 
-running=$(/usr/bin/osascript -e "application id \"$bid\" is running" 2>/dev/null || echo false)
+running=$(osascript -e "application id \"$bid\" is running" 2>/dev/null || echo false)
 if [ "$running" != "true" ]; then
-  exec /usr/bin/open -b "$bid"
+  exec "$(dirname "$0")/app-focus" -b "$bid"
 fi
 
 case "$(printf '%s' "$bid" | tr '[:upper:]' '[:lower:]')" in
@@ -43,9 +51,9 @@ case "$(printf '%s' "$bid" | tr '[:upper:]' '[:lower:]')" in
 esac
 
 if [ -n "$verb" ]; then
-  /usr/bin/osascript -e "tell application id \"$bid\"" -e "$verb" -e "activate" -e "end tell" >/dev/null
+  osascript -e "tell application id \"$bid\"" -e "$verb" -e "activate" -e "end tell" >/dev/null
 else
-  /usr/bin/open -b "$bid"
+  open -b "$bid"
   sleep 0.4
-  /usr/bin/osascript -e 'tell application "System Events" to keystroke "n" using command down' >/dev/null
+  osascript -e 'tell application "System Events" to keystroke "n" using command down' >/dev/null
 fi

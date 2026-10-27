@@ -9,6 +9,19 @@ to carry your setup across. `gallery version` prints the version you have.
 
 - super + shift + f opens Finder at the home folder: Omarchy's file-manager
   key. The super + o keys (home, Downloads, Desktop) stay.
+- Fixed: an app key pressed on an empty Desktop did nothing when the app was
+  already open on another one. The app keys now go through
+  `~/.config/skhd/app-focus`, which takes you to the app's window (on any
+  Desktop or display, minimized or hidden), or starts the app and follows
+  its first window. To carry it across, change your own `open -a X` keys in
+  `local.skhd` to `"$HOME/.config/skhd/app-focus" X`.
+- Fixed: a new browser window (super + b, Cmd-N) on an empty Desktop was
+  thrown onto the browser's home Desktop. A home rule now settles only an
+  app's first window; a later one stays where you opened it. Run
+  `gallery home save` once to install the signal that does this.
+- `gallery home save --keep-absent` keeps the home of an app that has no
+  window open right now; only plain rules are kept, never title rules.
+- The docs said the browser roams by default; only terminals do.
 - The agent skill now covers questions as well as changes: it tells the
   agent to answer "which key does what" from the live key list
   (`~/.config/skhd/Tiler-Keys.md`), and the README says so.

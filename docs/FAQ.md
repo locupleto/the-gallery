@@ -119,8 +119,10 @@ gallery home show      # check: the map, and the saved rules
 ```
 
 Save again whenever you rearrange; nothing is saved automatically. Terminals
-and the browser roam by default (`gallery home save --roam A,B` sets your
-own list). A rule saved for one window by its title, as for a browser window
+roam by default (`gallery home save --roam A,B` adds your own). A home is
+for an app's first window: a second window you open later (super + b, Cmd-N)
+stays on the Desktop you opened it on, and an app key takes you to the
+app's window wherever it is. A rule saved for one window by its title, as for a browser window
 on a Desktop of its own, stops matching when the title changes; save again.
 
 After a login macOS reopens your apps while the tiler is still starting, so

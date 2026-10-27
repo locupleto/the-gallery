@@ -26,7 +26,7 @@ still types `@ | [ ] { }` on non-US layouts. Examples:
 
 ```sh
 ## open Spotify
-lalt - p : open -a Spotify
+lalt - p : "$HOME/.config/skhd/app-focus" Spotify
 ## a second coding agent
 shift + ctrl + lalt - g : "$HOME/bin/gallery" agent open gemini
 ```
