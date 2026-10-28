@@ -480,6 +480,17 @@ assert_file "${HOME_DIR}/.gemini" "G the Gemini folder itself"
 assert_gone "${HOME_DIR}/.copilot" "G no Copilot folder made"
 "${INSTALL}" --minimal >/dev/null 2>&1 || fail "G: reinstall failed"
 [ "$(sort "${HOME_DIR}/.config/gallery/state/agent-skill-dirs-created" | uniq -d)" = "" ] || fail "G: reinstall recorded a folder twice"
+# A plain `ln -s` of the skill onto the existing link follows it and leaves a
+# link to the skill folder inside the skill folder. Links to folders in a
+# mirrored folder are backed up as links, not followed, and the install goes on.
+ln -s "${SK}" "${HOME_DIR}/.claude/skills/gallery"
+[ -L "${SK}/gallery" ] || fail "G: the test did not make the self link"
+out="$("${INSTALL}" --minimal 2>&1)" || { echo "${out}" >&2; fail "G: install with a link to a folder in the skill failed"; }
+assert_gone "${SK}/gallery" "G the self link in the skill folder"
+backup="$(find "${HOME_DIR}/.config/gallery/backup" -path '*/agents/skills/gallery/gallery')"
+[ -n "${backup}" ] && [ -L "${backup}" ] || fail "G: the self link was not backed up as a link"
+[ "$(readlink "${backup}")" = "${SK}" ] || fail "G: the backed-up link points elsewhere"
+assert_contains "${out}" "install complete" "G the install ran to the end"
 "${INSTALL}" --uninstall >/dev/null 2>&1 || fail "G: uninstall failed"
 assert_gone "${HOME_DIR}/.claude/skills/gallery" "G Claude link"
 assert_gone "${HOME_DIR}/.agents" "G the ~/.agents the installer made"

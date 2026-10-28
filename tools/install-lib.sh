@@ -410,7 +410,9 @@ gl_rsync_delete() {
         gl_say "(dry-run) would back up ${dest}${gone} to ${bdir}/${gone} before the sync deletes it"
       else
         mkdir -p "$(dirname "${bdir}/${gone}")"
-        cp -p "${dest}${gone}" "${bdir}/${gone}"
+        # -PR copies a link as a link: a link to a folder would otherwise be
+        # followed, and cp refuses a folder without -R, stopping the install.
+        cp -pPR "${dest}${gone}" "${bdir}/${gone}"
       fi
     done <<EOF
 $(rsync -a --delete --dry-run --itemize-changes "${src}" "${dest}" 2>/dev/null | sed -n -E 's/^\*deleting +//p')

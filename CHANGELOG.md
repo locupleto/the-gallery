@@ -5,12 +5,18 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
-## Unreleased
+## 0.2.0 (2026-10-28)
 
 - Two new themes from Omarchy: starship and jade-horse, with their
   wallpapers. Every existing theme stays, osaka-jade too (upstream replaced
   it with jade-horse). Run `./install.sh` to get them; it fetches the new
   wallpapers.
+- Fixed: an update stopped halfway when a folder the Gallery keeps in step
+  with its own copy (the agent skill, a plugin, the Spoon) held a link to a
+  folder: making the backup copy followed the link and failed. Such a link
+  is now backed up as a link, like any other stray file, and the update
+  runs to the end. A plain `ln -s` of the skill onto its existing link
+  leaves exactly such a link inside the skill folder.
 - super + shift + f opens Finder at the home folder: Omarchy's file-manager
   key. The super + o keys (home, Downloads, Desktop) stay.
 - Fixed: an app key pressed on an empty Desktop did nothing when the app was
