@@ -7,6 +7,10 @@ to carry your setup across. `gallery version` prints the version you have.
 
 ## Unreleased
 
+- Two new themes from Omarchy: starship and jade-horse, with their
+  wallpapers. Every existing theme stays, osaka-jade too (upstream replaced
+  it with jade-horse). Run `./install.sh` to get them; it fetches the new
+  wallpapers.
 - super + shift + f opens Finder at the home folder: Omarchy's file-manager
   key. The super + o keys (home, Downloads, Desktop) stay.
 - Fixed: an app key pressed on an empty Desktop did nothing when the app was

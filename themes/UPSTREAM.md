@@ -10,6 +10,14 @@ Vendored from [`omacom/omarchy`](https://github.com/omacom/omarchy)
 - Themes vendored: 22
 - Vendored by: tools/vendor-omarchy-themes.sh
 
+Added later, by hand, without re-vendoring the themes above (so local
+changes such as tokyo-night's are kept):
+
+- `starship` and `jade-horse`, from source commit
+  `526fe64706b0fcbaf0483ac7253cd62abe7854ae` on `quattro`, fetched
+  2026-10-28. Upstream's jade-horse replaces osaka-jade; this repo keeps
+  osaka-jade as well.
+
 Only `colors.toml` (and `light.mode`, where the upstream theme
 directory has one) is vendored per theme; Omarchy also ships
 wallpapers, editor/terminal themes, and icon sets that this repo
