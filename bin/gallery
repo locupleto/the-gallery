@@ -4265,9 +4265,31 @@ home_open_app() {
   fi
   if [ -n "${path}" ] && [ -d "${path}" ]; then
     "${GALLERY_OPEN_BIN:-open}" -g "${path}" >/dev/null 2>&1
-  else
-    "${GALLERY_OPEN_BIN:-open}" -g -a "${app}" >/dev/null 2>&1
+    return
   fi
+  "${GALLERY_OPEN_BIN:-open}" -g -a "${app}" >/dev/null 2>&1 && return 0
+  # `open -a` knows an app by its file name; yabai names it by its bundle
+  # name (iTerm2 is iTerm.app). Ask Launch Services for the bundle.
+  path="$(app_bundle_by_name "${app}")"
+  [ -n "${path}" ] && "${GALLERY_OPEN_BIN:-open}" -g "${path}" >/dev/null 2>&1
+}
+
+# The bundle Launch Services registered under this name (GALLERY_LSREGISTER,
+# a test seam: a stand-in for `lsregister -dump`).
+app_bundle_by_name() {
+  local lsreg="${GALLERY_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
+  [ -x "${lsreg}" ] || return 0
+  "${lsreg}" -dump 2>/dev/null | python3 -c 'import os, sys
+want, path = sys.argv[1], None
+for line in sys.stdin:
+    key, _, value = line.partition(":")
+    key, value = key.strip(), value.strip()
+    if key == "path":
+        path = value.split(" (0x")[0]
+    elif key == "name" and value == want and path and path.endswith(".app") and os.path.isdir(path) \
+            and "/Volumes/" not in path and "/.Trash/" not in path:
+        print(path)
+        break' "$1"
 }
 
 # Start every app in the plan, one at a time: wait until it shows as many

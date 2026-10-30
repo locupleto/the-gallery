@@ -5,6 +5,12 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.4.1 (2026-10-30)
+
+- Fixed: `gallery home reopen` could not start an app whose name differs
+  from its file (iTerm2 is iTerm.app) before a save had recorded where it
+  is. It now asks Launch Services for the app.
+
 ## 0.4.0 (2026-10-30)
 
 - The Gallery can reopen your apps after a login instead of macOS:

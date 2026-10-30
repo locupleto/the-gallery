@@ -432,7 +432,8 @@ EOF
 printf '#!/bin/sh\nexit 0\n' > "${RO_STUB}/layout-tool"
 chmod +x "${RO_STUB}/yabai" "${RO_STUB}/open" "${RO_STUB}/ps" "${RO_STUB}/layout-tool"
 ro() {  # ro <args...>: the gallery CLI in the reopen sandbox
-  GALLERY_RUNNING_BUNDLES="${RO_RUNNING:-}" HOME="${RO_HOME}" PATH="${RO_STUB}:${PATH}" GALLERY_OPEN_BIN="${RO_STUB}/open" \
+  GALLERY_RUNNING_BUNDLES="${RO_RUNNING:-}" HOME="${RO_HOME}" PATH="${RO_STUB}:${PATH}" \
+    GALLERY_OPEN_BIN="${GALLERY_OPEN_BIN:-${RO_STUB}/open}" GALLERY_LSREGISTER="${GALLERY_LSREGISTER:-/nonexistent}" \
     GALLERY_LAYOUT_TOOL="${RO_STUB}/layout-tool" GALLERY_DEFAULTS_BIN="${REPO_ROOT}/tests/fake-defaults" \
     GALLERY_HOME_POLL=1 GALLERY_HOME_REOPEN_WAIT=3 GALLERY_SESSION_ID=66 GALLERY_SESSION_AGE=999999 \
     "${GALLERY_BIN}" "$@"
@@ -506,7 +507,26 @@ RO_RUNNING="${RO_APPS}/iTerm.app" ro home reopen now >/dev/null
 grep -q iTerm.app "${RO_OPENS}" && fail "reopen: started an app running without a window"
 [[ "$(ro home reopen off)" == *"reopening off"* ]] || fail "reopen: off did not confirm"
 [ -f "${RO_HOME}/.config/gallery/state/home-reopen" ] && fail "reopen: off left the switch"
-say "reopen: open apps left alone; off removes the switch"
+# Started by name where no save recorded the bundle; when `open -a` does not
+# know the name (iTerm2 is iTerm.app), Launch Services names the bundle.
+mkdir -p "${RO_APPS}/Bundled.app"
+cat > "${RO_STUB}/lsregister" <<EOF
+#!/bin/sh
+printf 'path:  /nowhere/Other.app (0x1)\nname:  Other\npath:  ${RO_APPS}/Bundled.app (0x2)\nname:  ByName\n'
+EOF
+cat > "${RO_STUB}/open-byname" <<EOF
+#!/bin/sh
+echo "open \$*" >> "${RO_OPENS}"
+[ "\$2" = -a ] && exit 1
+exit 0
+EOF
+chmod +x "${RO_STUB}/lsregister" "${RO_STUB}/open-byname"
+echo '{"spaces": {"1": {"windows": [{"app": "ByName"}]}}}' > "${RO_HOME}/.config/yabai/home-layout.json"
+: > "${RO_OPENS}"; echo '[]' > "${RO_LIVE}"
+GALLERY_LSREGISTER="${RO_STUB}/lsregister" GALLERY_OPEN_BIN="${RO_STUB}/open-byname" ro home reopen now >/dev/null
+[ "$(cat "${RO_OPENS}")" = "open -g -a ByName
+open -g ${RO_APPS}/Bundled.app" ] || fail "reopen: no Launch Services fallback: $(tr '\n' '|' < "${RO_OPENS}")"
+say "reopen: open apps left alone; off removes the switch; unknown names found through Launch Services"
 
 # --- automatic save (gallery home _autosave) --------------------------------
 # A stub `gallery` (GALLERY_SELF) stands in for `home save` and writes the
