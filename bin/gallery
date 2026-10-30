@@ -3826,9 +3826,15 @@ for r in data:
 
   # The tile shapes too (which side is full height, the split ratios), so the
   # after-login pass can rebuild them (tiler/yabai-layout restore --remap).
-  if [ -x "${HOME_LAYOUT_TOOL}" ] && command -v yabai >/dev/null 2>&1 \
-     && "${HOME_LAYOUT_TOOL}" save --file "${HOME_LAYOUT_FILE}" >/dev/null 2>&1; then
-    echo "home: tile shapes saved -> ${HOME_LAYOUT_FILE}"
+  # A failure is reported, not swallowed: the nightly save went on for days
+  # writing rules while the shapes file stayed as it was (2026-10-25..30).
+  if [ -x "${HOME_LAYOUT_TOOL}" ] && command -v yabai >/dev/null 2>&1; then
+    local layout_out
+    if layout_out="$("${HOME_LAYOUT_TOOL}" save --file "${HOME_LAYOUT_FILE}" 2>&1)"; then
+      echo "home: tile shapes saved -> ${HOME_LAYOUT_FILE}"
+    else
+      echo "gallery: tile shapes not saved: $(printf '%s' "${layout_out}" | tail -1)" >&2
+    fi
   fi
 }
 
@@ -3927,6 +3933,9 @@ HOME_QUIET_TIMEOUT="${GALLERY_HOME_QUIET_TIMEOUT:-600}"
 HOME_LOG="${CONFIG_DIR}/gallery-home.log"
 HOME_LAYOUT_TOOL="${GALLERY_LAYOUT_TOOL:-${HOME}/.config/yabai/yabai-layout}"
 HOME_LAYOUT_FILE="${HOME}/.config/yabai/home-layout.json"
+# Written with the login session's id once the login pass has put the
+# windows back: from then on an automatic save may record the desktop.
+HOME_LOGIN_DONE_FILE="${CONFIG_DIR}/state/home-login-done"
 
 home_log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "${HOME_LOG}" 2>/dev/null || true; }
 
@@ -3962,6 +3971,19 @@ try:
 except Exception:
     sys.exit(1)
 print(" ".join(sorted("%s:%s" % (w.get("id"), w.get("space")) for w in ws)))'
+}
+
+# Every window back on the Desktop it was on at the last save, terminals and
+# other apps without a home rule included (the rules only move the pinned
+# apps). From the snapshot `home save` writes; see tiler/yabai-layout place.
+home_login_place() {
+  [ -f "${HOME_LAYOUT_FILE}" ] && [ -x "${HOME_LAYOUT_TOOL}" ] || return 0
+  local out
+  out="$("${HOME_LAYOUT_TOOL}" place --file "${HOME_LAYOUT_FILE}" 2>&1)" || true
+  home_log "login pass: $(printf '%s\n' "${out}" | sed -n 's/^\[yabai-layout\] //p' | head -1)"
+  printf '%s\n' "${out}" | sed -n 's/^  \(.*\)/\1/p' | while IFS= read -r line; do
+    home_log "login pass: place: ${line}"
+  done
 }
 
 # The saved tile shapes, once the apps are on their Desktops (a moment for
@@ -4037,12 +4059,128 @@ cmd_home_login_pass() {
       sh "${RULES_LOCAL_FILE}" >/dev/null 2>&1 || true
       yabai -m rule --apply
       home_log "login pass: home rules applied after ${waited}s"
+      home_login_place
       home_login_shapes
       home_login_wallpaper
+      printf '%s\n' "${session}" > "${HOME_LOGIN_DONE_FILE}"
       return 0
     fi
   done
   home_log "login pass: no quiet moment in ${HOME_QUIET_TIMEOUT}s; nothing moved (gallery home apply does it by hand)"
+}
+
+# `gallery home _autosave <reason>` (Gallery.spoon: every HOME_AUTOSAVE_EVERY
+# seconds, and when the Mac is about to sleep, shut down, restart or log out).
+# A `home save --keep-absent` of the desktop as it is, so the next login puts
+# every window back where it was left -- on every Mac, not only one that is
+# awake at a fixed hour. Guards, each logged once it skips a save:
+#   - the Gallery is switched off;
+#   - the login pass has not yet put the windows back in this login session
+#     (a save then would freeze the post-login scatter), unless the session is
+#     older than HOME_AUTOSAVE_MIN_AGE (a pass that found no quiet moment);
+#   - yabai does not answer, fewer than 3 windows are open, or more than half
+#     have no title (created behind the lock screen, invisible to yabai);
+#   - at a shutdown or logout, fewer than half the windows of the last save
+#     are open (apps already quitting must not shrink the saved desktop).
+# Nothing changed since the last save (as many windows of each app on each
+# Desktop) is
+# a silent no-op. Each day's last save is kept in HOME_HISTORY_DIR (the last
+# HOME_HISTORY_KEEP days) for a rollback. Test seams: GALLERY_SESSION_ID,
+# GALLERY_SESSION_AGE, GALLERY_HOME_WINDOWS_JSON (the window list).
+HOME_AUTOSAVE_MIN_AGE="${GALLERY_HOME_AUTOSAVE_MIN_AGE:-7200}"
+HOME_AUTOSAVE_SIG_FILE="${CONFIG_DIR}/state/home-autosave-sig"
+HOME_HISTORY_DIR="${HOME}/.config/yabai/home-history"
+HOME_HISTORY_KEEP=14
+
+# A skipped save is logged once, not every period while the reason holds.
+home_autosave_skip() {
+  local reason="$1" why="$2" last="${CONFIG_DIR}/state/home-autosave-skip"
+  [ "$(cat "${last}" 2>/dev/null)" = "${why}" ] && return 0
+  mkdir -p "$(dirname "${last}")"
+  printf '%s\n' "${why}" > "${last}"
+  home_log "autosave (${reason}): ${why}; skipped"
+}
+
+# PY_HOME_AUTOSAVE_CHECK -- argv: reason, windows in the last save (0 = none);
+# stdin: yabai's window list. Prints why a save must not happen, or on the
+# first line "ok" and on the second the signature of the desktop (each
+# window's app and Desktop), compared with the last save's.
+read -r -d '' PY_HOME_AUTOSAVE_CHECK <<'PYEOF' || true
+import hashlib, json, sys
+
+reason, last_count = sys.argv[1], int(sys.argv[2] or 0)
+try:
+    ws = [w for w in json.load(sys.stdin) if not w.get("is-minimized")]
+except Exception:
+    print("yabai's window list is unreadable"); sys.exit(0)
+blank = sum(1 for w in ws if not (w.get("title") or "").strip())
+if len(ws) < 3:
+    print("only %d windows open" % len(ws))
+elif blank * 2 > len(ws):
+    print("%d of %d windows have no title" % (blank, len(ws)))
+elif reason == "poweroff" and last_count and len(ws) * 2 < last_count:
+    print("%d windows open, %d at the last save (apps quitting)" % (len(ws), last_count))
+else:
+    # Which app's windows are on which Desktop; not titles, which some apps
+    # change all the time (a coding agent's spinner in a terminal's title).
+    sig = sorted("%s\t%s" % (w.get("app"), w.get("space")) for w in ws)
+    print("ok")
+    print(hashlib.sha1("\n".join(sig).encode()).hexdigest())
+PYEOF
+
+cmd_home_autosave() {
+  local reason="${1:-periodic}"
+  [ -f "${CONFIG_DIR}/state/paused" ] && return 0
+  command -v yabai >/dev/null 2>&1 || return 0
+
+  local session age
+  session="$(login_session_id)"
+  age="$(login_session_age)"
+  if [ "$(cat "${HOME_LOGIN_DONE_FILE}" 2>/dev/null)" != "${session}" ] \
+     && [ "${age:-0}" -lt "${HOME_AUTOSAVE_MIN_AGE}" ]; then
+    home_autosave_skip "${reason}" "the login pass has not put the windows back yet"
+    return 0
+  fi
+
+  local windows last_count verdict
+  windows="$(home_windows_json 2>/dev/null)" || { home_autosave_skip "${reason}" "yabai not answering"; return 0; }
+  last_count="$(python3 -c 'import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(sum(1 for s in d["spaces"].values() for w in s["windows"] if not w.get("is_minimized")))
+except Exception:
+    print(0)' "${HOME_LAYOUT_FILE}" 2>/dev/null)" || last_count=0
+  verdict="$(printf '%s' "${windows}" | python3 -c "${PY_HOME_AUTOSAVE_CHECK}" "${reason}" "${last_count:-0}")" || verdict="the window check failed"
+  if [ "$(printf '%s\n' "${verdict}" | head -1)" != "ok" ]; then
+    home_autosave_skip "${reason}" "${verdict}"
+    return 0
+  fi
+  local sig
+  sig="$(printf '%s\n' "${verdict}" | sed -n 2p)"
+  # Unchanged since the last save -- unless the shapes file is missing.
+  if [ "$(cat "${HOME_AUTOSAVE_SIG_FILE}" 2>/dev/null)" = "${sig}" ] && [ -f "${HOME_LAYOUT_FILE}" ]; then
+    return 0
+  fi
+
+  local out
+  if ! out="$("${GALLERY_SELF:-$0}" home save --keep-absent 2>&1)"; then
+    home_log "autosave (${reason}): gallery home save failed: $(printf '%s' "${out}" | tail -1)"
+    return 0
+  fi
+  mkdir -p "$(dirname "${HOME_AUTOSAVE_SIG_FILE}")"
+  printf '%s\n' "${sig}" > "${HOME_AUTOSAVE_SIG_FILE}"
+  rm -f "${CONFIG_DIR}/state/home-autosave-skip"
+
+  local today
+  today="$(date +%Y-%m-%d)"
+  mkdir -p "${HOME_HISTORY_DIR}/${today}"
+  cp "${RULES_LOCAL_FILE}" "${HOME_HISTORY_DIR}/${today}/" 2>/dev/null || true
+  [ -f "${HOME_LAYOUT_FILE}" ] && cp "${HOME_LAYOUT_FILE}" "${HOME_HISTORY_DIR}/${today}/"
+  ls -1d "${HOME_HISTORY_DIR}"/????-??-?? 2>/dev/null | sort -r | tail -n +$((HOME_HISTORY_KEEP + 1)) \
+    | while IFS= read -r old; do rm -rf "${old}"; done
+  local shapes_err
+  shapes_err="$(printf '%s\n' "${out}" | grep '^gallery: tile shapes not saved' || true)"
+  home_log "autosave (${reason}): $(printf '%s\n' "${out}" | grep '^home: ' | head -1 | sed 's/ -> .*//')${shapes_err:+; ${shapes_err#gallery: }}"
 }
 
 # `gallery ghosts`: windows the tiler cannot see (created behind the lock screen,
@@ -4096,6 +4234,10 @@ cmd_home() {
     _keep-here)
       # the home-keep-here yabai signal, for each new window (see above)
       cmd_home_keep_here "$@"
+      ;;
+    _autosave)
+      # Gallery.spoon: periodically and before sleep or shutdown (see above)
+      cmd_home_autosave "$@"
       ;;
     "")
       echo "usage: gallery home <show|save [--roam A,B] [--keep-absent] [--dry-run]|apply>" >&2

@@ -12,6 +12,15 @@ rebuilds every tree from scratch and loses all of that) can be undone.
     yabai-layout restore [--file PATH] [--wait SEC]  # SEC default: 30
     yabai-layout restore --remap [--file PATH]       # after a login, see below
     yabai-layout verify  [--file PATH]
+    yabai-layout place   [--file PATH] [--dry-run]   # after a login, see below
+
+place (used by the Gallery's after-login pass, before restore --remap): puts
+every open window back on the Desktop it was on when the snapshot was saved,
+terminals and other apps without a home rule included. Saved and open windows
+are matched across all Desktops, app by app: by app and title where that pair
+is unique on both sides, then the rest in creation order (saved ids, open ids).
+A window whose saved Desktop no longer exists (a display not connected now) is
+left where it is, as are minimized windows and ones yabai cannot reach.
 
 --remap (used by `gallery home save` / the Gallery's after-login pass): window
 ids change at every login, so the saved windows are first matched to the
@@ -717,6 +726,88 @@ def cmd_restore(args) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# place
+# --------------------------------------------------------------------------- #
+
+def plan_placement(snapshot, live_windows, live_spaces):
+    """Return (moves, notes): moves is a list of (live id, app, saved Space
+    index) for each open window that sits on another Desktop than its matched
+    saved window did. Pure: no yabai calls."""
+    saved_by_app: dict[str, list] = {}
+    for space in snapshot.get("spaces", {}).values():
+        for w in space.get("windows", []):
+            if w.get("is_minimized") or not w.get("app"):
+                continue
+            saved_by_app.setdefault(w["app"], []).append(w)
+    live_by_app: dict[str, list] = {}
+    for w in live_windows:
+        if w.get("is-minimized") or not w.get("has-ax-reference", True) or not w.get("app"):
+            continue
+        live_by_app.setdefault(w["app"], []).append(w)
+    displays_now = {s.get("display") for s in live_spaces}
+    spaces_now = {s["index"]: s for s in live_spaces}
+
+    moves, notes = [], []
+    for app, live in sorted(live_by_app.items()):
+        saved = saved_by_app.get(app)
+        if not saved:
+            continue
+        saved = sorted(saved, key=lambda w: w["id"])
+        live = sorted(live, key=lambda w: w["id"])
+        pairs = []
+        # 1. app and title, where that pair is unique on both sides
+        def by_title(ws):
+            seen: dict[str, list] = {}
+            for w in ws:
+                seen.setdefault(w.get("title") or "", []).append(w)
+            return seen
+        saved_t, live_t = by_title(saved), by_title(live)
+        for title, ws in saved_t.items():
+            if title and len(ws) == 1 and len(live_t.get(title, [])) == 1:
+                pairs.append((live_t[title][0], ws[0]))
+        done_saved = {id(sw) for _, sw in pairs}
+        done_live = {lw["id"] for lw, _ in pairs}
+        # 2. the rest in creation order on both sides
+        rest_saved = [w for w in saved if id(w) not in done_saved]
+        rest_live = [w for w in live if w["id"] not in done_live]
+        pairs.extend(zip(rest_live, rest_saved))
+        for lw, sw in pairs:
+            target = sw.get("space_index")
+            if not isinstance(target, int) or lw.get("space") == target:
+                continue
+            here = spaces_now.get(target)
+            saved_display = sw.get("display")
+            if here is None or (saved_display is not None and saved_display not in displays_now):
+                notes.append(f"{app}#{lw['id']}: saved on Desktop {target}, which is not here now -- left")
+                continue
+            moves.append((lw["id"], app, target))
+    return moves, notes
+
+
+def cmd_place(args) -> int:
+    path = Path(args.file).expanduser()
+    if not path.exists():
+        print(f"[yabai-layout] no snapshot at {path}", file=sys.stderr)
+        return 1
+    snapshot = json.loads(path.read_text())
+    moves, notes = plan_placement(snapshot, query_windows(), query_spaces())
+    placed = 0
+    for wid, app, target in moves:
+        if args.dry_run:
+            notes.append(f"{app}#{wid}: would move to Desktop {target}")
+            continue
+        try:
+            yabai("window", str(wid), "--space", str(target))
+            placed += 1
+        except RuntimeError as exc:
+            notes.append(f"{app}#{wid}: could not move to Desktop {target} ({exc})")
+    print(f"[yabai-layout] placed {placed} of {len(moves)} windows on their saved Desktops")
+    for line in notes:
+        print(f"  {line}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # verify
 # --------------------------------------------------------------------------- #
 
@@ -782,6 +873,10 @@ def main() -> int:
     p_verify = sub.add_parser("verify", help="compare live frames to a saved snapshot")
     p_verify.add_argument("--file", default=str(DEFAULT_FILE))
 
+    p_place = sub.add_parser("place", help="move open windows to their saved Desktops (after a login)")
+    p_place.add_argument("--file", default=str(DEFAULT_FILE))
+    p_place.add_argument("--dry-run", action="store_true")
+
     args = ap.parse_args()
     if args.cmd == "save":
         return cmd_save(args)
@@ -789,6 +884,8 @@ def main() -> int:
         return cmd_restore(args)
     if args.cmd == "verify":
         return cmd_verify(args)
+    if args.cmd == "place":
+        return cmd_place(args)
     return 2
 
 

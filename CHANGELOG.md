@@ -5,6 +5,24 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.3.0 (2026-10-30)
+
+- Your desktop is saved automatically, on every Mac: every half hour and
+  just before the Mac sleeps, shuts down, restarts or logs out, so the next
+  login finds the windows where you left them. Before, a Desktop layout was
+  only as fresh as your last `gallery home save`. Guards keep a scattered,
+  half-closed or unchanged desktop from being saved; each day's last save
+  is kept for 14 days in `~/.config/yabai/home-history/`. If you set up a
+  scheduled `gallery home save` of your own, remove it.
+- After a login every window goes back to the Desktop it was on, terminals
+  and Finder included (they have no home rule, so they all opened on the
+  first Desktop). Windows of one app are matched by title, else in opening
+  order.
+- Finder roams like the terminals and gets no home rule: a folder opened on
+  one Desktop no longer throws you to Finder's home Desktop.
+- `gallery home save` now says when it could not save the tile shapes,
+  instead of failing silently.
+
 ## 0.2.0 (2026-10-28)
 
 - Two new themes from Omarchy: starship and jade-horse, with their

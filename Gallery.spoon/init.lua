@@ -41,6 +41,9 @@ obj.themesDir = os.getenv("HOME") .. "/.config/gallery/themes"
 -- Written at the end of start(); the installer waits for it instead of probing
 -- the IPC port, because a probe killed mid-request can wedge or crash Hammerspoon.
 obj.readyPath = os.getenv("HOME") .. "/.config/gallery/state/ready"
+-- Seconds between automatic saves of where the windows are (`gallery home
+-- _autosave`); it also saves before sleep and shutdown.
+obj.homeAutosaveInterval = 1800
 obj.plugins = {}
 obj.pluginList = {}
 obj.windows = {}
@@ -324,6 +327,35 @@ function obj:start()
     self.homeLoginTask:start()
   end)
 
+  -- Save where every window is, so the next login can put it back: every
+  -- half hour, and before the Mac sleeps, shuts down, restarts or logs out
+  -- (a laptop is rarely awake at a fixed hour). The command guards against
+  -- saving a scattered or half-closed desktop and skips an unchanged one
+  -- (bin/gallery, cmd_home_autosave). Before sleep or power-off it runs to
+  -- completion here, as the Mac may not wait for a background task.
+  pcall(function()
+    local gallery = os.getenv("HOME") .. "/bin/gallery"
+    local function autosave(reason, wait)
+      if wait then
+        hs.execute(string.format("%q home _autosave %s", gallery, reason))
+      else
+        hs.task.new(gallery, nil, { "home", "_autosave", reason }):start()
+      end
+    end
+    if self.homeSaveTimer then self.homeSaveTimer:stop() end
+    self.homeSaveTimer = hs.timer.doEvery(obj.homeAutosaveInterval, function() autosave("periodic") end)
+    if self.homeSaveWatcher then self.homeSaveWatcher:stop() end
+    local cw = hs.caffeinate.watcher
+    self.homeSaveWatcher = cw.new(function(event)
+      if event == cw.systemWillSleep then
+        autosave("sleep", true)
+      elseif event == cw.systemWillPowerOff then
+        autosave("poweroff", true)
+      end
+    end)
+    self.homeSaveWatcher:start()
+  end)
+
   -- While the Gallery is switched off, skhd is stopped and the on/off key is
   -- held here instead (see obj:pauseKey); that state survives a restart.
   if hs.fs.attributes(os.getenv("HOME") .. "/.config/gallery/state/paused") then
@@ -358,6 +390,8 @@ function obj:stop()
   Feed.stopAll()
   pcall(Outline.stop)
   if self.itermWatcher then pcall(function() self.itermWatcher:stop() end) end
+  if self.homeSaveTimer then pcall(function() self.homeSaveTimer:stop() end) end
+  if self.homeSaveWatcher then pcall(function() self.homeSaveWatcher:stop() end) end
 
   return self
 end

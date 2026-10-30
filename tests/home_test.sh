@@ -334,11 +334,79 @@ lp2() {
 }
 store "file:///old-tokyo.jpg"; lp2
 grep -q "layout restore --remap --file ${LP_HOME}/.config/yabai/home-layout.json" "${LP_CALLS}" || fail "login pass: the tile shapes were not restored: $(cat "${LP_CALLS}")"
+grep -q "layout place --file ${LP_HOME}/.config/yabai/home-layout.json" "${LP_CALLS}" || fail "login pass: the windows were not placed on their saved Desktops"
+[ "$(sed -n 1p "${LP_CALLS}" | cut -d' ' -f2)" = "place" ] || fail "login pass: placement must come before the shapes"
+[ "$(cat "${LP_HOME}/.config/gallery/state/home-login-done")" = 4242 ] || fail "login pass: the session was not marked done"
 grep -q "gallery bg apply" "${LP_CALLS}" || fail "login pass: a Desktop with an old wallpaper was not re-synced"
 store "file:///a.jpg"; lp2
 grep -q "gallery bg apply" "${LP_CALLS}" && fail "login pass: re-applied the wallpaper although every Desktop matched"
 rm -f "${LP_HOME}/.config/yabai/home-layout.json"; lp2
 grep -q "layout restore" "${LP_CALLS}" && fail "login pass: restored shapes without a saved layout"
-say "login pass: tile shapes restored when saved; wallpaper re-applied only when a Desktop differs"
+say "login pass: windows placed, then tile shapes restored; wallpaper re-applied only when a Desktop differs"
+
+# --- automatic save (gallery home _autosave) --------------------------------
+# A stub `gallery` (GALLERY_SELF) stands in for `home save` and writes the
+# files a real save writes; the window list comes from GALLERY_HOME_WINDOWS_JSON.
+AS_HOME="${WORK_DIR}/as-home"; AS_LOG="${AS_HOME}/.config/gallery/gallery-home.log"
+AS_CALLS="${WORK_DIR}/as-calls.log"
+mkdir -p "${AS_HOME}/.config/gallery/state" "${AS_HOME}/.config/yabai"
+cat > "${LP_STUB}/as-gallery" <<EOF
+#!/bin/sh
+echo "gallery \$*" >> "${AS_CALLS}"
+echo rules > "${AS_HOME}/.config/yabai/rules.local"
+printf '{"spaces": {"1": {"windows": [{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4}]}}}' > "${AS_HOME}/.config/yabai/home-layout.json"
+echo "home: 3 apps pinned, 0 windows pinned by title, roaming: iTerm2 -> /x"
+EOF
+chmod +x "${LP_STUB}/as-gallery"
+win() {  # win <id> <app> <title> <space>
+  printf '{"id": %s, "app": "%s", "title": "%s", "space": %s, "is-minimized": false}' "$1" "$2" "$3" "$4"
+}
+printf '[%s, %s, %s, %s]' "$(win 1 Mail Inbox 2)" "$(win 2 iTerm2 zsh 3)" "$(win 3 Notes N 4)" "$(win 4 Safari Docs 5)" > "${WORK_DIR}/as4.json"
+printf '[%s, %s, %s, %s]' "$(win 1 Mail Inbox 2)" "$(win 2 iTerm2 zsh 6)" "$(win 3 Notes N 4)" "$(win 4 Safari Docs 5)" > "${WORK_DIR}/as4b.json"
+printf '[%s, %s]' "$(win 1 Mail Inbox 2)" "$(win 2 iTerm2 zsh 3)" > "${WORK_DIR}/as2.json"
+printf '[%s, %s, %s]' "$(win 1 Mail "" 2)" "$(win 2 iTerm2 "" 3)" "$(win 3 Notes N 4)" > "${WORK_DIR}/asblank.json"
+as() {  # as <reason> <windows file> <session age>
+  : > "${AS_CALLS}"
+  HOME="${AS_HOME}" PATH="${LP_STUB}:${PATH}" GALLERY_SELF="${LP_STUB}/as-gallery" GALLERY_SESSION_ID=77 \
+    GALLERY_SESSION_AGE="$3" GALLERY_HOME_WINDOWS_JSON="$2" "${GALLERY_BIN}" home _autosave "$1"
+}
+saved() { grep -q "home save --keep-absent" "${AS_CALLS}"; }
+
+as periodic "${WORK_DIR}/as4.json" 60
+saved && fail "autosave: saved before the login pass put the windows back"
+grep -q "login pass has not put the windows back" "${AS_LOG}" || fail "autosave: the skip was not logged"
+as periodic "${WORK_DIR}/as4.json" 60
+[ "$(grep -c "login pass has not" "${AS_LOG}")" = 1 ] || fail "autosave: a repeated skip was logged again"
+as periodic "${WORK_DIR}/as4.json" 9000
+saved || fail "autosave: did not save in an old session whose pass never finished"
+echo 77 > "${AS_HOME}/.config/gallery/state/home-login-done"
+rm -f "${AS_HOME}/.config/gallery/state/home-autosave-sig"
+as periodic "${WORK_DIR}/as4.json" 60
+saved || fail "autosave: did not save once the login pass was done"
+[ -f "${AS_HOME}/.config/yabai/home-history/$(date +%Y-%m-%d)/rules.local" ] || fail "autosave: no dated history copy"
+grep -q "autosave (periodic): home: 3 apps pinned" "${AS_LOG}" || fail "autosave: the save was not logged"
+as periodic "${WORK_DIR}/as4.json" 60
+saved && fail "autosave: saved an unchanged desktop again"
+sed 's/"zsh"/"claude: thinking"/' "${WORK_DIR}/as4.json" > "${WORK_DIR}/as4t.json"
+as periodic "${WORK_DIR}/as4t.json" 60
+saved && fail "autosave: a title change alone counted as a change"
+as sleep "${WORK_DIR}/as4b.json" 60
+saved || fail "autosave: a window moved to another Desktop was not saved"
+as periodic "${WORK_DIR}/as2.json" 60
+saved && fail "autosave: saved with only 2 windows open"
+as periodic "${WORK_DIR}/asblank.json" 60
+saved && fail "autosave: saved a desktop of title-less windows"
+python3 -c 'import json; print(json.dumps({"spaces": {"1": {"windows": [{"id": i} for i in range(10)]}}}))' \
+  > "${AS_HOME}/.config/yabai/home-layout.json"
+as poweroff "${WORK_DIR}/as4.json" 60
+saved && fail "autosave: a shutdown with apps quitting shrank the saved desktop"
+grep -q "apps quitting" "${AS_LOG}" || fail "autosave: the shutdown skip was not logged"
+as periodic "${WORK_DIR}/as4.json" 60
+saved || fail "autosave: the shrink guard must only apply at shutdown"
+touch "${AS_HOME}/.config/gallery/state/paused"
+rm -f "${AS_HOME}/.config/gallery/state/home-autosave-sig"
+as periodic "${WORK_DIR}/as4.json" 60
+saved && fail "autosave: saved while the Gallery is off"
+say "autosave: after the login pass, only on change, never scattered, title-less, half-closed or off; history kept"
 
 say "PASS home_test.sh"

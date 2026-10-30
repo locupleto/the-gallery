@@ -53,11 +53,16 @@ gallery home apply               # re-apply it live
   `~/.config/skhd/app-focus` take the user to the app's window wherever it is. An app on
   several Desktops is pinned per window by title, which breaks when the title
   changes.
-- `home save` also records each Desktop's tile shape in
-  `~/.config/yabai/home-layout.json`. After a login the Gallery applies the
-  rules once more at the first quiet moment, then rebuilds the shapes where
+- `home save` also records every window's Desktop and each Desktop's tile
+  shape in `~/.config/yabai/home-layout.json`. After a login the Gallery
+  applies the rules once more at the first quiet moment, puts every window
+  (terminals too) back on its saved Desktop, then rebuilds the shapes where
   the Desktop holds the same apps (logged in
   `~/.config/gallery/gallery-home.log`).
+- The Gallery saves by itself (`gallery home _autosave`): every half hour
+  and before sleep, shutdown, restart or logout, skipping an unchanged,
+  scattered or half-closed desktop. Rollback: the daily copies in
+  `~/.config/yabai/home-history/<date>/`, then `gallery home apply`.
 - A Desktop showing a different wallpaper from the rest: `gallery bg apply`
   syncs them all (the after-login pass does it too).
 - Keep other rules in `yabairc.local`, not `rules.local`.

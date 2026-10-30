@@ -79,10 +79,41 @@ off = {11: dict(live(11, "Notes", "N"), frame={"x": 866, "y": 40, "w": 850, "h":
 check(yl.in_shape(sp, on, 10), "a Space within eps is already in shape")
 check(not yl.in_shape(sp, off, 10), "a mirrored Space is not in shape")
 
+# plan_placement: every open window back on its saved Desktop, terminals too.
+def psaved(wid, app, title, space, display=1, minimized=False):
+    return {"id": wid, "app": app, "title": title, "space_index": space, "display": display,
+            "is_minimized": minimized}
+def pspaces(n, displays=1):
+    return [{"index": i, "display": 1 if i <= n // displays else 2} for i in range(1, n + 1)]
+s = {"spaces": {"x": {"windows": [
+    psaved(5, "iTerm2", "claude", 3), psaved(6, "iTerm2", "claude", 4), psaved(7, "iTerm2", "claude", 4),
+    psaved(8, "Safari", "Docs", 2), psaved(9, "Safari", "Mail", 5), psaved(10, "Notes", "N", 1),
+    psaved(11, "Maps", "M", 12, display=2)]}}}
+now = [live(40, "iTerm2", "-zsh"), live(41, "iTerm2", "-zsh"), live(42, "iTerm2", "-zsh"),
+       live(50, "Safari", "Mail"), live(51, "Safari", "Docs"), live(60, "Notes", "N"),
+       live(70, "Maps", "M"), live(80, "Music", "X")]
+moves, notes = yl.plan_placement(s, now, pspaces(6))
+got = {wid: target for wid, _, target in moves}
+check(got == {40: 3, 41: 4, 42: 4, 50: 5, 51: 2}, f"placement: got {got}")
+check(60 not in got, "a window already on its Desktop is not moved")
+check(80 not in got, "an app absent from the save is left alone")
+check(any("Maps#70" in n for n in notes), "a Desktop that is not here now should be noted, not used")
+# Fewer windows open than saved: the earliest saved ones are used.
+moves, _ = yl.plan_placement(s, [live(40, "iTerm2", "-zsh")], pspaces(6))
+check(moves == [(40, "iTerm2", 3)], f"one terminal goes to the first saved one's Desktop, got {moves}")
+# Minimized windows are never moved, nor saved minimized ones used.
+moves, _ = yl.plan_placement({"spaces": {"x": {"windows": [psaved(1, "Notes", "N", 4, minimized=True)]}}},
+                             [live(2, "Notes", "N")], pspaces(6))
+check(moves == [], "a saved minimized window is not a placement")
+moves, _ = yl.plan_placement({"spaces": {"x": {"windows": [psaved(1, "Notes", "N", 4)]}}},
+                             [dict(live(2, "Notes", "N"), **{"is-minimized": True})], pspaces(6))
+check(moves == [], "a minimized open window is not moved")
+
 if failures:
     for f in failures:
         print("[layout_test]   " + f)
     sys.exit(1)
 PY
+say "place: windows matched by app+title then creation order; absent Desktops, minimized and unknown apps left"
 say "remap: same-app windows matched in order, app+title exact, mismatched Spaces left alone, floats skipped; in_shape"
 say "PASS layout_test.sh"

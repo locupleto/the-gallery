@@ -415,13 +415,25 @@ height, how the rest are split, the ratios) in
 `home save` leaves terminals and Finder out (they roam; add apps with `--roam A,B`),
 previews with `--dry-run`, and keeps the previous file as `rules.local.prev`.
 With `--keep-absent` an app that has no window open right now keeps the
-plain home rule the previous file gave it (a nightly save uses this).
+plain home rule the previous file gave it (the automatic save uses this).
+
+**Saved automatically.** The Gallery saves by itself every half hour, and
+just before the Mac sleeps, shuts down, restarts or logs out, so the next
+login finds the desktop as you left it, on a laptop too. It skips a save
+when nothing moved, before the after-login pass below has put your windows
+back (a save then would record the scatter; after two hours it saves
+anyway), when fewer than three windows are open or most have no title, and
+at a shutdown when apps have already closed half the windows. Each day's
+last save is kept in `~/.config/yabai/home-history/<date>/` for 14 days;
+to go back to one, copy its two files into `~/.config/yabai/` and run
+`gallery home apply`. Every save and skip is logged in
+`~/.config/gallery/gallery-home.log`.
 
 A home is for an app's first window. yabai applies a rule to every new
 window, so `rules.local` also installs a `home-keep-here` signal: a later
 window of an app that has been running for a minute (super + b, Cmd-N)
 is brought back to the Desktop you opened it on and focused. The windows an
-app restores as it starts still go home. Nothing saves it automatically. Because `save` rewrites
+app restores as it starts still go home. Because `save` rewrites
 the file, keep your own non-home rules in `yabairc.local`, not in
 `rules.local`. Space numbers are one global sequence across displays and shift
 if you add or remove a Space in Mission Control. The template is
@@ -435,7 +447,14 @@ seconds and no keyboard or mouse use for 5. It waits up to 10 minutes and
 otherwise leaves the windows alone; each run is logged in
 `~/.config/gallery/gallery-home.log`. A `gallery reload` does not repeat it.
 
-The same pass then rebuilds the saved tile shapes. Windows are matched to
+The same pass then puts every window back on the Desktop it was on at the
+last save, terminals and Finder included, which have no rule. Windows are
+matched app by app, by title where that is unique and otherwise in the order
+they were opened, so of five terminals the right number lands on each
+Desktop but two may swap. A window whose Desktop is on a display that is not
+connected now stays where it is.
+
+The pass then rebuilds the saved tile shapes. Windows are matched to
 their saved places by app, and by title where that is unique; a Desktop is
 rebuilt only when its tiled windows are the same apps as when you saved, and
 left as it is otherwise (or when it is already in shape). Of several windows
