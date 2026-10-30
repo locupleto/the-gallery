@@ -429,11 +429,11 @@ to go back to one, copy its two files into `~/.config/yabai/` and run
 `gallery home apply`. Every save and skip is logged in
 `~/.config/gallery/gallery-home.log`.
 
-A home is for an app's first window. yabai applies a rule to every new
-window, so `rules.local` also installs a `home-keep-here` signal: a later
-window of an app that has been running for a minute (super + b, Cmd-N)
-is brought back to the Desktop you opened it on and focused. The windows an
-app restores as it starts still go home. Because `save` rewrites
+Homes are for the login. yabai applies a rule to every new window, so
+`rules.local` also installs a `home-keep-here` signal: once the after-login
+pass below has put your windows back, any new window, an app you start from
+the Dock or a key included, is brought back to the Desktop you opened it on
+and focused. While the Mac is still logging in, the rules decide. Because `save` rewrites
 the file, keep your own non-home rules in `yabairc.local`, not in
 `rules.local`. Space numbers are one global sequence across displays and shift
 if you add or remove a Space in Mission Control. The template is

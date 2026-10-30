@@ -47,9 +47,10 @@ gallery home apply               # re-apply it live
   running loses its old rule (unless `--keep-absent`). Say so before saving.
 - Terminals and Finder roam (`--roam A,B` adds to the list). `--keep-absent` keeps
   the old plain rule of an app with no window open now.
-- A home is for an app's first window: the `home-keep-here` signal in
-  rules.local brings a later window (super + b, Cmd-N) back to the Desktop
-  it was opened on (`gallery home _keep-here`). App keys bound to
+- Homes are for the login: once the after-login pass is done, the
+  `home-keep-here` signal in rules.local brings every new window (an app
+  started from the Dock, super + b, Cmd-N) back to the Desktop it was opened
+  on (`gallery home _keep-here`). App keys bound to
   `~/.config/skhd/app-focus` take the user to the app's window wherever it is. An app on
   several Desktops is pinned per window by title, which breaks when the title
   changes.

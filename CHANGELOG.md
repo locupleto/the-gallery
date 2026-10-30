@@ -5,6 +5,13 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.3.1 (2026-10-30)
+
+- Fixed: starting an app (Outlook from the Dock, say) threw you to its home
+  Desktop. Homes now only place windows while the Mac logs in; once the
+  after-login pass has put your windows back, every new window opens on the
+  Desktop you are on, an app's first window too.
+
 ## 0.3.0 (2026-10-30)
 
 - Your desktop is saved automatically, on every Mac: every half hour and

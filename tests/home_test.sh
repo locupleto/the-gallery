@@ -158,9 +158,10 @@ chmod +x "${KH_STUB}/yabai"
 # is pinned to Desktop 10; the user is on the empty Desktop 5.
 kh_windows() { printf '%s\n' "$1" > "${WORK_DIR}/kh-windows.json"; }
 kh_space() { printf '{"index": %s, "display": %s}\n' "$1" "$2" > "${WORK_DIR}/kh-space.json"; }
-kh() {  # kh <window id> [app age]
+kh() {  # kh <window id> [app age] [session age]: a fresh login unless given
   : > "${KH_LOG}"
-  HOME="${FAKE_HOME}" PATH="${KH_STUB}:${PATH}" GALLERY_APP_AGE="${2:-}" "${GALLERY_BIN}" home _keep-here "$1" \
+  HOME="${FAKE_HOME}" PATH="${KH_STUB}:${PATH}" GALLERY_APP_AGE="${2:-}" GALLERY_SESSION_ID=55 \
+    GALLERY_SESSION_AGE="${3:-30}" "${GALLERY_BIN}" home _keep-here "$1" \
     || fail "_keep-here exited non-zero"
 }
 moved() { grep -qx -- "yabai -m window $1 --space $2" "${KH_LOG}" && grep -qx -- "yabai -m window --focus $1" "${KH_LOG}"; }
@@ -188,6 +189,23 @@ still "a malformed window id is ignored"
 kh_windows "[${OLD}]"; kh 702 3600
 still "a window yabai no longer lists is ignored"
 say "T1 left home: a young app, a first window, already here, floating, a dialog, a bad id"
+
+# Once the login pass has put the windows back, every new window stays where
+# it is opened, an app's first one and a young app's too (Outlook started
+# from the Dock, 2026-10-30); so it does once the pass can no longer run.
+mkdir -p "${FAKE_HOME}/.config/gallery/state"
+echo 55 > "${FAKE_HOME}/.config/gallery/state/home-login-done"
+kh_windows "[${NEW}]"; kh 702 2
+moved 702 5 || fail "settled: an app's first window was thrown to its home Desktop: $(cat "${KH_LOG}")"
+kh_windows "[${OLD}, $(printf '%s' "${NEW}" | sed 's/"is-floating": false/"is-floating": true/')]"; kh 702 2
+still "settled: a floating window is still left alone"
+echo 54 > "${FAKE_HOME}/.config/gallery/state/home-login-done"
+kh_windows "[${NEW}]"; kh 702 2
+still "another login's done marker must not settle this one"
+kh_windows "[${NEW}]"; kh 702 2 99999
+moved 702 5 || fail "settled: a session past the login pass still sent a first window home"
+rm -f "${FAKE_HOME}/.config/gallery/state/home-login-done"
+say "T1 after the login pass every new window stays on the Desktop in view, a first one too"
 
 # Several Desktops on two displays: the user on Desktop 12 (display 2), a
 # window thrown onto Desktop 3 (display 1) comes to 12 -- the global index.

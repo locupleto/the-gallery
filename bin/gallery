@@ -3854,20 +3854,26 @@ cmd_home_apply() {
 # rule acts on EVERY new window of its app, so a second Safari window opened
 # on Desktop 5 (super+b, Cmd-N) landed on Safari's home Desktop instead and
 # seemed never to open. This puts such a window back on the Desktop in view
-# and focuses it. The rule still wins for an app's first window (a launch, a
-# reopen from the Dock: what the home Desktop is for, and tiler/app-focus
-# follows it there) and while the app is younger than HOME_KEEP_GRACE seconds
-# (the windows it restores at launch or login all go home). Test seam:
-# GALLERY_APP_AGE, the app's age in seconds instead of asking ps.
+# and focuses it.
+# Once this login's pass has put the windows back (HOME_LOGIN_DONE_FILE holds
+# this session), the homes have done their job: every new window stays where
+# it is opened, an app's first one too -- Outlook started from the Dock on
+# one Desktop threw the user to its home Desktop (2026-10-30). Before that,
+# the rule wins for an app's first window and while the app is younger than
+# HOME_KEEP_GRACE seconds (the windows it restores at login all go home).
+# Test seams: GALLERY_APP_AGE, the app's age in seconds instead of asking ps;
+# GALLERY_SESSION_ID.
 HOME_KEEP_GRACE="${GALLERY_HOME_KEEP_GRACE:-60}"
 
-# PY_HOME_KEEP_HERE -- argv: window id, grace, app age override; stdin: a JSON
+# PY_HOME_KEEP_HERE -- argv: window id, grace, app age override, "1" once the
+# login pass is done (then any window stays); stdin: a JSON
 # object {"windows": [...], "space": {...}}. Prints "<space index>" when the
 # window should come back to that Desktop, nothing otherwise.
 read -r -d '' PY_HOME_KEEP_HERE <<'PYEOF' || true
 import json, re, subprocess, sys
 
 wid, grace, age_override = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+settled = sys.argv[4] == "1"
 try:
     data = json.load(sys.stdin)
     windows, here = data["windows"], data["space"]
@@ -3878,6 +3884,9 @@ if not win or win.get("subrole") != "AXStandardWindow" or win.get("is-floating")
     sys.exit(0)
 target = here.get("index")
 if not isinstance(target, int) or win.get("space") == target:
+    sys.exit(0)
+if settled:
+    print(target)
     sys.exit(0)
 pid = win.get("pid")
 # Only a later window: the app already had another one before this.
@@ -3908,8 +3917,16 @@ cmd_home_keep_here() {
   local windows space target
   windows="$(yabai -m query --windows 2>/dev/null)" || return 0
   space="$(yabai -m query --spaces --space 2>/dev/null)" || return 0
+  # Settled: this login's pass is done, or the session is past the time the
+  # pass may run at all (it starts within HOME_LOGIN_MAX_AGE, then waits at
+  # most HOME_QUIET_TIMEOUT).
+  local settled=0
+  if [ "$(cat "${HOME_LOGIN_DONE_FILE}" 2>/dev/null)" = "$(login_session_id)" ] \
+     || [ "$(login_session_age)" -gt $((HOME_LOGIN_MAX_AGE + HOME_QUIET_TIMEOUT)) ]; then
+    settled=1
+  fi
   target="$(printf '{"windows": %s, "space": %s}' "${windows}" "${space}" \
-    | python3 -c "${PY_HOME_KEEP_HERE}" "${wid}" "${HOME_KEEP_GRACE}" "${GALLERY_APP_AGE:-}")" || return 0
+    | python3 -c "${PY_HOME_KEEP_HERE}" "${wid}" "${HOME_KEEP_GRACE}" "${GALLERY_APP_AGE:-}" "${settled}")" || return 0
   [ -n "${target}" ] || return 0
   yabai -m window "${wid}" --space "${target}" >/dev/null 2>&1 || return 0
   yabai -m window --focus "${wid}" >/dev/null 2>&1 || true
