@@ -270,6 +270,39 @@ if printf '%s\n' "${OUT_FINDER}" | grep -F -q "home-finder"; then fail "Finder g
 printf '%s\n' "${OUT_FINDER}" | grep -F -q "# Roaming (no rule): iTerm2, Ghostty, kitty, WezTerm, Finder" || fail "Finder missing from the roaming list"
 say "Finder roams by default"
 
+# --- homes are for the login only ---------------------------------------------
+# rules.local asks `gallery home _settled` before loading anything: once this
+# login's pass is done no rule or signal is loaded, so nothing moves a window
+# to another Desktop mid-session (a Dock launch, a dialog, a Safari title).
+assert_contains "# Homes act only while the Mac logs in (see \`gallery home _settled\`)."
+assert_contains 'if [ -n "${GALLERY_HOME_FORCE:-}" ] || ! { [ -x "$HOME/bin/gallery" ] && "$HOME/bin/gallery" home _settled; }; then'
+[ "$(printf '%s\n' "${OUT}" | tail -1)" = "fi" ] || fail "settled: the guard does not close the file"
+ST_HOME="${WORK_DIR}/st-home"; ST_LOG="${WORK_DIR}/st-yabai.log"; ST_STUB="${WORK_DIR}/st-stub"
+mkdir -p "${ST_HOME}/bin" "${ST_HOME}/.config/gallery/state" "${ST_STUB}"
+ln -sf "${GALLERY_BIN}" "${ST_HOME}/bin/gallery"
+printf '#!/bin/sh\necho "yabai $*" >> "%s"\n' "${ST_LOG}" > "${ST_STUB}/yabai"; chmod +x "${ST_STUB}/yabai"
+printf '%s\n' "${OUT}" > "${WORK_DIR}/st-rules.local"
+st() {  # st <session age> [force]: source the generated file as yabairc does
+  : > "${ST_LOG}"
+  HOME="${ST_HOME}" PATH="${ST_STUB}:${PATH}" GALLERY_SESSION_ID=88 GALLERY_SESSION_AGE="$1" \
+    GALLERY_HOME_FORCE="${2:-}" sh -c ". '${WORK_DIR}/st-rules.local'"
+}
+st 30
+grep -q "rule --add label=home-mail" "${ST_LOG}" || fail "settled: a fresh login did not load the homes"
+echo 88 > "${ST_HOME}/.config/gallery/state/home-login-done"
+st 30
+[ -s "${ST_LOG}" ] && fail "settled: homes loaded after the login pass: $(tr '\n' '|' < "${ST_LOG}")"
+st 30 1
+grep -q "rule --add label=home-mail" "${ST_LOG}" || fail "settled: GALLERY_HOME_FORCE did not load the homes"
+rm -f "${ST_HOME}/.config/gallery/state/home-login-done"
+st 99999
+[ -s "${ST_LOG}" ] && fail "settled: homes loaded in a session past the login pass"
+HOME="${ST_HOME}" GALLERY_SESSION_ID=88 GALLERY_SESSION_AGE=30 "${GALLERY_BIN}" home _settled \
+  && fail "settled: _settled said yes in a fresh login"
+HOME="${ST_HOME}" GALLERY_SESSION_ID=88 GALLERY_SESSION_AGE=99999 "${GALLERY_BIN}" home _settled \
+  || fail "settled: _settled said no in an old session"
+say "homes load only while logging in (or forced by home apply); _settled answers"
+
 # --- header sanity -----------------------------------------------------------
 assert_contains "# Roaming (no rule): iTerm2"
 assert_contains "#!/usr/bin/env sh"
@@ -355,6 +388,7 @@ grep -q "layout restore --remap --file ${LP_HOME}/.config/yabai/home-layout.json
 grep -q "layout place --file ${LP_HOME}/.config/yabai/home-layout.json" "${LP_CALLS}" || fail "login pass: the windows were not placed on their saved Desktops"
 [ "$(sed -n 1p "${LP_CALLS}" | cut -d' ' -f2)" = "place" ] || fail "login pass: placement must come before the shapes"
 [ "$(cat "${LP_HOME}/.config/gallery/state/home-login-done")" = 4242 ] || fail "login pass: the session was not marked done"
+grep -q "signal --remove home-keep-here" "${LP_LOG}" || fail "login pass: the homes were not unloaded once done"
 grep -q "gallery bg apply" "${LP_CALLS}" || fail "login pass: a Desktop with an old wallpaper was not re-synced"
 store "file:///a.jpg"; lp2
 grep -q "gallery bg apply" "${LP_CALLS}" && fail "login pass: re-applied the wallpaper although every Desktop matched"

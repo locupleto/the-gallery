@@ -5,6 +5,18 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.3.2 (2026-10-30)
+
+- Homes now exist only while the Mac logs in. Once the after-login pass has
+  put your windows back, the home rules and signals are taken out of yabai
+  and `rules.local` loads nothing until the next login, so no window is ever
+  moved to another Desktop during the day: not a dialog or floating window
+  of a pinned app, and not a Safari window whose title changed to one with
+  a home (both still could in 0.3.1). Run `gallery home save` once to
+  rewrite `rules.local` in the new form (the automatic save does it too).
+- `gallery home apply` moves every window back to its saved Desktop as a
+  one-off, then unloads the homes again.
+
 ## 0.3.1 (2026-10-30)
 
 - Fixed: starting an app (Outlook from the Dock, say) threw you to its home

@@ -405,7 +405,7 @@ sources it when present. Arrange your apps across your Spaces, then:
 ```sh
 gallery home show      # the window -> Space map, and the live home-* rules
 gallery home save      # write rules.local from the current layout and apply it
-gallery home apply     # re-source rules.local and apply it live
+gallery home apply     # move every window back to its saved Desktop now
 ```
 
 `home save` also records each Desktop's tile shape (which window is full
@@ -429,11 +429,14 @@ to go back to one, copy its two files into `~/.config/yabai/` and run
 `gallery home apply`. Every save and skip is logged in
 `~/.config/gallery/gallery-home.log`.
 
-Homes are for the login. yabai applies a rule to every new window, so
-`rules.local` also installs a `home-keep-here` signal: once the after-login
-pass below has put your windows back, any new window, an app you start from
-the Dock or a key included, is brought back to the Desktop you opened it on
-and focused. While the Mac is still logging in, the rules decide. Because `save` rewrites
+Homes are for the login. `rules.local` loads its rules only while the Mac
+logs in; once the after-login pass below has put your windows back (or 20
+minutes after the login), they are taken out of yabai again and the file
+loads nothing until the next login. So during the day no rule moves a window
+to another Desktop: an app you start, a dialog, a Safari tab whose title
+changes, all open where you are. `gallery home apply` loads them for a
+one-off move of every window back to its home and takes them out again.
+Because `save` rewrites
 the file, keep your own non-home rules in `yabairc.local`, not in
 `rules.local`. Space numbers are one global sequence across displays and shift
 if you add or remove a Space in Mission Control. The template is

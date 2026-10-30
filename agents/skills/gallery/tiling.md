@@ -40,17 +40,17 @@ windows and then saves; do not hand-edit it (the next save overwrites it).
 gallery home show                # window -> Space map, and the saved rules
 gallery home save --dry-run      # preview
 gallery home save                # write rules.local and apply it
-gallery home apply               # re-apply it live
+gallery home apply               # move every window back home now
 ```
 
 - Only apps with a window open when saving get a home; an app that is not
   running loses its old rule (unless `--keep-absent`). Say so before saving.
 - Terminals and Finder roam (`--roam A,B` adds to the list). `--keep-absent` keeps
   the old plain rule of an app with no window open now.
-- Homes are for the login: once the after-login pass is done, the
-  `home-keep-here` signal in rules.local brings every new window (an app
-  started from the Dock, super + b, Cmd-N) back to the Desktop it was opened
-  on (`gallery home _keep-here`). App keys bound to
+- Homes are for the login: rules.local loads only until the after-login
+  pass is done (`gallery home _settled`, or 20 min after login), then the
+  rules and signals are taken out of yabai, so mid-session every window opens
+  where the user is. `gallery home apply` is a one-off move back home. App keys bound to
   `~/.config/skhd/app-focus` take the user to the app's window wherever it is. An app on
   several Desktops is pinned per window by title, which breaks when the title
   changes.
