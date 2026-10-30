@@ -219,6 +219,7 @@ yabai -m rule --add label=home-safari app='^Safari$' space=10
 yabai -m rule --add label=home-safari-2 app='^Safari$' title='^The Observatory$' space=10
 yabai -m rule --add label=home-preview-1 app='^Preview$' title='^JARVIS-mech\.png$' space=9
 yabai -m rule --add label=home-iterm2 app='^iTerm2$' space=1
+yabai -m rule --add label=home-finder app='^Finder$' space=1
 yabai -m rule --add label=home-mail app='^Mail$' space=3
 yabai -m rule --add label=home-microsoft-word app='^Microsoft\ Word\.x$' space=4
 yabai -m rule --add label=home-claude app='^Claude$' space=2
@@ -234,12 +235,22 @@ ka_not "The Observatory"
 ka_not "home-preview-1"
 ka_not "label=home-safari app="
 ka_not "home-iterm2"
+ka_not "home-finder"
 ka_has "yabai -m rule --add label=home-mail app='^Mail\$' space=5"
 [ "$(printf '%s\n' "${OUT_KA}" | grep -c 'label=home-mail ')" = 1 ] || fail "keep-absent: Mail's old Desktop was carried beside its new one"
 ka_has "app='^(Claude|Mail|Microsoft Word\\.x|Safari)\$'"
 OUT_NOKA="$(GALLERY_HOME_WINDOWS_JSON="${FIXTURE}" HOME="${KA_HOME}" "${GALLERY_BIN}" home save --dry-run)"
 if printf '%s\n' "${OUT_NOKA}" | grep -F -q "home-claude"; then fail "a save without --keep-absent carried a rule"; fi
 say "T8 --keep-absent: absent apps keep plain rules once; title, superseded and roaming rules dropped"
+
+# Finder roams by default: it never quits, so every folder window it opens is
+# a "first window" home-keep-here cannot rescue, and a Finder rule threw the
+# user to Finder's home Desktop (2026-10-30, a Desktop folder opened from 8).
+printf '[{"id": 1, "app": "Finder", "title": "Downloads", "space": 3, "subrole": "AXStandardWindow", "is-floating": false}]' > "${WORK_DIR}/finder.json"
+OUT_FINDER="$(GALLERY_HOME_WINDOWS_JSON="${WORK_DIR}/finder.json" HOME="${FAKE_HOME}" "${GALLERY_BIN}" home save --dry-run)"
+if printf '%s\n' "${OUT_FINDER}" | grep -F -q "home-finder"; then fail "Finder got a home rule"; fi
+printf '%s\n' "${OUT_FINDER}" | grep -F -q "# Roaming (no rule): iTerm2, Ghostty, kitty, WezTerm, Finder" || fail "Finder missing from the roaming list"
+say "Finder roams by default"
 
 # --- header sanity -----------------------------------------------------------
 assert_contains "# Roaming (no rule): iTerm2"

@@ -412,7 +412,7 @@ gallery home apply     # re-source rules.local and apply it live
 height, how the rest are split, the ratios) in
 `~/.config/yabai/home-layout.json`.
 
-`home save` leaves terminals out (they roam; add apps with `--roam A,B`),
+`home save` leaves terminals and Finder out (they roam; add apps with `--roam A,B`),
 previews with `--dry-run`, and keeps the previous file as `rules.local.prev`.
 With `--keep-absent` an app that has no window open right now keeps the
 plain home rule the previous file gave it (a nightly save uses this).

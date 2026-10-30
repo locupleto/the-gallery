@@ -103,9 +103,13 @@ WEATHER_KEY_FILE="${CONFIG_DIR}/weather.key"
 # the Gallery installs or owns. `gallery home save` only ever writes here.
 RULES_LOCAL_FILE="${HOME}/.config/yabai/rules.local"
 RULES_LOCAL_PREV_FILE="${RULES_LOCAL_FILE}.prev"
-# Apps that legitimately move around (terminals spawned wherever super+return
-# is pressed) never get a home-* rule. `home save --roam` adds to this list.
-HOME_DEFAULT_ROAM="iTerm2,Ghostty,kitty,WezTerm"
+# Apps that legitimately move around never get a home-* rule: terminals
+# (spawned wherever super+return is pressed) and Finder, which never quits, so
+# a folder opened from the Desktop or a Dock stack is always a "first window"
+# that home-keep-here cannot rescue -- a Finder rule threw every such window,
+# and the user with it, to Finder's home Desktop. `home save --roam` adds to
+# this list.
+HOME_DEFAULT_ROAM="iTerm2,Ghostty,kitty,WezTerm,Finder"
 # Installed by install.sh from this repo's patches/ directory -- see that
 # directory's own README.md for the mechanism (macOS replacements for a
 # plugin's own files, applied on top of the installed plugin dir).

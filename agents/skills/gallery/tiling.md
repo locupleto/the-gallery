@@ -45,7 +45,7 @@ gallery home apply               # re-apply it live
 
 - Only apps with a window open when saving get a home; an app that is not
   running loses its old rule (unless `--keep-absent`). Say so before saving.
-- Terminals roam (`--roam A,B` adds to the list). `--keep-absent` keeps
+- Terminals and Finder roam (`--roam A,B` adds to the list). `--keep-absent` keeps
   the old plain rule of an app with no window open now.
 - A home is for an app's first window: the `home-keep-here` signal in
   rules.local brings a later window (super + b, Cmd-N) back to the Desktop
