@@ -4379,8 +4379,10 @@ cmd_home_reopen() {
       echo "home: reopening off for this Mac -- macOS reopens the apps (keep its checkbox on at shutdown)"
       ;;
     now)
+      local before
+      before="$(wc -l < "${HOME_LOG}" 2>/dev/null || echo 0)"
       home_reopen_apps
-      tail -n 50 "${HOME_LOG}" 2>/dev/null | sed -n 's/^[0-9-]* [0-9:]* reopen: /  /p' | tail -n 30
+      tail -n "+$((before + 1))" "${HOME_LOG}" 2>/dev/null | sed -n 's/^[0-9-]* [0-9:]* reopen: /  /p'
       cmd_home_apply
       ;;
     status)

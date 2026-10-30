@@ -523,7 +523,8 @@ EOF
 chmod +x "${RO_STUB}/lsregister" "${RO_STUB}/open-byname"
 echo '{"spaces": {"1": {"windows": [{"app": "ByName"}]}}}' > "${RO_HOME}/.config/yabai/home-layout.json"
 : > "${RO_OPENS}"; echo '[]' > "${RO_LIVE}"
-GALLERY_LSREGISTER="${RO_STUB}/lsregister" GALLERY_OPEN_BIN="${RO_STUB}/open-byname" ro home reopen now >/dev/null
+out="$(GALLERY_LSREGISTER="${RO_STUB}/lsregister" GALLERY_OPEN_BIN="${RO_STUB}/open-byname" ro home reopen now)"
+[ "$(printf '%s\n' "${out}" | grep -c 'started ')" = 1 ] || fail "reopen: now printed an earlier run's lines: ${out}"
 [ "$(cat "${RO_OPENS}")" = "open -g -a ByName
 open -g ${RO_APPS}/Bundled.app" ] || fail "reopen: no Launch Services fallback: $(tr '\n' '|' < "${RO_OPENS}")"
 say "reopen: open apps left alone; off removes the switch; unknown names found through Launch Services"
