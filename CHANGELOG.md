@@ -5,6 +5,15 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.5.1 (2026-10-30)
+
+- Fixed: a web app added to the Dock from Safari (Outlook, say) came back
+  after login without a window. The save recorded Safari's generic Web
+  App.app for it; it now records the app's own bundle in ~/Applications.
+- The look at iTerm2's windows during a save gives up after 10 seconds, so
+  macOS's one-time question whether Hammerspoon may control iTerm2 cannot
+  hold up a save before sleep.
+
 ## 0.5.0 (2026-10-30)
 
 - Terminals come back with what ran in them. `home save` notes for each

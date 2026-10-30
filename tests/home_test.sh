@@ -426,6 +426,7 @@ cat > "${RO_STUB}/ps" <<EOF
 case "\$4" in
   11) echo "${RO_APPS}/Mail.app/Contents/MacOS/Mail" ;;
   12) echo "${RO_APPS}/iTerm.app/Contents/MacOS/iTerm2" ;;
+  14) echo "/System/Cryptexes/App/System/Library/CoreServices/Web App.app/Contents/MacOS/Web App" ;;
   13) echo "/usr/libexec/helper" ;;
 esac
 EOF
@@ -453,6 +454,17 @@ PY
 printf '[%s]' "$(rwin 1 Mail 99 2)" > "${RO_LIVE}"
 ro home save >/dev/null
 grep -q iTerm.app "${RO_HOME}/.config/yabai/home-apps.json" || fail "reopen: a save forgot the bundle of an app that is closed now"
+# A Safari web app runs from Safari's Web App.app: its own bundle in
+# ~/Applications is recorded instead, and a recorded Web App.app is dropped.
+mkdir -p "${RO_HOME}/Applications/Outlook.app"
+python3 -c 'import json, sys
+d = json.load(open(sys.argv[1])); d["Gmail"] = "/x/Web App.app"
+json.dump(d, open(sys.argv[1], "w"))' "${RO_HOME}/.config/yabai/home-apps.json"
+printf '[%s, %s]' "$(rwin 1 Mail 99 2)" "$(rwin 5 Outlook 14 3)" > "${RO_LIVE}"
+ro home save >/dev/null
+grep -q "\"Outlook\": \"${RO_HOME}/Applications/Outlook.app\"" "${RO_HOME}/.config/yabai/home-apps.json" \
+  || fail "reopen: a web app's own bundle was not recorded: $(cat "${RO_HOME}/.config/yabai/home-apps.json")"
+grep -q "Web App" "${RO_HOME}/.config/yabai/home-apps.json" && fail "reopen: a Web App.app path was kept"
 say "reopen: home save records each app's bundle and keeps those of closed apps"
 
 # The saved desktop: Mail (Desktop 2), iTerm2 x2 + Finder + Silent (Desktop 3), Notes (Desktop 10).

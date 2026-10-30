@@ -4134,7 +4134,10 @@ home_reopen_skip_csv() {
 # Which app bundle each open window belongs to (from its pid), merged into
 # HOME_APPS_FILE so an app closed since an earlier save keeps its path.
 # Written by `home save`; `home reopen` launches by these paths, as yabai's
-# app name is not always the bundle's (iTerm2 is iTerm.app).
+# app name is not always the bundle's (iTerm2 is iTerm.app). A web app added
+# to the Dock (Safari's "Add to Dock") runs from Safari's generic Web App.app,
+# which opens nothing on its own: its own bundle, ~/Applications/<name>.app,
+# is used instead, and a Web App.app path is never kept.
 read -r -d '' PY_HOME_RECORD_APPS <<'PYEOF' || true
 import json, os, subprocess, sys
 
@@ -4160,9 +4163,16 @@ for w in windows:
                              text=True, timeout=5).stdout.strip()
     except Exception:
         exe = ""
+    own = [d for d in (os.path.expanduser("~/Applications"), "/Applications")
+           if os.path.isdir(os.path.join(d, app + ".app"))]
     cut = exe.find(".app/")
-    if cut > 0:
+    if own:
+        seen[app] = os.path.join(own[0], app + ".app")
+    elif cut > 0 and not exe[:cut + 4].endswith("/Web App.app"):
         seen[app] = exe[:cut + 4]
+for app in list(known):
+    if not isinstance(known[app], str) or known[app].endswith("/Web App.app"):
+        del known[app]
 known.update(seen)
 tmp = path_file + ".tmp"
 with open(tmp, "w") as fh:
@@ -4196,7 +4206,9 @@ CLAUDE_SESSIONS_DIR="${GALLERY_CLAUDE_SESSIONS:-${HOME}/.claude/sessions}"
 iterm_window_ttys() {
   if [ -n "${GALLERY_ITERM_TTYS:-}" ]; then cat "${GALLERY_ITERM_TTYS}"; return; fi
   iterm_running || return 0
-  /usr/bin/osascript -e 'set out to ""
+  # At most 10 s: the first time, macOS asks whether Hammerspoon may control
+  # iTerm2, and a save before sleep must not wait for that answer.
+  /usr/bin/perl -e 'alarm 10; exec @ARGV' /usr/bin/osascript -e 'set out to ""
 tell application id "com.googlecode.iterm2"
   repeat with w in windows
     try
