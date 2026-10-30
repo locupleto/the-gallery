@@ -396,6 +396,118 @@ rm -f "${LP_HOME}/.config/yabai/home-layout.json"; lp2
 grep -q "layout restore" "${LP_CALLS}" && fail "login pass: restored shapes without a saved layout"
 say "login pass: windows placed, then tile shapes restored; wallpaper re-applied only when a Desktop differs"
 
+# --- reopening the apps (gallery home reopen) -------------------------------
+# A stub yabai answers from a live window file; a stub `open` logs the launch
+# and adds that app's window to it; a stub `ps` names each pid's executable.
+RO_HOME="${WORK_DIR}/ro-home"; RO_STUB="${WORK_DIR}/ro-stub"; RO_LIVE="${WORK_DIR}/ro-live.json"
+RO_OPENS="${WORK_DIR}/ro-opens.log"; RO_LOG="${RO_HOME}/.config/gallery/gallery-home.log"
+mkdir -p "${RO_HOME}/.config/gallery/state" "${RO_HOME}/.config/yabai" "${RO_STUB}"
+cat > "${RO_STUB}/yabai" <<EOF
+#!/bin/sh
+case "\$*" in
+  "-m query --windows") cat "${RO_LIVE}" ;;
+esac
+exit 0
+EOF
+cat > "${RO_STUB}/open" <<EOF
+#!/bin/sh
+echo "open \$*" >> "${RO_OPENS}"
+eval "app=\\\${\$#}"; app="\$(basename "\${app}" .app)"
+[ "\${app}" = iTerm ] && app=iTerm2
+[ "\${app}" = Silent ] && exit 0
+python3 -c 'import json, sys
+ws = json.load(open(sys.argv[1]))
+ws.append({"id": 900 + len(ws), "app": sys.argv[2], "space": 1, "has-ax-reference": True})
+json.dump(ws, open(sys.argv[1], "w"))' "${RO_LIVE}" "\${app}"
+EOF
+RO_APPS="${WORK_DIR}/Apps"; mkdir -p "${RO_APPS}/Mail.app" "${RO_APPS}/iTerm.app"
+cat > "${RO_STUB}/ps" <<EOF
+#!/bin/sh
+case "\$4" in
+  11) echo "${RO_APPS}/Mail.app/Contents/MacOS/Mail" ;;
+  12) echo "${RO_APPS}/iTerm.app/Contents/MacOS/iTerm2" ;;
+  13) echo "/usr/libexec/helper" ;;
+esac
+EOF
+printf '#!/bin/sh\nexit 0\n' > "${RO_STUB}/layout-tool"
+chmod +x "${RO_STUB}/yabai" "${RO_STUB}/open" "${RO_STUB}/ps" "${RO_STUB}/layout-tool"
+ro() {  # ro <args...>: the gallery CLI in the reopen sandbox
+  GALLERY_RUNNING_BUNDLES="${RO_RUNNING:-}" HOME="${RO_HOME}" PATH="${RO_STUB}:${PATH}" GALLERY_OPEN_BIN="${RO_STUB}/open" \
+    GALLERY_LAYOUT_TOOL="${RO_STUB}/layout-tool" GALLERY_DEFAULTS_BIN="${REPO_ROOT}/tests/fake-defaults" \
+    GALLERY_HOME_POLL=1 GALLERY_HOME_REOPEN_WAIT=3 GALLERY_SESSION_ID=66 GALLERY_SESSION_AGE=999999 \
+    "${GALLERY_BIN}" "$@"
+}
+rwin() {  # rwin <id> <app> <pid> <space>
+  printf '{"id": %s, "app": "%s", "title": "t%s", "pid": %s, "space": %s, "subrole": "AXStandardWindow", "is-floating": false, "has-ax-reference": true}' "$1" "$2" "$1" "$3" "$4"
+}
+printf '[%s, %s, %s]' "$(rwin 1 Mail 11 2)" "$(rwin 2 iTerm2 12 3)" "$(rwin 3 Helper 13 3)" > "${RO_LIVE}"
+ro home save >/dev/null
+python3 - "${RO_HOME}/.config/yabai/home-apps.json" "${RO_APPS}" <<'PY' || fail "reopen: home save did not record the app bundles"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d == {"Mail": sys.argv[2] + "/Mail.app", "iTerm2": sys.argv[2] + "/iTerm.app"}, d
+PY
+printf '[%s]' "$(rwin 1 Mail 99 2)" > "${RO_LIVE}"
+ro home save >/dev/null
+grep -q iTerm.app "${RO_HOME}/.config/yabai/home-apps.json" || fail "reopen: a save forgot the bundle of an app that is closed now"
+say "reopen: home save records each app's bundle and keeps those of closed apps"
+
+# The saved desktop: Mail (Desktop 2), iTerm2 x2 + Finder + Silent (Desktop 3), Notes (Desktop 10).
+cat > "${RO_HOME}/.config/yabai/home-layout.json" <<'EOF'
+{"spaces": {"10": {"windows": [{"app": "Notes"}]},
+            "2": {"windows": [{"app": "Mail"}]},
+            "3": {"windows": [{"app": "iTerm2"}, {"app": "iTerm2"}, {"app": "Finder"}, {"app": "Silent"}]}}}
+EOF
+echo '[]' > "${RO_LIVE}"
+[[ "$(ro home reopen)" == *"reopening off"* ]] || fail "reopen: not off by default"
+out="$(ro home reopen status)"
+printf '%s\n' "${out}" | grep -q "Mail (1 windows) ${RO_APPS}/Mail.app" || fail "reopen: status does not list Mail: ${out}"
+printf '%s\n' "${out}" | grep -q "Finder" && fail "reopen: Finder is on the skip list"
+printf '%s\n' "${out}" | grep -q "Close windows when quitting" || fail "reopen: status does not show the macOS setting"
+echo "Notes  # not this one" > "${RO_HOME}/.config/gallery/home-reopen-skip"
+[[ "$(ro home reopen status)" == *Notes* ]] && fail "reopen: home-reopen-skip was ignored"
+say "reopen: off by default; status lists the saved apps not open, minus the skip list"
+
+# The login pass with reopening off starts nothing.
+printf '#!/bin/sh\n' > "${RO_HOME}/.config/yabai/rules.local"
+lpro() {  # lpro [locked]: the login pass in a fresh session
+  rm -f "${RO_HOME}/.config/gallery/state/home-login-pass" "${RO_HOME}/.config/gallery/state/home-login-done"
+  : > "${RO_OPENS}"; echo '[]' > "${RO_LIVE}"
+  GALLERY_RUNNING_BUNDLES="" HOME="${RO_HOME}" PATH="${RO_STUB}:${PATH}" GALLERY_OPEN_BIN="${RO_STUB}/open" \
+    GALLERY_LAYOUT_TOOL="${RO_STUB}/layout-tool" GALLERY_SESSION_ID=67 GALLERY_SESSION_AGE=30 \
+    GALLERY_IDLE_SECONDS=60 GALLERY_HOME_POLL=1 GALLERY_HOME_QUIET_FOR=2 GALLERY_HOME_QUIET_TIMEOUT="${2:-8}" \
+    GALLERY_HOME_REOPEN_WAIT=3 GALLERY_HOME_SETTLE=0 GALLERY_SCREEN_LOCKED="${1:-0}" \
+    GALLERY_WALLPAPER_STORE=/nonexistent "${GALLERY_BIN}" home _login-pass
+}
+lpro
+[ -s "${RO_OPENS}" ] && fail "reopen: the login pass started apps with reopening off"
+[[ "$(ro home reopen on)" == *"reopening on"* ]] || fail "reopen: on did not confirm"
+[ -f "${RO_HOME}/.config/gallery/state/home-reopen" ] || fail "reopen: on did not write the per-Mac switch"
+lpro 1 3
+[ -s "${RO_OPENS}" ] && fail "reopen: started apps behind the lock screen"
+grep -q "screen stayed locked" "${RO_LOG}" || fail "reopen: giving up behind the lock was not logged"
+lpro
+[ "$(cat "${RO_OPENS}")" = "open -g ${RO_APPS}/Mail.app
+open -g ${RO_APPS}/iTerm.app
+open -g -a Silent" ] || fail "reopen: wrong launches or order: $(tr '\n' '|' < "${RO_OPENS}")"
+grep -q "reopen: iTerm2: 2 of 2 windows\|reopen: iTerm2: 1 of 2 windows" "${RO_LOG}" || fail "reopen: iTerm2's wait was not logged"
+grep -q "reopen: Silent: 0 of 1 windows after 3s" "${RO_LOG}" || fail "reopen: an app without windows did not time out"
+grep -q "reopen: started 3 apps" "${RO_LOG}" || fail "reopen: the total was not logged"
+[ "$(cat "${RO_HOME}/.config/gallery/state/home-login-done")" = 67 ] || fail "reopen: the pass did not go on to place the windows"
+say "reopen: the login pass starts the saved apps one by one, only when on and unlocked, then places them"
+
+# An app already open is left alone; so is one running without a window.
+printf '[%s]' "$(rwin 1 Mail 11 2)" > "${RO_LIVE}"; : > "${RO_OPENS}"
+ro home reopen now >/dev/null
+grep -q Mail.app "${RO_OPENS}" && fail "reopen: started an app that was open already"
+grep -q iTerm.app "${RO_OPENS}" || fail "reopen: now did not start a missing app"
+: > "${RO_OPENS}"; echo '[]' > "${RO_LIVE}"
+RO_RUNNING="${RO_APPS}/iTerm.app" ro home reopen now >/dev/null
+grep -q iTerm.app "${RO_OPENS}" && fail "reopen: started an app running without a window"
+[[ "$(ro home reopen off)" == *"reopening off"* ]] || fail "reopen: off did not confirm"
+[ -f "${RO_HOME}/.config/gallery/state/home-reopen" ] && fail "reopen: off left the switch"
+say "reopen: open apps left alone; off removes the switch"
+
 # --- automatic save (gallery home _autosave) --------------------------------
 # A stub `gallery` (GALLERY_SELF) stands in for `home save` and writes the
 # files a real save writes; the window list comes from GALLERY_HOME_WINDOWS_JSON.

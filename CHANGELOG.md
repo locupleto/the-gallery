@@ -5,6 +5,18 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.4.0 (2026-10-30)
+
+- The Gallery can reopen your apps after a login instead of macOS:
+  `gallery home reopen on` (per Mac, off by default). macOS starts every app
+  at once while yabai is still starting, which is how windows ended up on
+  Desktop 1; the Gallery waits for yabai and an unlocked screen, then starts
+  the apps of the last save one at a time and puts each window on its
+  Desktop. It needs "Close windows when quitting an application" off in
+  System Settings > Desktop & Dock so the apps restore their windows;
+  `gallery home reopen` shows both macOS settings and the apps it would
+  start. `home save` now also writes `~/.config/yabai/home-apps.json`.
+
 ## 0.3.2 (2026-10-30)
 
 - Homes now exist only while the Mac logs in. Once the after-login pass has

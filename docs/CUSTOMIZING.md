@@ -406,6 +406,7 @@ sources it when present. Arrange your apps across your Spaces, then:
 gallery home show      # the window -> Space map, and the live home-* rules
 gallery home save      # write rules.local from the current layout and apply it
 gallery home apply     # move every window back to its saved Desktop now
+gallery home reopen    # whether the Gallery, not macOS, starts the apps at login
 ```
 
 `home save` also records each Desktop's tile shape (which window is full
@@ -449,6 +450,27 @@ itself, at the first quiet moment: no window opened, closed or moved for 15
 seconds and no keyboard or mouse use for 5. It waits up to 10 minutes and
 otherwise leaves the windows alone; each run is logged in
 `~/.config/gallery/gallery-home.log`. A `gallery reload` does not repeat it.
+
+**Reopening the apps yourself.** Starting every app at once during the
+login is what makes windows land in the wrong place. Switch on
+
+```sh
+gallery home reopen on      # this Mac only; `off` gives it back to macOS
+gallery home reopen         # status: the macOS settings, the apps it would start
+gallery home reopen now     # start the saved apps that are not open, then home apply
+```
+
+and the pass starts the apps of the last save itself, before anything else:
+once yabai answers and the screen is unlocked, one app at a time, in the
+background, waiting for each app's windows (up to 20 seconds) before the
+next. The app restores its own windows, which macOS allows only with "Close
+windows when quitting an application" off (System Settings > Desktop &
+Dock); `gallery home reopen` says whether it is. You can then leave "Reopen
+windows when logging back in" unticked at shutdown; an app macOS reopens
+anyway, or a login item, is left alone. Finder, Hammerspoon, System
+Settings and installers are never started; add your own, one app per line,
+to `~/.config/gallery/home-reopen-skip`. `home save` records which app
+bundle each app is in `~/.config/yabai/home-apps.json`.
 
 The same pass then puts every window back on the Desktop it was on at the
 last save, terminals and Finder included, which have no rule. Windows are

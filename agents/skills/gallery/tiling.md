@@ -41,6 +41,7 @@ gallery home show                # window -> Space map, and the saved rules
 gallery home save --dry-run      # preview
 gallery home save                # write rules.local and apply it
 gallery home apply               # move every window back home now
+gallery home reopen              # status of the Gallery starting the apps after login
 ```
 
 - Only apps with a window open when saving get a home; an app that is not
@@ -60,6 +61,10 @@ gallery home apply               # move every window back home now
   (terminals too) back on its saved Desktop, then rebuilds the shapes where
   the Desktop holds the same apps (logged in
   `~/.config/gallery/gallery-home.log`).
+- `gallery home reopen on|off|now|status` (per Mac, `state/home-reopen`): the login
+  pass starts the last save's apps itself, one at a time after unlock, before placing
+  them; needs "Close windows when quitting an application" off. Skip list:
+  `~/.config/gallery/home-reopen-skip`. Bundles: `~/.config/yabai/home-apps.json`.
 - The Gallery saves by itself (`gallery home _autosave`): every half hour
   and before sleep, shutdown, restart or logout, skipping an unchanged,
   scattered or half-closed desktop. Rollback: the daily copies in

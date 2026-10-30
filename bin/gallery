@@ -206,6 +206,7 @@ commands:
   home save [--roam A,B] [--keep-absent] [--dry-run]
                                    snapshot the current layout into ~/.config/yabai/rules.local
   home apply                      move every window back to its saved Desktop now
+  home reopen [on|off|now|status] this Mac: the Gallery, not macOS, starts the saved apps after login
   ghosts [list]                   windows yabai cannot see (born behind the lock screen)
   ghosts fix [OWNER|ID]           quit + relaunch the app owning ghost window(s)
   ghosts forget                   clear the ghosts service's reported/handled state
@@ -3846,6 +3847,8 @@ for r in data:
       echo "gallery: tile shapes not saved: $(printf '%s' "${layout_out}" | tail -1)" >&2
     fi
   fi
+  # Which bundle each app is, for `home reopen`.
+  printf '%s' "${windows}" | home_record_apps
 }
 
 cmd_home_apply() {
@@ -4090,6 +4093,299 @@ PY
   fi
 }
 
+# --- reopening the apps (gallery home reopen) ------------------------------
+# When macOS reopens the apps at login ("Reopen windows when logging back
+# in") it starts them all at once, while yabai is still attaching: windows
+# land on Desktop 1 or arrive unreadable (AX-less). With reopening on for
+# this Mac, the login pass starts the apps of the last save itself instead:
+# once yabai answers and the screen is unlocked, one app at a time, waiting
+# for its windows before the next. Each app still restores its own windows,
+# which macOS lets it do only with "Close windows when quitting an
+# application" off (System Settings > Desktop & Dock). An app already
+# running (macOS reopened it after all, or it is a login item) is left alone,
+# so the macOS checkbox may stay on. Test seams: GALLERY_OPEN_BIN,
+# GALLERY_SCREEN_LOCKED, GALLERY_HOME_REOPEN_WAIT.
+HOME_REOPEN_FILE="${CONFIG_DIR}/state/home-reopen"
+HOME_APPS_FILE="${HOME}/.config/yabai/home-apps.json"
+HOME_REOPEN_SKIP_FILE="${CONFIG_DIR}/home-reopen-skip"
+HOME_REOPEN_SKIP_DEFAULT="Finder,Dock,loginwindow,Hammerspoon,System Settings,System Preferences,Installer,Software Update,Archive Utility,Gallery,Learn"
+HOME_REOPEN_WAIT="${GALLERY_HOME_REOPEN_WAIT:-20}"
+
+home_reopen_enabled() { [ -f "${HOME_REOPEN_FILE}" ]; }
+
+# The apps to skip: the built-in list plus one app per line of
+# ~/.config/gallery/home-reopen-skip (# comments allowed).
+home_reopen_skip_csv() {
+  local csv="${HOME_REOPEN_SKIP_DEFAULT}" line
+  if [ -f "${HOME_REOPEN_SKIP_FILE}" ]; then
+    while IFS= read -r line || [ -n "${line}" ]; do
+      line="${line%%#*}"
+      line="$(printf '%s' "${line}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+      [ -n "${line}" ] && csv="${csv},${line}"
+    done < "${HOME_REOPEN_SKIP_FILE}"
+  fi
+  printf '%s' "${csv}"
+}
+
+# Which app bundle each open window belongs to (from its pid), merged into
+# HOME_APPS_FILE so an app closed since an earlier save keeps its path.
+# Written by `home save`; `home reopen` launches by these paths, as yabai's
+# app name is not always the bundle's (iTerm2 is iTerm.app).
+read -r -d '' PY_HOME_RECORD_APPS <<'PYEOF' || true
+import json, os, subprocess, sys
+
+path_file = sys.argv[1]
+try:
+    windows = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+try:
+    with open(path_file) as fh:
+        known = json.load(fh)
+    if not isinstance(known, dict):
+        known = {}
+except Exception:
+    known = {}
+seen = {}
+for w in windows:
+    app, pid = w.get("app"), w.get("pid")
+    if not app or not pid or app in seen:
+        continue
+    try:
+        exe = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+    except Exception:
+        exe = ""
+    cut = exe.find(".app/")
+    if cut > 0:
+        seen[app] = exe[:cut + 4]
+known.update(seen)
+tmp = path_file + ".tmp"
+with open(tmp, "w") as fh:
+    json.dump(dict(sorted(known.items())), fh, indent=2)
+    fh.write("\n")
+os.replace(tmp, path_file)
+PYEOF
+
+home_record_apps() {  # stdin: yabai's window list
+  mkdir -p "$(dirname "${HOME_APPS_FILE}")"
+  python3 -c "${PY_HOME_RECORD_APPS}" "${HOME_APPS_FILE}" 2>/dev/null || true
+}
+
+# The apps of the last save that have no window now, in the order of their
+# Desktops: "app|bundle path or empty|windows saved", one per line.
+# stdin: yabai's window list; argv: layout file, apps file, skip csv.
+read -r -d '' PY_HOME_REOPEN_PLAN <<'PYEOF' || true
+import json, sys
+
+layout_file, apps_file, skip_csv = sys.argv[1:4]
+try:
+    live = json.load(sys.stdin)
+except Exception:
+    live = []
+try:
+    with open(layout_file) as fh:
+        spaces = json.load(fh).get("spaces") or {}
+except Exception:
+    sys.exit(0)
+try:
+    with open(apps_file) as fh:
+        paths = json.load(fh)
+except Exception:
+    paths = {}
+skip = {s.strip() for s in skip_csv.split(",") if s.strip()}
+open_now = {w.get("app") for w in live}
+counts, order = {}, []
+def index(key):
+    try:
+        return int(key)
+    except ValueError:
+        return 1 << 30
+for key in sorted(spaces, key=index):
+    for w in (spaces[key] or {}).get("windows") or []:
+        app = w.get("app")
+        if not app or app in skip or app in open_now:
+            continue
+        if app.startswith(("Gallery:", "Learn:")):
+            continue
+        if app not in counts:
+            order.append(app)
+        counts[app] = counts.get(app, 0) + 1
+for app in order:
+    print("%s|%s|%d" % (app, paths.get(app, "") if isinstance(paths, dict) else "", counts[app]))
+PYEOF
+
+home_reopen_plan() {
+  [ -f "${HOME_LAYOUT_FILE}" ] || return 0
+  local windows
+  windows="$(home_windows_json 2>/dev/null)" || windows="[]"
+  printf '%s' "${windows}" | python3 -c "${PY_HOME_REOPEN_PLAN}" \
+    "${HOME_LAYOUT_FILE}" "${HOME_APPS_FILE}" "$(home_reopen_skip_csv)"
+}
+
+screen_locked() {
+  if [ -n "${GALLERY_SCREEN_LOCKED:-}" ]; then [ "${GALLERY_SCREEN_LOCKED}" = 1 ]; return; fi
+  ioreg -n Root -d1 -a 2>/dev/null | python3 -c 'import plistlib, sys
+try:
+    users = plistlib.loads(sys.stdin.buffer.read()).get("IOConsoleUsers") or []
+except Exception:
+    sys.exit(1)
+sys.exit(0 if any(u.get("CGSSessionScreenIsLocked") for u in users) else 1)'
+}
+
+# Whether an app from this bundle runs for this user (GALLERY_RUNNING_BUNDLES,
+# a test seam: the bundle paths that count as running, one per line).
+app_bundle_running() {
+  if [ -n "${GALLERY_RUNNING_BUNDLES+x}" ]; then
+    printf '%s\n' "${GALLERY_RUNNING_BUNDLES}" | grep -qxF -- "$1"
+    return
+  fi
+  pgrep -u "$(id -u)" -af "^$1/Contents/MacOS/" >/dev/null 2>&1
+}
+
+# How many readable windows an app has now (yabai sees an AX-less window but
+# cannot move it, so those do not count).
+app_window_count() {
+  yabai -m query --windows 2>/dev/null | python3 -c 'import json, sys
+try:
+    ws = json.load(sys.stdin)
+except Exception:
+    ws = []
+print(sum(1 for w in ws if w.get("app") == sys.argv[1] and w.get("has-ax-reference", True)))' "$1"
+}
+
+# Start one app in the background (no focus stolen) by its bundle path, or
+# by name when no save recorded one. Never from a stand-in $HOME without a
+# stand-in opener: a test must not start the real apps.
+home_open_app() {
+  local app="$1" path="$2"
+  if [ -z "${GALLERY_OPEN_BIN:-}" ] && [ "${HOME}" != "$(eval echo "~$(id -un)")" ]; then
+    echo "gallery: not starting ${app} from a HOME that is not yours (${HOME})" >&2
+    return 1
+  fi
+  if [ -n "${path}" ] && [ -d "${path}" ]; then
+    "${GALLERY_OPEN_BIN:-open}" -g "${path}" >/dev/null 2>&1
+  else
+    "${GALLERY_OPEN_BIN:-open}" -g -a "${app}" >/dev/null 2>&1
+  fi
+}
+
+# Start every app in the plan, one at a time: wait until it shows as many
+# readable windows as were saved, or its count holds still for a few polls,
+# or HOME_REOPEN_WAIT runs out. Logs each app. Prints nothing.
+home_reopen_apps() {
+  local poll="${GALLERY_HOME_POLL:-1}" app path saved n last still waited started=0 plan
+  plan="$(home_reopen_plan)"
+  [ -n "${plan}" ] || { home_log "reopen: every saved app is open already"; return 0; }
+  while IFS='|' read -r app path saved; do
+    [ -n "${app}" ] || continue
+    if [ -n "${path}" ] && app_bundle_running "${path}"; then
+      home_log "reopen: ${app}: running without a window; left alone"
+      continue
+    fi
+    if ! home_open_app "${app}" "${path}"; then
+      home_log "reopen: ${app}: could not be started"
+      continue
+    fi
+    started=$((started + 1))
+    waited=0; still=0; last=-1; n=0
+    while [ "${waited}" -lt "${HOME_REOPEN_WAIT}" ]; do
+      sleep "${poll}"
+      waited=$((waited + poll))
+      n="$(app_window_count "${app}")"
+      [ "${n}" -ge "${saved}" ] && break
+      if [ "${n}" -gt 0 ] && [ "${n}" = "${last}" ]; then
+        still=$((still + poll))
+        [ "${still}" -ge 3 ] && break
+      else
+        still=0
+      fi
+      last="${n}"
+    done
+    home_log "reopen: ${app}: ${n} of ${saved} windows after ${waited}s"
+  done <<< "${plan}"
+  home_log "reopen: started ${started} apps"
+}
+
+# The login pass's first step when reopening is on: wait (within the pass's
+# timeout) for yabai and an unlocked screen, then start the apps.
+home_login_reopen() {
+  home_reopen_enabled || return 0
+  local poll="${GALLERY_HOME_POLL:-3}" waited=0
+  while { screen_locked || ! yabai -m query --spaces >/dev/null 2>&1; }; do
+    if [ "${waited}" -ge "${HOME_QUIET_TIMEOUT}" ]; then
+      home_log "reopen: the screen stayed locked or yabai did not answer; no app started"
+      return 0
+    fi
+    sleep "${poll}"
+    waited=$((waited + poll))
+  done
+  [ -f "${CONFIG_DIR}/state/paused" ] && return 0
+  home_log "reopen: starting the saved apps"
+  home_reopen_apps
+}
+
+# The two macOS settings reopening depends on, as one line each.
+home_reopen_mac_settings() {
+  local keep tal
+  keep="$("${GALLERY_DEFAULTS_BIN:-defaults}" read -g NSQuitAlwaysKeepsWindows 2>/dev/null || true)"
+  tal="$("${GALLERY_DEFAULTS_BIN:-defaults}" -currentHost read com.apple.loginwindow TALLogoutSavesState 2>/dev/null \
+    || "${GALLERY_DEFAULTS_BIN:-defaults}" read com.apple.loginwindow TALLogoutSavesState 2>/dev/null || true)"
+  if [ "${keep}" = 1 ]; then
+    echo "  \"Close windows when quitting an application\": off -- apps restore their windows (good)"
+  else
+    echo "  \"Close windows when quitting an application\": on -- turn it off in System Settings > Desktop & Dock,"
+    echo "    or the apps start without their windows"
+  fi
+  case "${tal}" in
+    0) echo "  \"Reopen windows when logging back in\": off -- the Gallery does it" ;;
+    1) echo "  \"Reopen windows when logging back in\": on -- may be turned off at the next shutdown (harmless either way)" ;;
+    *) echo "  \"Reopen windows when logging back in\": not set yet (asked at shutdown)" ;;
+  esac
+}
+
+cmd_home_reopen() {
+  case "${1:-status}" in
+    on)
+      mkdir -p "$(dirname "${HOME_REOPEN_FILE}")"
+      date '+%Y-%m-%dT%H:%M:%S%z' > "${HOME_REOPEN_FILE}"
+      echo "home: reopening on for this Mac -- after login the Gallery starts the saved apps itself"
+      home_reopen_mac_settings
+      ;;
+    off)
+      rm -f "${HOME_REOPEN_FILE}"
+      echo "home: reopening off for this Mac -- macOS reopens the apps (keep its checkbox on at shutdown)"
+      ;;
+    now)
+      home_reopen_apps
+      tail -n 50 "${HOME_LOG}" 2>/dev/null | sed -n 's/^[0-9-]* [0-9:]* reopen: /  /p' | tail -n 30
+      cmd_home_apply
+      ;;
+    status)
+      if home_reopen_enabled; then
+        echo "home: reopening on for this Mac (since $(cat "${HOME_REOPEN_FILE}"))"
+      else
+        echo "home: reopening off for this Mac -- macOS reopens the apps; \`gallery home reopen on\` to switch"
+      fi
+      home_reopen_mac_settings
+      local plan
+      plan="$(home_reopen_plan)"
+      if [ -n "${plan}" ]; then
+        echo "  would start now (saved, not open):"
+        printf '%s\n' "${plan}" | while IFS='|' read -r app path saved; do
+          echo "    ${app} (${saved} windows)${path:+ ${path}}"
+        done
+      else
+        echo "  every saved app is open"
+      fi
+      ;;
+    *)
+      echo "usage: gallery home reopen [on|off|now|status]" >&2
+      exit 1
+      ;;
+  esac
+}
+
 cmd_home_login_pass() {
   local session age marker="${CONFIG_DIR}/state/home-login-pass"
   [ -f "${RULES_LOCAL_FILE}" ] || return 0
@@ -4102,6 +4398,7 @@ cmd_home_login_pass() {
   mkdir -p "$(dirname "${marker}")"
   printf '%s\n' "${session}" > "${marker}"
 
+  home_login_reopen
   local poll="${GALLERY_HOME_POLL:-3}" waited=0 still=0 sig last=""
   home_log "login pass: waiting for a quiet moment"
   while [ "${waited}" -lt "${HOME_QUIET_TIMEOUT}" ]; do
@@ -4284,6 +4581,9 @@ cmd_home() {
     apply)
       cmd_home_apply
       ;;
+    reopen)
+      cmd_home_reopen "$@"
+      ;;
     _login-pass)
       # Gallery.spoon, when Hammerspoon starts: once per login (see above)
       cmd_home_login_pass
@@ -4301,7 +4601,7 @@ cmd_home() {
       cmd_home_autosave "$@"
       ;;
     "")
-      echo "usage: gallery home <show|save [--roam A,B] [--keep-absent] [--dry-run]|apply>" >&2
+      echo "usage: gallery home <show|save [--roam A,B] [--keep-absent] [--dry-run]|apply|reopen [on|off|now|status]>" >&2
       exit 1
       ;;
     *)
