@@ -5,6 +5,12 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.6.2 (2026-10-30)
+
+- The tree guard no longer gives up on a Desktop because a rebuild ran
+  while the screen locked (nothing can be resized then); it tries again at
+  the next change.
+
 ## 0.6.1 (2026-10-30)
 
 - Fixed: removing a Desktop in Mission Control could leave the Desktop you

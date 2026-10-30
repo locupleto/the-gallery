@@ -299,6 +299,9 @@ for idx in $("$YABAI" -m query --spaces | jq -r '.[] | select(.["is-visible"]) |
   log "space $idx: coverage now $ratio_after"
   if [ "$(awk -v r="$ratio_after" -v t="$THRESHOLD" 'BEGIN { print (r < t) ? 0 : 1 }')" = "1" ]; then
     skip_clear "$idx"
+  elif screen_locked; then
+    # Locked mid-rebuild: no window can be resized, so this proves nothing.
+    log "space $idx: the screen locked during the rebuild -- the next event tries again"
   else
     skip_add "$idx" "$(fingerprint "$idx")"
     log "space $idx: still short after the rebuild -- not the tree; leaving this window set alone"
