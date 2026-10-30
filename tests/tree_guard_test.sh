@@ -41,7 +41,15 @@ case "$*" in
   "-m query --spaces")               jq -c '.spaces'                "$FIXTURE" ;;
   "-m query --windows")              jq -c '.windows'               "$FIXTURE" ;;
   "-m query --spaces --space "*)     jq -c --argjson i "$last" '.spaces[] | select(.index == $i)' "$FIXTURE" ;;
-  "-m query --windows --space "*)    jq -c --argjson i "$last" '[.windows[] | select(.space == $i)]' "$FIXTURE" ;;
+  "-m query --windows --space "*)
+    # FIXTURE_AFTER / SWITCH_AT: from the SWITCH_AT-th such query on, answer
+    # from another fixture (windows still arriving while the guard measures).
+    f="$FIXTURE"
+    if [ -n "${FIXTURE_AFTER:-}" ]; then
+      n=$(( $(cat "$COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$COUNTER"
+      [ "$n" -ge "$SWITCH_AT" ] && f="$FIXTURE_AFTER"
+    fi
+    jq -c --argjson i "$last" '[.windows[] | select(.space == $i)]' "$f" ;;
   "-m space "*"--layout "*)          echo "$*" >> "$REPAIRS" ;;
   *) echo "fake yabai: unhandled query: $*" >&2; exit 1 ;;
 esac
@@ -170,6 +178,21 @@ fixture "${BROKEN2}" \
 run_guard_auto "${BROKEN2}" "${WORK_DIR}/state-auto" "${WORK_DIR}/repairs-changed" "${WORK_DIR}/skip-broken" >/dev/null
 [ -s "${WORK_DIR}/repairs-changed" ] || fail "a hole with a changed window set was skipped"
 say "the skip is void once the window set changes -- a real hole is still repaired"
+
+# --- a hole whose window count changes while it is confirmed ------------------
+# Mission Control removing a Desktop: the first readings see two tiles, the
+# next three, and the hole stays. That is no recovery; it is read again until
+# two readings agree, then rebuilt.
+TWO="${WORK_DIR}/broken-two.json"
+fixture "${TWO}" "$(tile 1 1 1 1344 39 1208 692)" "$(tile 2 1 1 1344 740 600 692)"
+: > "${WORK_DIR}/counter"
+FIXTURE_AFTER="${BROKEN}" SWITCH_AT=3 COUNTER="${WORK_DIR}/counter" \
+  run_guard_auto "${TWO}" "${WORK_DIR}/state-auto" "${WORK_DIR}/repairs-arriving" "${WORK_DIR}/skip-arriving" >/dev/null
+grep -q -- "--layout" "${WORK_DIR}/repairs-arriving" \
+  || fail "a hole whose window count changed during the check was left alone: $(tail -3 "${WORK_DIR}/guard.log")"
+grep -q "recovered" "${WORK_DIR}/guard.log" && tail -1 "${WORK_DIR}/guard.log" | grep -q recovered \
+  && fail "a changed window count was logged as a recovery"
+say "a hole whose window count changes mid-check is measured again and rebuilt"
 
 # --- 9. a remembered rect past the display's edge is cut back to it -------------
 # Recorded 2026-10-10: a window that had once hung over the right and bottom

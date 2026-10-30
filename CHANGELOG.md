@@ -5,6 +5,14 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.6.1 (2026-10-30)
+
+- Fixed: removing a Desktop in Mission Control could leave the Desktop you
+  were on with a broken tiling: a window shrunk into a corner and others
+  overlapping it. The tree guard, which rebuilds such a Desktop, saw the
+  gap but took the windows still moving for a recovery and left it. It now
+  measures again until the Desktop has settled, then rebuilds it.
+
 ## 0.6.0 (2026-10-30)
 
 - Desktops are now remembered by monitor. Each save notes every Desktop's

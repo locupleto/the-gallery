@@ -65,6 +65,7 @@ set -euo pipefail
 THRESHOLD="${TREE_GUARD_THRESHOLD:-0.97}"   # coverage below this = a hole
 SETTLE="${TREE_GUARD_SETTLE:-0.35}"         # let yabai finish re-tiling first
 CONFIRM="${TREE_GUARD_CONFIRM:-0.6}"        # a hole must still be there after this
+CONFIRM_TRIES="${TREE_GUARD_CONFIRM_TRIES:-5}"  # readings while the window count still changes
 LOG="${TREE_GUARD_LOG:-$HOME/Library/Logs/yabai-tree-guard.log}"
 LOCK="${TREE_GUARD_LOCK:-/tmp/yabai-tree-guard.lock}"
 STATE="${TREE_GUARD_STATE:-$HOME/.config/yabai/tree-guard.rects}"
@@ -235,13 +236,31 @@ for idx in $("$YABAI" -m query --spaces | jq -r '.[] | select(.["is-visible"]) |
   # a moment later before spending the Space's split ratios on a rebuild -- the
   # same "must persist" discipline the gallery.ghosts watcher applies before it
   # relaunches anything.
+  #
+  # A different window count between two readings means windows are still
+  # arriving or leaving: Mission Control removing a Desktop moves them for a
+  # moment. That is not a recovery -- reading it as one left a real hole
+  # alone, with no later signal to look again (2026-10-30). So read again
+  # until two readings agree, and judge the settled one.
   if [ "$whole" = "0" ] && [ "$MODE" != "check" ]; then
-    sleep "$CONFIRM"
-    read -r tiles2 ratio2 < <(coverage "$idx" "$u_w" "$u_h")
-    if [ "$tiles2" != "$tiles" ] || [ "$(awk -v r="$ratio2" -v t="$THRESHOLD" 'BEGIN { print (r < t) ? 0 : 1 }')" = "1" ]; then
+    tries=0 settled=0
+    while [ "$tries" -lt "$CONFIRM_TRIES" ]; do
+      sleep "$CONFIRM"
+      tries=$((tries + 1))
+      read -r tiles2 ratio2 < <(coverage "$idx" "$u_w" "$u_h")
+      if [ "$tiles2" = "$tiles" ]; then settled=1; break; fi
+      tiles="$tiles2"; ratio="$ratio2"
+    done
+    if [ "$settled" = "0" ]; then
+      log "space $idx: windows still arriving or leaving after $tries readings -- left for the next event"
+      continue
+    fi
+    if [ "$(awk -v r="$ratio2" -v t="$THRESHOLD" 'BEGIN { print (r < t) ? 0 : 1 }')" = "1" ]; then
       log "space $idx: coverage $ratio recovered to $ratio2 on its own -- left alone"
       continue
     fi
+    ratio="$ratio2"
+    [ "$tiles" -gt 0 ] || continue
   fi
 
   if [ "$whole" = "1" ]; then
