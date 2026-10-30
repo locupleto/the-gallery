@@ -472,6 +472,20 @@ Settings and installers are never started; add your own, one app per line,
 to `~/.config/gallery/home-reopen-skip`. `home save` records which app
 bundle each app is in `~/.config/yabai/home-apps.json`.
 
+Terminals come back with what ran in them. With iTerm2 as the terminal,
+`home save` also notes for each iTerm2 window (its current tab) whether a
+Claude Code agent runs in it, and which session, or else the folder its shell
+is in (`~/.config/yabai/home-terminals.json`; floating Gallery windows are
+left out). After login, while iTerm2 is not running yet, the Gallery starts
+it without its own window restore and opens one window per saved terminal on
+its saved Desktop: an agent as `claude --resume <session>` in its folder,
+with the permission mode and model it was started with, a shell in its
+folder. A resumed agent has its whole conversation but is idle: whatever it
+was doing when the Mac shut down has to be asked for again. Other programs
+in a shell (a server, `btop`) are not restarted. If iTerm2 is running
+already (macOS reopened it after all), its own windows stay and none are
+added. The automatic save also saves when an agent starts or ends.
+
 The same pass then puts every window back on the Desktop it was on at the
 last save, terminals and Finder included, which have no rule. Windows are
 matched app by app, by title where that is unique and otherwise in the order

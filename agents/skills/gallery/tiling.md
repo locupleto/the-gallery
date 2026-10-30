@@ -65,6 +65,10 @@ gallery home reopen              # status of the Gallery starting the apps after
   pass starts the last save's apps itself, one at a time after unlock, before placing
   them; needs "Close windows when quitting an application" off. Skip list:
   `~/.config/gallery/home-reopen-skip`. Bundles: `~/.config/yabai/home-apps.json`.
+  Terminals (iTerm2): `~/.config/yabai/home-terminals.json` notes per window a Claude Code
+  session (from `~/.claude/sessions/<pid>.json`) or a shell's folder; reopened as
+  `claude --resume <id>` (idle) or a shell there, on the saved Desktop, only while iTerm2
+  was not running.
 - The Gallery saves by itself (`gallery home _autosave`): every half hour
   and before sleep, shutdown, restart or logout, skipping an unchanged,
   scattered or half-closed desktop. Rollback: the daily copies in

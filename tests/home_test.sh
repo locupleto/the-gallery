@@ -434,6 +434,8 @@ chmod +x "${RO_STUB}/yabai" "${RO_STUB}/open" "${RO_STUB}/ps" "${RO_STUB}/layout
 ro() {  # ro <args...>: the gallery CLI in the reopen sandbox
   GALLERY_RUNNING_BUNDLES="${RO_RUNNING:-}" HOME="${RO_HOME}" PATH="${RO_STUB}:${PATH}" \
     GALLERY_OPEN_BIN="${GALLERY_OPEN_BIN:-${RO_STUB}/open}" GALLERY_LSREGISTER="${GALLERY_LSREGISTER:-/nonexistent}" \
+    GALLERY_ITERM_TTYS="${GALLERY_ITERM_TTYS:-/dev/null}" GALLERY_ITERM_RUNNING="${GALLERY_ITERM_RUNNING:-0}" \
+    GALLERY_TERM_BIN="${GALLERY_TERM_BIN:-/nonexistent}" GALLERY_CLAUDE_SESSIONS="${GALLERY_CLAUDE_SESSIONS:-/nonexistent}" \
     GALLERY_LAYOUT_TOOL="${RO_STUB}/layout-tool" GALLERY_DEFAULTS_BIN="${REPO_ROOT}/tests/fake-defaults" \
     GALLERY_HOME_POLL=1 GALLERY_HOME_REOPEN_WAIT=3 GALLERY_SESSION_ID=66 GALLERY_SESSION_AGE=999999 \
     "${GALLERY_BIN}" "$@"
@@ -476,6 +478,7 @@ lpro() {  # lpro [locked]: the login pass in a fresh session
   : > "${RO_OPENS}"; echo '[]' > "${RO_LIVE}"
   GALLERY_RUNNING_BUNDLES="" HOME="${RO_HOME}" PATH="${RO_STUB}:${PATH}" GALLERY_OPEN_BIN="${RO_STUB}/open" \
     GALLERY_LAYOUT_TOOL="${RO_STUB}/layout-tool" GALLERY_SESSION_ID=67 GALLERY_SESSION_AGE=30 \
+    GALLERY_ITERM_TTYS=/dev/null GALLERY_ITERM_RUNNING=0 GALLERY_TERM_BIN=/nonexistent GALLERY_LSREGISTER=/nonexistent \
     GALLERY_IDLE_SECONDS=60 GALLERY_HOME_POLL=1 GALLERY_HOME_QUIET_FOR=2 GALLERY_HOME_QUIET_TIMEOUT="${2:-8}" \
     GALLERY_HOME_REOPEN_WAIT=3 GALLERY_HOME_SETTLE=0 GALLERY_SCREEN_LOCKED="${1:-0}" \
     GALLERY_WALLPAPER_STORE=/nonexistent "${GALLERY_BIN}" home _login-pass
@@ -528,6 +531,90 @@ out="$(GALLERY_LSREGISTER="${RO_STUB}/lsregister" GALLERY_OPEN_BIN="${RO_STUB}/o
 [ "$(cat "${RO_OPENS}")" = "open -g -a ByName
 open -g ${RO_APPS}/Bundled.app" ] || fail "reopen: no Launch Services fallback: $(tr '\n' '|' < "${RO_OPENS}")"
 say "reopen: open apps left alone; off removes the switch; unknown names found through Launch Services"
+
+# --- the terminals: agents resumed, shells in their folder ------------------
+# iTerm2's windows come from GALLERY_ITERM_TTYS; ps and lsof are stubs; a
+# Claude Code session record sits in a stand-in sessions folder. Window 21
+# runs an agent, 22 a shell, 23 is a floating Gallery window (left out).
+RT_DIR="${WORK_DIR}/rt"; mkdir -p "${RT_DIR}/sessions" "${RT_DIR}/proj" "${RT_DIR}/shelldir"
+RT_YLOG="${WORK_DIR}/rt-yabai.log"; RT_TLOG="${WORK_DIR}/rt-term.log"
+printf '21 /dev/ttys021\n22 /dev/ttys022\n23 /dev/ttys023\n' > "${RT_DIR}/ttys"
+printf '{"pid":5021,"sessionId":"aaaa-1111","cwd":"%s","name":"proj-x"}' "${RT_DIR}/proj" > "${RT_DIR}/sessions/5021.json"
+cat > "${RO_STUB}/ps" <<EOF
+#!/bin/sh
+case "\$*" in
+  "-t ttys021 -o pid=,comm=") printf ' 4021 -zsh\n 5021 claude\n 5099 caffeinate\n' ;;
+  "-t ttys022 -o pid=,comm=") printf ' 4022 -zsh\n' ;;
+  "-t ttys023 -o pid=,comm=") printf ' 4023 btop\n' ;;
+  "-o args= -p 5021") echo "claude --permission-mode bypassPermissions --resume old-id write a poem" ;;
+  "-o comm= -p 11") echo "${RO_APPS}/Mail.app/Contents/MacOS/Mail" ;;
+esac
+EOF
+cat > "${RO_STUB}/lsof" <<EOF
+#!/bin/sh
+case "\$*" in *"-p 4022"*) printf 'p4022\nfcwd\nn${RT_DIR}/shelldir\n' ;; esac
+EOF
+cat > "${RO_STUB}/rt-term" <<EOF
+#!/bin/sh
+case "\$1" in
+  name) echo iterm2 ;;
+  open) shift; echo "term \$*" >> "${RT_TLOG}"; n=\$(wc -l < "${RT_TLOG}"); echo \$((700 + n)) ;;
+esac
+EOF
+cat > "${RO_STUB}/yabai" <<EOF
+#!/bin/sh
+echo "yabai \$*" >> "${RT_YLOG}"
+case "\$*" in
+  "-m query --windows") cat "${RO_LIVE}" ;;
+esac
+exit 0
+EOF
+printf '#!/bin/sh\necho "osascript $*" >> "%s"\n' "${RT_TLOG}" > "${RO_STUB}/osascript"
+chmod +x "${RO_STUB}/ps" "${RO_STUB}/lsof" "${RO_STUB}/rt-term" "${RO_STUB}/yabai" "${RO_STUB}/osascript"
+rt() {  # rt <args...>: the reopen sandbox with the terminal stand-ins
+  GALLERY_ITERM_TTYS="${RT_TTYS:-${RT_DIR}/ttys}" GALLERY_CLAUDE_SESSIONS="${RT_DIR}/sessions" \
+    GALLERY_TERM_BIN="${RO_STUB}/rt-term" GALLERY_OSASCRIPT="${RO_STUB}/osascript" GALLERY_HOME_SETTLE=0 \
+    GALLERY_ITERM_RUNNING="${RT_ITERM:-0}" ro "$@"
+}
+printf '[%s, %s, %s, %s]' "$(rwin 21 iTerm2 12 4)" "$(rwin 22 iTerm2 12 6)" \
+  "$(printf '{"id": 23, "app": "iTerm2", "title": "Gallery: btop", "pid": 12, "space": 4, "is-floating": true}')" \
+  "$(rwin 1 Mail 11 2)" > "${RO_LIVE}"
+out="$(rt home save)"
+[[ "${out}" == *"home: terminals: 1 agents, 1 shells"* ]] || fail "terminals: save did not report them: ${out}"
+python3 - "${RO_HOME}/.config/yabai/home-terminals.json" "${RT_DIR}" <<'PY' || fail "terminals: wrong record: $(cat "${RO_HOME}/.config/yabai/home-terminals.json")"
+import json, sys
+e = json.load(open(sys.argv[1]))
+assert [x["window"] for x in e] == [21, 22], e
+a, s = e
+assert a["kind"] == "claude" and a["session"] == "aaaa-1111" and a["space"] == 4, a
+assert a["cwd"] == sys.argv[2] + "/proj", a
+assert a["flags"] == ["--permission-mode", "bypassPermissions"], a   # no --resume, no prompt
+assert s["kind"] == "shell" and s["cwd"] == sys.argv[2] + "/shelldir" and s["space"] == 6, s
+PY
+say "terminals: home save records each iTerm2 window's agent session or shell folder, not floating ones"
+
+# Reopened: iTerm2 started without its own restore, one window per entry,
+# moved to its Desktop, iTerm2's startup window closed; iTerm2 is not also
+# started as an app.
+echo '[]' > "${RO_LIVE}"; : > "${RO_OPENS}"; : > "${RT_TLOG}"; : > "${RT_YLOG}"
+printf '600 /dev/ttys600\n' > "${RT_DIR}/startup"
+RT_TTYS="${RT_DIR}/startup" rt home reopen now >/dev/null
+grep -q "open -g -a iTerm --args -ApplePersistenceIgnoreState YES" "${RO_OPENS}" || fail "terminals: iTerm2 not started without its restore: $(cat "${RO_OPENS}")"
+grep -q "iTerm.app" "${RO_OPENS}" && fail "terminals: iTerm2 was also started as an app"
+[ "$(grep -c '^term ' "${RT_TLOG}")" = 2 ] || fail "terminals: not one window per entry: $(cat "${RT_TLOG}")"
+grep -q "^term --role tile --cwd ${RT_DIR}/proj -- /bin/zsh -l -c exec claude \"\$@\" claude --resume aaaa-1111 --permission-mode bypassPermissions$" "${RT_TLOG}" \
+  || fail "terminals: the agent was not resumed: $(cat "${RT_TLOG}")"
+grep -q "^term --role tile --cwd ${RT_DIR}/shelldir -- /bin/zsh -l$" "${RT_TLOG}" || fail "terminals: the shell did not open in its folder"
+grep -q "yabai -m window 701 --space 4" "${RT_YLOG}" || fail "terminals: the agent window was not moved to its Desktop"
+grep -q "yabai -m window 702 --space 6" "${RT_YLOG}" || fail "terminals: the shell window was not moved to its Desktop"
+grep -q "first window whose id is 600" "${RT_TLOG}" || fail "terminals: iTerm2's startup window was not closed"
+grep -q "reopen: terminals: 1 agents resumed, 1 shells opened" "${RO_LOG}" || fail "terminals: not logged"
+: > "${RT_TLOG}"
+RT_ITERM=1 rt home reopen now >/dev/null
+grep -q '^term ' "${RT_TLOG}" && fail "terminals: opened windows although iTerm2 was running"
+[[ "$(rt home reopen status)" == *"agent proj-x aaaa-111 in ${RT_DIR}/proj"* ]] || fail "terminals: status does not list the agent"
+say "terminals: agents resumed and shells reopened on their Desktops, only when iTerm2 was not running"
+printf '#!/bin/sh\ncase "$*" in "-m query --windows") cat "%s" ;; esac\nexit 0\n' "${RO_LIVE}" > "${RO_STUB}/yabai"
 
 # --- automatic save (gallery home _autosave) --------------------------------
 # A stub `gallery` (GALLERY_SELF) stands in for `home save` and writes the

@@ -5,6 +5,17 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.5.0 (2026-10-30)
+
+- Terminals come back with what ran in them. `home save` notes for each
+  iTerm2 window whether a Claude Code agent runs in it (and which session)
+  or a shell (and its folder), in `~/.config/yabai/home-terminals.json`.
+  With `gallery home reopen on`, the login opens one window per saved
+  terminal on its saved Desktop instead of iTerm2's empty restored windows:
+  agents resumed with `claude --resume` (idle, the conversation intact),
+  shells in their folder. `gallery home reopen` lists them. The automatic
+  save now also saves when an agent starts or ends.
+
 ## 0.4.1 (2026-10-30)
 
 - Fixed: `gallery home reopen` could not start an app whose name differs

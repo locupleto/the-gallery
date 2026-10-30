@@ -3847,8 +3847,12 @@ for r in data:
       echo "gallery: tile shapes not saved: $(printf '%s' "${layout_out}" | tail -1)" >&2
     fi
   fi
-  # Which bundle each app is, for `home reopen`.
+  # Which bundle each app is, and what runs in each terminal, for `home reopen`.
   printf '%s' "${windows}" | home_record_apps
+  local terms
+  terms="$(printf '%s' "${windows}" | home_record_terminals "${keep_absent}")"
+  [ -n "${terms}" ] && echo "home: terminals: ${terms} -> ${HOME_TERMINALS_FILE}"
+  return 0
 }
 
 cmd_home_apply() {
@@ -4172,6 +4176,216 @@ home_record_apps() {  # stdin: yabai's window list
   python3 -c "${PY_HOME_RECORD_APPS}" "${HOME_APPS_FILE}" 2>/dev/null || true
 }
 
+# --- the terminals: shells and coding agents --------------------------------
+# A terminal window's app can be started again, but not what ran in it. So
+# `home save` also writes HOME_TERMINALS_FILE: for each iTerm2 window (its
+# current tab), the Desktop, and either the Claude Code session running in it
+# (from ~/.claude/sessions/<pid>.json: session id, folder, and the start flags
+# that matter) or the folder of its shell. With reopening on, the login pass
+# opens one window per entry instead of letting iTerm2 restore empty ones: an
+# agent resumed (`claude --resume <id>`, idle, the conversation intact), a
+# shell in its folder. Floating Gallery windows (btop, Learn) are left out.
+# iTerm2 only: it is the one terminal that names each window's tty. Test
+# seams: GALLERY_ITERM_TTYS (a file of "<window id> <tty>" lines in place of
+# asking iTerm2), GALLERY_CLAUDE_SESSIONS (the sessions folder).
+HOME_TERMINALS_FILE="${HOME}/.config/yabai/home-terminals.json"
+CLAUDE_SESSIONS_DIR="${GALLERY_CLAUDE_SESSIONS:-${HOME}/.claude/sessions}"
+
+# "<window id> <tty>" for every iTerm2 window, its current tab's session.
+# Never starts iTerm2: asked only while it runs.
+iterm_window_ttys() {
+  if [ -n "${GALLERY_ITERM_TTYS:-}" ]; then cat "${GALLERY_ITERM_TTYS}"; return; fi
+  iterm_running || return 0
+  /usr/bin/osascript -e 'set out to ""
+tell application id "com.googlecode.iterm2"
+  repeat with w in windows
+    try
+      set out to out & (id of w) & " " & (tty of current session of current tab of w) & linefeed
+    end try
+  end repeat
+end tell
+return out' 2>/dev/null || true
+}
+
+read -r -d '' PY_HOME_RECORD_TERMINALS <<'PYEOF' || true
+import json, os, subprocess, sys
+
+out_file, ttys_file, sessions_dir = sys.argv[1:4]
+try:
+    windows = {w.get("id"): w for w in json.load(sys.stdin)}
+except Exception:
+    sys.exit(1)
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return ""
+
+def shell_cwd(pid):
+    # lsof with a pinned fd limit: under a huge `ulimit -n` it walks every fd.
+    out = run("/bin/sh", "-c", 'ulimit -n 1024; exec lsof -a -p "$0" -d cwd -Fn', str(pid))
+    for line in out.splitlines():
+        if line.startswith("n/"):
+            return line[1:]
+    return ""
+
+# The flags worth keeping on a resume: never a prompt, never --resume/--continue.
+KEEP_VALUE = {"--permission-mode", "--model", "--add-dir"}
+KEEP_FLAG = {"--dangerously-skip-permissions"}
+def start_flags(args):
+    keep, i = [], 1
+    while i < len(args):
+        a = args[i]
+        name, eq, _ = a.partition("=")
+        if a in KEEP_FLAG:
+            keep.append(a)
+        elif name in KEEP_VALUE and eq:
+            keep.append(a)
+        elif a in KEEP_VALUE and i + 1 < len(args):
+            keep += [a, args[i + 1]]
+            i += 1
+        i += 1
+    return keep
+
+entries = []
+with open(ttys_file) as fh:
+    pairs = [line.split() for line in fh if len(line.split()) == 2]
+for wid, tty in pairs:
+    try:
+        wid = int(wid)
+    except ValueError:
+        continue
+    w = windows.get(wid)
+    if not w or w.get("is-floating") or (w.get("title") or "").startswith(("Gallery:", "Learn:")):
+        continue
+    procs = []
+    for line in run("ps", "-t", tty.replace("/dev/", ""), "-o", "pid=,comm=").splitlines():
+        pid, _, comm = line.strip().partition(" ")
+        if pid.isdigit():
+            procs.append((int(pid), os.path.basename(comm.strip()).lstrip("-")))
+    entry = {"window": wid, "space": w.get("space"), "display": w.get("display")}
+    agent = next((p for p, c in procs if c == "claude"), None)
+    session = None
+    if agent:
+        try:
+            with open(os.path.join(sessions_dir, "%d.json" % agent)) as fh:
+                session = json.load(fh)
+        except Exception:
+            session = None
+    if session and session.get("sessionId") and session.get("cwd"):
+        args = run("ps", "-o", "args=", "-p", str(agent)).split()
+        entry.update(kind="claude", session=session["sessionId"], cwd=session["cwd"],
+                     flags=start_flags(args), name=session.get("name") or "")
+    else:
+        shell = next((p for p, c in procs if c in ("zsh", "bash", "fish", "sh")), None)
+        entry.update(kind="shell", cwd=shell_cwd(shell) if shell else "")
+    entries.append(entry)
+entries.sort(key=lambda e: e["window"])
+tmp = out_file + ".tmp"
+with open(tmp, "w") as fh:
+    json.dump(entries, fh, indent=2)
+    fh.write("\n")
+os.replace(tmp, out_file)
+print("%d agents, %d shells" % (sum(e["kind"] == "claude" for e in entries),
+                                sum(e["kind"] == "shell" for e in entries)))
+PYEOF
+
+# stdin: yabai's window list; $1: 1 to keep the old file while iTerm2 is not
+# running (the automatic save), else an empty list is written.
+home_record_terminals() {
+  local keep="${1:-0}" ttys
+  ttys="$(mktemp "${TMPDIR:-/tmp}/gallery-ttys.XXXXXX")"
+  iterm_window_ttys > "${ttys}"
+  if [ ! -s "${ttys}" ] && [ "${keep}" = 1 ] && [ -z "${GALLERY_ITERM_TTYS:-}" ] && ! iterm_running; then
+    rm -f "${ttys}"
+    return 0
+  fi
+  mkdir -p "$(dirname "${HOME_TERMINALS_FILE}")"
+  python3 -c "${PY_HOME_RECORD_TERMINALS}" "${HOME_TERMINALS_FILE}" "${ttys}" "${CLAUDE_SESSIONS_DIR}" 2>/dev/null || true
+  rm -f "${ttys}"
+}
+
+# The live agents, for the automatic save's change check: a new agent in a
+# window that did not move must still be saved.
+claude_sessions_signature() {
+  local f
+  for f in "${CLAUDE_SESSIONS_DIR}"/*.json; do
+    [ -f "${f}" ] || continue
+    kill -0 "$(basename "${f}" .json)" 2>/dev/null || continue
+    sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' "${f}"
+  done | sort | tr '\n' ' '
+}
+
+# Open the saved terminals, when iTerm2 is the terminal and not running yet
+# (running, it restored or kept its own windows: no duplicates). iTerm2 is
+# started without restoring its windows, each entry gets a window of its own
+# on its saved Desktop, then iTerm2's own startup window is closed.
+home_reopen_terminals() {
+  local term="${GALLERY_TERM_BIN:-${HOME}/bin/gallery-term}"
+  if iterm_running; then
+    home_log "reopen: terminals: iTerm2 is running already; its windows are left as they are"
+    return 0
+  fi
+  local plan
+  plan="$(python3 -c 'import json, sys
+try:
+    entries = json.load(open(sys.argv[1]))
+except Exception:
+    entries = []
+for e in entries:
+    if e.get("kind") == "claude" and e.get("session") and e.get("cwd"):
+        print("\x1f".join(["claude", str(e.get("space") or ""), e["cwd"], e["session"]] + list(e.get("flags") or [])))
+    elif e.get("kind") == "shell":
+        print("\x1f".join(["shell", str(e.get("space") or ""), e.get("cwd") or ""]))' "${HOME_TERMINALS_FILE}")"
+  [ -n "${plan}" ] || return 0
+  if [ -z "${GALLERY_OPEN_BIN:-}" ] && [ "${HOME}" != "$(eval echo "~$(id -un)")" ]; then
+    echo "gallery: not starting iTerm2 from a HOME that is not yours (${HOME})" >&2
+    return 0
+  fi
+  # ApplePersistenceIgnoreState: this one launch restores no windows.
+  "${GALLERY_OPEN_BIN:-open}" -g -a iTerm --args -ApplePersistenceIgnoreState YES >/dev/null 2>&1 || true
+  local waited=0
+  until iterm_running || [ "${waited}" -ge "${HOME_REOPEN_WAIT}" ]; do sleep 1; waited=$((waited + 1)); done
+  sleep "${GALLERY_HOME_SETTLE:-2}"
+  local startup
+  startup="$(iterm_window_ttys | awk '{ print $1 }' | tr '\n' ' ')"
+
+  local agents=0 shells=0 kind space cwd wid line
+  local -a f cmd
+  while IFS= read -r line; do
+    [ -n "${line}" ] || continue
+    IFS=$'\x1f' read -r -a f <<< "${line}"
+    kind="${f[0]}"; space="${f[1]}"; cwd="${f[2]}"
+    [ -d "${cwd}" ] || cwd="${HOME}"
+    if [ "${kind}" = claude ]; then
+      cmd=(/bin/zsh -l -c 'exec claude "$@"' claude --resume "${f[3]}" "${f[@]:4}")
+      agents=$((agents + 1))
+    else
+      cmd=(/bin/zsh -l)
+      shells=$((shells + 1))
+    fi
+    wid="$("${term}" open --role tile --cwd "${cwd}" -- "${cmd[@]}" 2>/dev/null)" || wid=""
+    case "${wid}" in ''|*[!0-9]*) continue ;; esac
+    [ -n "${space}" ] || continue
+    waited=0
+    until yabai -m query --windows --window "${wid}" >/dev/null 2>&1 || [ "${waited}" -ge 10 ]; do
+      sleep 0.5; waited=$((waited + 1))
+    done
+    yabai -m window "${wid}" --space "${space}" >/dev/null 2>&1 || true
+  done <<< "${plan}"
+
+  # iTerm2's own window from the launch, if it opened one: a lone session.
+  local id
+  for id in ${startup}; do
+    "${GALLERY_OSASCRIPT:-/usr/bin/osascript}" -e "tell application id \"com.googlecode.iterm2\"
+      set w to (first window whose id is ${id})
+      if (count of tabs of w) is 1 and (count of sessions of current tab of w) is 1 then close w
+    end tell" >/dev/null 2>&1 || true
+  done
+  home_log "reopen: terminals: ${agents} agents resumed, ${shells} shells opened"
+}
+
 # The apps of the last save that have no window now, in the order of their
 # Desktops: "app|bundle path or empty|windows saved", one per line.
 # stdin: yabai's window list; argv: layout file, apps file, skip csv.
@@ -4217,10 +4431,21 @@ PYEOF
 
 home_reopen_plan() {
   [ -f "${HOME_LAYOUT_FILE}" ] || return 0
-  local windows
+  local windows skip
   windows="$(home_windows_json 2>/dev/null)" || windows="[]"
+  skip="$(home_reopen_skip_csv)"
+  # iTerm2 comes back through its saved terminals (home_reopen_terminals).
+  home_terminals_apply && skip="${skip},iTerm2"
   printf '%s' "${windows}" | python3 -c "${PY_HOME_REOPEN_PLAN}" \
-    "${HOME_LAYOUT_FILE}" "${HOME_APPS_FILE}" "$(home_reopen_skip_csv)"
+    "${HOME_LAYOUT_FILE}" "${HOME_APPS_FILE}" "${skip}"
+}
+
+# Whether the saved terminals stand in for iTerm2's own restore.
+home_terminals_apply() {
+  [ -s "${HOME_TERMINALS_FILE}" ] || return 1
+  [ "$(cat "${HOME_TERMINALS_FILE}")" != "[]" ] || return 1
+  local term="${GALLERY_TERM_BIN:-${HOME}/bin/gallery-term}"
+  [ -x "${term}" ] && [ "$("${term}" name 2>/dev/null)" = iterm2 ]
 }
 
 screen_locked() {
@@ -4298,7 +4523,7 @@ for line in sys.stdin:
 home_reopen_apps() {
   local poll="${GALLERY_HOME_POLL:-1}" app path saved n last still waited started=0 plan
   plan="$(home_reopen_plan)"
-  [ -n "${plan}" ] || { home_log "reopen: every saved app is open already"; return 0; }
+  [ -n "${plan}" ] || home_log "reopen: every saved app is open already"
   while IFS='|' read -r app path saved; do
     [ -n "${app}" ] || continue
     if [ -n "${path}" ] && app_bundle_running "${path}"; then
@@ -4326,7 +4551,9 @@ home_reopen_apps() {
     done
     home_log "reopen: ${app}: ${n} of ${saved} windows after ${waited}s"
   done <<< "${plan}"
-  home_log "reopen: started ${started} apps"
+  [ -n "${plan}" ] && home_log "reopen: started ${started} apps"
+  home_terminals_apply && home_reopen_terminals
+  return 0
 }
 
 # The login pass's first step when reopening is on: wait (within the pass's
@@ -4401,6 +4628,16 @@ cmd_home_reopen() {
         done
       else
         echo "  every saved app is open"
+      fi
+      if home_terminals_apply; then
+        echo "  terminals (opened when iTerm2 is not running yet):"
+        python3 -c 'import json, sys
+for e in json.load(open(sys.argv[1])):
+    where = "Desktop %s" % e.get("space")
+    if e.get("kind") == "claude":
+        print("    %s: agent %s %s in %s" % (where, e.get("name") or "", e["session"][:8], e.get("cwd")))
+    else:
+        print("    %s: shell in %s" % (where, e.get("cwd") or "~"))' "${HOME_TERMINALS_FILE}" 2>/dev/null || true
       fi
       ;;
     *)
@@ -4534,7 +4771,7 @@ except Exception:
     return 0
   fi
   local sig
-  sig="$(printf '%s\n' "${verdict}" | sed -n 2p)"
+  sig="$(printf '%s\n' "${verdict}" | sed -n 2p) agents: $(claude_sessions_signature)"
   # Unchanged since the last save -- unless the shapes file is missing.
   if [ "$(cat "${HOME_AUTOSAVE_SIG_FILE}" 2>/dev/null)" = "${sig}" ] && [ -f "${HOME_LAYOUT_FILE}" ]; then
     return 0
@@ -4553,7 +4790,10 @@ except Exception:
   today="$(date +%Y-%m-%d)"
   mkdir -p "${HOME_HISTORY_DIR}/${today}"
   cp "${RULES_LOCAL_FILE}" "${HOME_HISTORY_DIR}/${today}/" 2>/dev/null || true
-  [ -f "${HOME_LAYOUT_FILE}" ] && cp "${HOME_LAYOUT_FILE}" "${HOME_HISTORY_DIR}/${today}/"
+  local kept
+  for kept in "${HOME_LAYOUT_FILE}" "${HOME_TERMINALS_FILE}" "${HOME_APPS_FILE}"; do
+    [ -f "${kept}" ] && cp "${kept}" "${HOME_HISTORY_DIR}/${today}/"
+  done
   ls -1d "${HOME_HISTORY_DIR}"/????-??-?? 2>/dev/null | sort -r | tail -n +$((HOME_HISTORY_KEEP + 1)) \
     | while IFS= read -r old; do rm -rf "${old}"; done
   local shapes_err
