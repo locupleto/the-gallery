@@ -5,6 +5,17 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.6.0 (2026-10-30)
+
+- Desktops are now remembered by monitor. Each save notes every Desktop's
+  monitor by its permanent id and its place on that monitor, and after a
+  login windows, terminals and tile shapes go back there whatever the
+  Desktop's number is now. Before, adding or removing a Desktop on the main
+  display, or making another display the main one, sent windows to the
+  wrong Desktops. The home rules in `rules.local` load only while the
+  numbers are unchanged; run `gallery home save` once (or let the automatic
+  save do it) so the saved files carry the monitors.
+
 ## 0.5.2 (2026-10-30)
 
 - Fixed: a web app added to the Dock from Safari was often saved as "Web

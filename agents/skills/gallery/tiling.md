@@ -75,6 +75,11 @@ gallery home reopen              # status of the Gallery starting the apps after
   `~/.config/yabai/home-history/<date>/`, then `gallery home apply`.
 - A Desktop showing a different wallpaper from the rest: `gallery bg apply`
   syncs them all (the after-login pass does it too).
+- Several displays: the snapshot and `home-terminals.json` note each Desktop's monitor
+  uuid and place on it (`display_uuid`, `display_space`); `yabai-layout place` and
+  `restore --remap` translate to today's numbers, so adding/removing a Desktop or a new
+  main display is followed. rules.local (plain `space=N`) loads only while
+  `gallery home _same-desktops` says the numbers still hold.
 - Keep other rules in `yabairc.local`, not `rules.local`.
 
 ## Floating

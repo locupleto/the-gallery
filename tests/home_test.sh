@@ -301,7 +301,17 @@ HOME="${ST_HOME}" GALLERY_SESSION_ID=88 GALLERY_SESSION_AGE=30 "${GALLERY_BIN}" 
   && fail "settled: _settled said yes in a fresh login"
 HOME="${ST_HOME}" GALLERY_SESSION_ID=88 GALLERY_SESSION_AGE=99999 "${GALLERY_BIN}" home _settled \
   || fail "settled: _settled said no in an old session"
-say "homes load only while logging in (or forced by home apply); _settled answers"
+# ...and only while the Desktops have the numbers they had at the save.
+assert_contains 'if ! [ -x "$HOME/bin/gallery" ] || "$HOME/bin/gallery" home _same-desktops; then'
+mkdir -p "${ST_HOME}/.config/yabai"; echo '{}' > "${ST_HOME}/.config/yabai/home-layout.json"
+printf '#!/bin/sh\n[ "$1" = same-desktops ] && exit 1\nexit 0\n' > "${ST_HOME}/.config/yabai/yabai-layout"
+chmod +x "${ST_HOME}/.config/yabai/yabai-layout"
+st 30 1
+grep -q "rule --add" "${ST_LOG}" && fail "settled: homes loaded although the Desktops were renumbered"
+rm -f "${ST_HOME}/.config/yabai/yabai-layout"
+st 30 1
+grep -q "rule --add label=home-mail" "${ST_LOG}" || fail "settled: homes not loaded without a layout tool to ask"
+say "homes load only while logging in (or forced by home apply); _settled answers; not after a renumbering"
 
 # --- header sanity -----------------------------------------------------------
 assert_contains "# Roaming (no rule): iTerm2"
@@ -587,11 +597,14 @@ case "\$1" in
   open) shift; echo "term \$*" >> "${RT_TLOG}"; n=\$(wc -l < "${RT_TLOG}"); echo \$((700 + n)) ;;
 esac
 EOF
+RT_DISPLAYS="${WORK_DIR}/rt-displays.json"
+printf '[{"uuid": "AAA", "index": 1, "spaces": [1, 2, 3]}, {"uuid": "BBB", "index": 2, "spaces": [4, 5, 6]}]' > "${RT_DISPLAYS}"
 cat > "${RO_STUB}/yabai" <<EOF
 #!/bin/sh
 echo "yabai \$*" >> "${RT_YLOG}"
 case "\$*" in
   "-m query --windows") cat "${RO_LIVE}" ;;
+  "-m query --displays") cat "${RT_DISPLAYS}" ;;
 esac
 exit 0
 EOF
@@ -616,6 +629,7 @@ assert a["kind"] == "claude" and a["session"] == "aaaa-1111" and a["space"] == 4
 assert a["cwd"] == sys.argv[2] + "/proj", a
 assert a["flags"] == ["--permission-mode", "bypassPermissions"], a   # no --resume, no prompt
 assert s["kind"] == "shell" and s["cwd"] == sys.argv[2] + "/shelldir" and s["space"] == 6, s
+assert (a["display_uuid"], a["display_space"], s["display_uuid"], s["display_space"]) == ("BBB", 1, "BBB", 3), e
 PY
 say "terminals: home save records each iTerm2 window's agent session or shell folder, not floating ones"
 
@@ -639,7 +653,13 @@ grep -q "reopen: terminals: 1 agents resumed, 1 shells opened" "${RO_LOG}" || fa
 RT_ITERM=1 rt home reopen now >/dev/null
 grep -q '^term ' "${RT_TLOG}" && fail "terminals: opened windows although iTerm2 was running"
 [[ "$(rt home reopen status)" == *"agent proj-x aaaa-111 in ${RT_DIR}/proj"* ]] || fail "terminals: status does not list the agent"
-say "terminals: agents resumed and shells reopened on their Desktops, only when iTerm2 was not running"
+# A Desktop removed on the main display: the terminals follow their monitor.
+printf '[{"uuid": "AAA", "index": 1, "spaces": [1, 2]}, {"uuid": "BBB", "index": 2, "spaces": [3, 4, 5]}]' > "${RT_DISPLAYS}"
+echo '[]' > "${RO_LIVE}"; : > "${RO_OPENS}"; : > "${RT_TLOG}"; : > "${RT_YLOG}"
+RT_TTYS="${RT_DIR}/startup" rt home reopen now >/dev/null
+grep -q "yabai -m window 701 --space 3" "${RT_YLOG}" && grep -q "yabai -m window 702 --space 5" "${RT_YLOG}" \
+  || fail "terminals: did not follow their monitor's renumbered Desktops: $(grep -- '--space' "${RT_YLOG}" | tr '\n' '|')"
+say "terminals: agents resumed and shells reopened on their Desktops, only when iTerm2 was not running; by monitor"
 printf '#!/bin/sh\ncase "$*" in "-m query --windows") cat "%s" ;; esac\nexit 0\n' "${RO_LIVE}" > "${RO_STUB}/yabai"
 
 # --- automatic save (gallery home _autosave) --------------------------------

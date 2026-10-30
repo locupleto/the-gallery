@@ -3767,8 +3767,12 @@ if blocks:
     # Dock launch, a dialog, a Safari tab whose title changed. GALLERY_HOME_FORCE
     # loads them anyway (`gallery home apply`).
     out += ("\n# Homes act only while the Mac logs in (see `gallery home _settled`).\n"
-            "if [ -n \"${GALLERY_HOME_FORCE:-}\" ] || ! { [ -x \"$HOME/bin/gallery\" ] && \"$HOME/bin/gallery\" home _settled; }; then\n\n"
-            + "\n\n".join(blocks) + "\n\nfi\n")
+            "if [ -n \"${GALLERY_HOME_FORCE:-}\" ] || ! { [ -x \"$HOME/bin/gallery\" ] && \"$HOME/bin/gallery\" home _settled; }; then\n"
+            "# Only while every Desktop has the number it had at the save: after a\n"
+            "# Desktop was added or removed, or the displays changed order, the\n"
+            "# after-login pass places every window by monitor instead.\n"
+            "if ! [ -x \"$HOME/bin/gallery\" ] || \"$HOME/bin/gallery\" home _same-desktops; then\n\n"
+            + "\n\n".join(blocks) + "\n\nfi\nfi\n")
 sys.stdout.write(out)
 PYEOF
 
@@ -4301,6 +4305,16 @@ def start_flags(args):
         i += 1
     return keep
 
+# Each Desktop's monitor (uuid) and place on it, as the layout snapshot keeps
+# them, so the Desktop can be found again if the numbering changes.
+where = {}
+try:
+    for d in json.loads(run("yabai", "-m", "query", "--displays") or "[]"):
+        for pos, index in enumerate(d.get("spaces") or [], start=1):
+            where[index] = (d.get("uuid"), pos)
+except Exception:
+    pass
+
 entries = []
 with open(ttys_file) as fh:
     pairs = [line.split() for line in fh if len(line.split()) == 2]
@@ -4317,7 +4331,9 @@ for wid, tty in pairs:
         pid, _, comm = line.strip().partition(" ")
         if pid.isdigit():
             procs.append((int(pid), os.path.basename(comm.strip()).lstrip("-")))
-    entry = {"window": wid, "space": w.get("space"), "display": w.get("display")}
+    uuid, pos = where.get(w.get("space"), (None, None))
+    entry = {"window": wid, "space": w.get("space"), "display": w.get("display"),
+             "display_uuid": uuid, "display_space": pos}
     agent = next((p for p, c in procs if c == "claude"), None)
     session = None
     if agent:
@@ -4381,12 +4397,24 @@ home_reopen_terminals() {
     return 0
   fi
   local plan
-  plan="$(python3 -c 'import json, sys
+  plan="$(yabai -m query --displays 2>/dev/null | python3 -c 'import json, sys
 try:
     entries = json.load(open(sys.argv[1]))
 except Exception:
     entries = []
+try:
+    displays = {d.get("uuid"): d for d in json.load(sys.stdin)}
+except Exception:
+    displays = {}
+# The saved Desktop by monitor and place on it (numbers shift), else as saved.
+def desktop(e):
+    uuid, pos = e.get("display_uuid"), e.get("display_space")
+    if not uuid or not displays:
+        return e.get("space")
+    here = (displays.get(uuid) or {}).get("spaces") or []
+    return here[pos - 1] if isinstance(pos, int) and 0 < pos <= len(here) else None
 for e in entries:
+    e["space"] = desktop(e)
     if e.get("kind") == "claude" and e.get("session") and e.get("cwd"):
         print("\x1f".join(["claude", str(e.get("space") or ""), e["cwd"], e["session"]] + list(e.get("flags") or [])))
     elif e.get("kind") == "shell":
@@ -4912,6 +4940,11 @@ cmd_home() {
     _settled)
       # rules.local, before loading the homes: exit 0 once they must not load
       home_settled
+      ;;
+    _same-desktops)
+      # rules.local: exit 0 while the saved Desktop numbers still hold
+      [ -f "${HOME_LAYOUT_FILE}" ] && [ -x "${HOME_LAYOUT_TOOL}" ] || exit 0
+      "${HOME_LAYOUT_TOOL}" same-desktops --file "${HOME_LAYOUT_FILE}"
       ;;
     _autosave)
       # Gallery.spoon: periodically and before sleep or shutdown (see above)

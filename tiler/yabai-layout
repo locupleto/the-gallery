@@ -13,6 +13,11 @@ rebuilds every tree from scratch and loses all of that) can be undone.
     yabai-layout restore --remap [--file PATH]       # after a login, see below
     yabai-layout verify  [--file PATH]
     yabai-layout place   [--file PATH] [--dry-run]   # after a login, see below
+    yabai-layout same-desktops [--file PATH]         # exit 0: no Desktop renumbered
+
+Desktops are saved by monitor (its uuid) and place on it, and translated to
+today's numbers before place and restore --remap act: see "Desktops by
+monitor" below.
 
 place (used by the Gallery's after-login pass, before restore --remap): puts
 every open window back on the Desktop it was on when the snapshot was saved,
@@ -233,12 +238,16 @@ def cmd_save(args) -> int:
     }
 
     focused_window = None
+    where = desktop_positions(displays)
     spaces_out: dict[str, dict] = {}
     for s in spaces:
+        uuid, pos = where.get(s["index"], (None, None))
         spaces_out[str(s["index"])] = {
             "space_id": s["id"],
             "space_index": s["index"],
             "display": s["display"],
+            "display_uuid": uuid,
+            "display_space": pos,
             "type": s["type"],
             "windows": [],
         }
@@ -248,11 +257,14 @@ def cmd_save(args) -> int:
             focused_window = w["id"]
         fz, pz = zoom_state.get(w["id"], (False, False))
         sp = space_by_index.get(w["space"], {})
+        uuid, pos = where.get(w["space"], (None, None))
         rec = {
             "id": w["id"],
             "app": w["app"],
             "title": w["title"],
             "display": w["display"],
+            "display_uuid": uuid,
+            "display_space": pos,
             "space_id": sp.get("id"),
             "space_index": w["space"],
             "frame": w["frame"],
@@ -271,7 +283,8 @@ def cmd_save(args) -> int:
         key = str(w["space"])
         spaces_out.setdefault(key, {
             "space_id": sp.get("id"), "space_index": w["space"],
-            "display": w["display"], "type": "bsp", "windows": [],
+            "display": w["display"], "display_uuid": uuid, "display_space": pos,
+            "type": "bsp", "windows": [],
         })
         spaces_out[key]["windows"].append(rec)
 
@@ -279,7 +292,8 @@ def cmd_save(args) -> int:
         "version": 1,
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "config": {"window_gap": gap, "padding": padding},
-        "displays": [{"id": d["id"], "index": d["index"], "frame": d["frame"]} for d in displays],
+        "displays": [{"id": d["id"], "uuid": d.get("uuid"), "index": d["index"],
+                      "spaces": d.get("spaces"), "frame": d["frame"]} for d in displays],
         "focused_window": focused_window,
         "spaces": spaces_out,
     }
@@ -632,6 +646,83 @@ def rezoom(snapshot, live_by_id, summary: list[str]):
 
 
 # --------------------------------------------------------------------------- #
+# Desktops by monitor
+# --------------------------------------------------------------------------- #
+#
+# yabai numbers the Desktops of all displays in one sequence (1-9 on the main
+# display, 10-18 on the next), and "display 2" only means the second in its
+# order. Both shift: a Desktop added or removed on one display renumbers those
+# after it, and another main display or a monitor plugged in elsewhere swaps
+# the order. So a snapshot also notes each Desktop's monitor by its permanent
+# uuid and its place on that monitor (display_uuid, display_space), and is
+# translated to today's numbers before anything is moved. A snapshot from
+# before this (no uuids) is used as saved.
+
+def desktop_positions(displays):
+    """{global Desktop index: (display uuid, 1-based place on that display)}."""
+    out = {}
+    for d in displays:
+        for pos, index in enumerate(d.get("spaces") or [], start=1):
+            out[index] = (d.get("uuid"), pos)
+    return out
+
+
+def translate_snapshot(snapshot, live_displays):
+    """Return (snapshot with every Desktop renumbered for the displays
+    connected now, notes). A Desktop whose monitor is not connected, or that
+    no longer exists on it, is dropped (its windows stay where they are).
+    Pure: no yabai calls."""
+    spaces = snapshot.get("spaces") or {}
+    if not any(sp.get("display_uuid") for sp in spaces.values()):
+        return snapshot, []
+    live = {d.get("uuid"): d for d in live_displays if d.get("uuid")}
+    out = dict(snapshot)
+    out["spaces"] = {}
+    notes = []
+    for key, sp in sorted(spaces.items(), key=lambda kv: kv[1].get("space_index") or 0):
+        uuid, pos = sp.get("display_uuid"), sp.get("display_space")
+        d = live.get(uuid)
+        has_windows = bool(sp.get("windows"))
+        if d is None:
+            if has_windows:
+                notes.append(f"Desktop {sp.get('space_index')}: its display is not connected -- left")
+            continue
+        here = d.get("spaces") or []
+        if not isinstance(pos, int) or pos > len(here):
+            if has_windows:
+                notes.append(f"Desktop {sp.get('space_index')}: display {d.get('index')} has no Desktop {pos} now -- left")
+            continue
+        index, display = here[pos - 1], d.get("index")
+        if index != sp.get("space_index") and has_windows:
+            notes.append(f"Desktop {sp.get('space_index')} is Desktop {index} now (same monitor, same place)")
+        new = dict(sp, space_index=index, display=display)
+        new["windows"] = [dict(w, space_index=index, display=display) for w in sp.get("windows") or []]
+        out["spaces"][str(index)] = new
+    return out, notes
+
+
+def desktops_unchanged(snapshot, live_displays) -> bool:
+    """True if every saved Desktop with windows has the same number now."""
+    moved, notes = translate_snapshot(snapshot, live_displays)
+    if notes:
+        return False
+    before = {k for k, sp in (snapshot.get("spaces") or {}).items() if sp.get("windows")}
+    after = {k for k, sp in moved.get("spaces", {}).items() if sp.get("windows")}
+    return before == after
+
+
+def cmd_same_desktops(args) -> int:
+    path = Path(args.file).expanduser()
+    if not path.exists():
+        return 0
+    try:
+        snapshot = json.loads(path.read_text())
+    except Exception:
+        return 0
+    return 0 if desktops_unchanged(snapshot, query_displays()) else 1
+
+
+# --------------------------------------------------------------------------- #
 # remap (ids change at every login)
 # --------------------------------------------------------------------------- #
 
@@ -719,6 +810,8 @@ def cmd_restore(args) -> int:
 
     summary: list[str] = []
     if args.remap:
+        # (place, which runs first, reports what moved or was left)
+        snapshot, _ = translate_snapshot(snapshot, query_displays())
         snapshot, notes = remap_snapshot(snapshot, query_windows())
         summary.extend(notes)
         saved_ids = set()
@@ -817,8 +910,9 @@ def cmd_place(args) -> int:
     if not path.exists():
         print(f"[yabai-layout] no snapshot at {path}", file=sys.stderr)
         return 1
-    snapshot = json.loads(path.read_text())
+    snapshot, moved = translate_snapshot(json.loads(path.read_text()), query_displays())
     moves, notes = plan_placement(snapshot, query_windows(), query_spaces())
+    notes = moved + notes
     placed = 0
     for wid, app, target in moves:
         if args.dry_run:
@@ -905,6 +999,10 @@ def main() -> int:
     p_place.add_argument("--file", default=str(DEFAULT_FILE))
     p_place.add_argument("--dry-run", action="store_true")
 
+    p_same = sub.add_parser("same-desktops",
+                            help="exit 0 if every saved Desktop has the same number now")
+    p_same.add_argument("--file", default=str(DEFAULT_FILE))
+
     args = ap.parse_args()
     if args.cmd == "save":
         return cmd_save(args)
@@ -914,6 +1012,8 @@ def main() -> int:
         return cmd_verify(args)
     if args.cmd == "place":
         return cmd_place(args)
+    if args.cmd == "same-desktops":
+        return cmd_same_desktops(args)
     return 2
 
 

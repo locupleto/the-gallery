@@ -439,9 +439,21 @@ changes, all open where you are. `gallery home apply` loads them for a
 one-off move of every window back to its home and takes them out again.
 Because `save` rewrites
 the file, keep your own non-home rules in `yabairc.local`, not in
-`rules.local`. Space numbers are one global sequence across displays and shift
-if you add or remove a Space in Mission Control. The template is
-`tiler/rules.local.example`.
+`rules.local`. The template is `tiler/rules.local.example`.
+
+**Several displays.** yabai numbers the Desktops of all displays in one
+sequence (1-9 on the main display, 10-18 on the next), and the numbers shift
+when you add or remove a Desktop in Mission Control or another display
+becomes the main one. So each save also notes every Desktop's monitor, by
+its permanent id, and its place on that monitor ("the third Desktop on the
+LG"), and after a login every window, terminal and tile shape goes back to
+that monitor and place, whatever its number is now. The rules in
+`rules.local` use plain numbers, so they load only while the numbers are
+what they were at the save; otherwise the after-login pass does all the
+placing. A Desktop you removed, or one on a monitor that is not connected,
+keeps its windows wherever macOS puts them. To give a Desktop a new home,
+arrange the windows and save again (the automatic save does it within half
+an hour).
 
 After a login, macOS reopens your apps while yabai is still starting, and a
 window that opens before yabai can see it misses its rule (rules act when a
@@ -491,7 +503,7 @@ last save, terminals and Finder included, which have no rule. Windows are
 matched app by app, by title where that is unique and otherwise in the order
 they were opened, so of five terminals the right number lands on each
 Desktop but two may swap. A window whose Desktop is on a display that is not
-connected now stays where it is.
+connected now stays where it is (see "Several displays" above).
 
 The pass then rebuilds the saved tile shapes. Windows are matched to
 their saved places by app, and by title where that is unique; a Desktop is

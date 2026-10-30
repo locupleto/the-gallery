@@ -109,6 +109,49 @@ moves, _ = yl.plan_placement({"spaces": {"x": {"windows": [psaved(1, "Notes", "N
                              [dict(live(2, "Notes", "N"), **{"is-minimized": True})], pspaces(6))
 check(moves == [], "a minimized open window is not moved")
 
+# Desktops by monitor: a snapshot's Desktops are renumbered for the
+# displays connected now (uuid + place on that display).
+def tsaved(index, uuid, pos, display, apps):
+    return {"space_index": index, "display": display, "display_uuid": uuid, "display_space": pos,
+            "windows": [{"id": 100 + index * 10 + i, "app": a, "title": a, "space_index": index,
+                         "display": display, "display_uuid": uuid, "display_space": pos}
+                        for i, a in enumerate(apps)]}
+snap = {"spaces": {"2": tsaved(2, "AAA", 2, 1, ["Mail"]), "3": tsaved(3, "AAA", 3, 1, ["Notes"]),
+                   "5": tsaved(5, "BBB", 2, 2, ["Safari"]), "1": tsaved(1, "AAA", 1, 1, [])}}
+same = [{"uuid": "AAA", "index": 1, "spaces": [1, 2, 3]}, {"uuid": "BBB", "index": 2, "spaces": [4, 5]}]
+moved, notes = yl.translate_snapshot(snap, same)
+check(sorted(moved["spaces"]) == ["1", "2", "3", "5"] and notes == [], "translate: unchanged displays: %r" % notes)
+check(yl.desktops_unchanged(snap, same), "translate: unchanged displays not reported as unchanged")
+# A Desktop removed on the main display: the second display's Desktops shift down.
+fewer = [{"uuid": "AAA", "index": 1, "spaces": [1, 2]}, {"uuid": "BBB", "index": 2, "spaces": [3, 4]}]
+moved, notes = yl.translate_snapshot(snap, fewer)
+check(moved["spaces"]["4"]["windows"][0]["app"] == "Safari" and moved["spaces"]["4"]["windows"][0]["space_index"] == 4,
+      "translate: Safari should be on Desktop 4 now: %r" % moved["spaces"].keys())
+check("3" not in moved["spaces"] or moved["spaces"]["3"]["windows"] == [], "translate: a vanished Desktop kept its windows")
+check(any("has no Desktop 3" in n for n in notes), "translate: the vanished Desktop was not noted: %r" % notes)
+check(not yl.desktops_unchanged(snap, fewer), "translate: a renumbering was reported as unchanged")
+# The displays swapped order: each Desktop follows its monitor.
+swapped = [{"uuid": "BBB", "index": 1, "spaces": [1, 2]}, {"uuid": "AAA", "index": 2, "spaces": [3, 4, 5]}]
+moved, _ = yl.translate_snapshot(snap, swapped)
+check(moved["spaces"]["2"]["windows"][0]["app"] == "Safari" and moved["spaces"]["2"]["display"] == 1,
+      "translate: Safari did not follow its monitor")
+check(moved["spaces"]["4"]["windows"][0]["app"] == "Mail" and moved["spaces"]["5"]["windows"][0]["app"] == "Notes",
+      "translate: the main monitor's Desktops did not follow it")
+# A monitor not connected: its Desktops are dropped, noted.
+alone = [{"uuid": "AAA", "index": 1, "spaces": [1, 2, 3]}]
+moved, notes = yl.translate_snapshot(snap, alone)
+check("5" not in moved["spaces"] and any("not connected" in n for n in notes), "translate: absent monitor: %r" % notes)
+# Placement follows the translation.
+moves, _ = yl.plan_placement(yl.translate_snapshot(snap, swapped)[0],
+                             [live(7, "Safari", "Safari"), live(8, "Mail", "Mail")],
+                             [{"index": i, "display": 1 if i < 3 else 2} for i in range(1, 6)])
+check(sorted((a, t) for _, a, t in moves) == [("Mail", 4), ("Safari", 2)], "translate: placement %r" % moves)
+# A snapshot from before (no uuids) is used as saved.
+old = {"spaces": {"5": {"space_index": 5, "display": 2, "windows": [{"id": 1, "app": "X"}]}}}
+check(yl.translate_snapshot(old, fewer) == (old, []), "translate: an old snapshot was changed")
+check(yl.desktop_positions(same) == {1: ("AAA", 1), 2: ("AAA", 2), 3: ("AAA", 3), 4: ("BBB", 1), 5: ("BBB", 2)},
+      "desktop_positions")
+
 # A Safari web app yabai names "Web App" gets the name macOS gives it (a
 # stand-in lsappinfo on PATH: pid 31 is Outlook, pid 32 unknown).
 import os, tempfile
@@ -127,6 +170,7 @@ if failures:
         print("[layout_test]   " + f)
     sys.exit(1)
 PY
+say "Desktops by monitor: renumbered with the displays, follow a swapped monitor, absent ones left"
 say "place: windows matched by app+title then creation order; absent Desktops, minimized and unknown apps left"
 say "remap: same-app windows matched in order, app+title exact, mismatched Spaces left alone, floats skipped; in_shape"
 say "PASS layout_test.sh"
