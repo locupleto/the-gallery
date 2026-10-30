@@ -5,6 +5,13 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.5.2 (2026-10-30)
+
+- Fixed: a web app added to the Dock from Safari was often saved as "Web
+  App", the name yabai gives the generic process it runs in, so it could not
+  be put back or started again. The Gallery now uses the name macOS gives
+  the app (Outlook), when saving, reopening and placing windows.
+
 ## 0.5.1 (2026-10-30)
 
 - Fixed: a web app added to the Dock from Safari (Outlook, say) came back

@@ -109,6 +109,19 @@ moves, _ = yl.plan_placement({"spaces": {"x": {"windows": [psaved(1, "Notes", "N
                              [dict(live(2, "Notes", "N"), **{"is-minimized": True})], pspaces(6))
 check(moves == [], "a minimized open window is not moved")
 
+# A Safari web app yabai names "Web App" gets the name macOS gives it (a
+# stand-in lsappinfo on PATH: pid 31 is Outlook, pid 32 unknown).
+import os, tempfile
+stub = tempfile.mkdtemp()
+with open(os.path.join(stub, "lsappinfo"), "w") as fh:
+    fh.write('#!/bin/sh\ncase "$*" in\n  "find pid=31") echo ASN:0x1 ;;\n'
+             '  "info -only name ASN:0x1") echo \'"Outlook" ASN:0x1:\' ;;\nesac\n')
+os.chmod(os.path.join(stub, "lsappinfo"), 0o755)
+os.environ["PATH"] = stub + ":" + os.environ["PATH"]
+named = yl.web_app_names([{"id": 1, "pid": 31, "app": "Web App"}, {"id": 2, "pid": 32, "app": "Web App"},
+                          {"id": 3, "pid": 31, "app": "Mail"}])
+check([w["app"] for w in named] == ["Outlook", "Web App", "Mail"], "web app names: %r" % named)
+
 if failures:
     for f in failures:
         print("[layout_test]   " + f)

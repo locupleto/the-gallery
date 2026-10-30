@@ -103,6 +103,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -142,7 +143,34 @@ def yabai_json(*args: str):
 
 
 def query_windows():
-    return yabai_json("query", "--windows")
+    return web_app_names(yabai_json("query", "--windows"))
+
+
+# A web app added to the Dock from Safari runs in Safari's generic Web App
+# process, and yabai often names its windows "Web App". bin/gallery saves them
+# under the name macOS gives the app (lsappinfo); so do the snapshots here, or
+# a saved Outlook would never match the live window.
+_WEB_APP_NAMES: dict = {}
+
+
+def web_app_names(windows):
+    for w in windows if isinstance(windows, list) else []:
+        if not isinstance(w, dict) or w.get("app") != "Web App" or not isinstance(w.get("pid"), int):
+            continue
+        pid = w["pid"]
+        if pid not in _WEB_APP_NAMES:
+            _WEB_APP_NAMES[pid] = None
+            try:
+                asn = subprocess.run(["lsappinfo", "find", f"pid={pid}"], capture_output=True,
+                                     text=True, timeout=5).stdout.strip()
+                out = subprocess.run(["lsappinfo", "info", "-only", "name", asn], capture_output=True,
+                                     text=True, timeout=5).stdout if asn else ""
+                m = re.match(r'\s*"([^"]+)"', out)
+                _WEB_APP_NAMES[pid] = m.group(1) if m else None
+            except Exception:
+                pass
+        w["app"] = _WEB_APP_NAMES[pid] or w["app"]
+    return windows
 
 
 def query_spaces():

@@ -3458,7 +3458,48 @@ home_windows_json() {
     return 0
   fi
   command -v yabai >/dev/null 2>&1 || { echo "gallery: yabai not found on PATH" >&2; return 1; }
-  yabai -m query --windows
+  yabai_windows
+}
+
+# A web app added to the Dock from Safari (Outlook, Gmail) runs in Safari's
+# generic Web App process, and yabai, catching the app as it starts, often
+# names its windows "Web App". Saved under that name, it could not be told
+# from another web app or started again. Such windows get the name macOS
+# itself gives the app (lsappinfo), the one the Dock shows.
+read -r -d '' PY_WEBAPP_NAMES <<'PYEOF' || true
+import json, re, subprocess, sys
+
+raw = sys.stdin.read()
+try:
+    windows = json.loads(raw)
+except Exception:
+    sys.stdout.write(raw)
+    sys.exit(0)
+names = {}
+def real_name(pid):
+    if pid not in names:
+        names[pid] = None
+        try:
+            asn = subprocess.run(["lsappinfo", "find", "pid=%d" % pid], capture_output=True,
+                                 text=True, timeout=5).stdout.strip()
+            out = subprocess.run(["lsappinfo", "info", "-only", "name", asn], capture_output=True,
+                                 text=True, timeout=5).stdout if asn else ""
+            m = re.match(r'\s*"([^"]+)"', out)
+            names[pid] = m.group(1) if m else None
+        except Exception:
+            pass
+    return names[pid]
+for w in windows if isinstance(windows, list) else []:
+    if isinstance(w, dict) and w.get("app") == "Web App" and isinstance(w.get("pid"), int):
+        w["app"] = real_name(w["pid"]) or w["app"]
+json.dump(windows, sys.stdout)
+PYEOF
+
+# yabai's window list with web apps under their own names (above).
+yabai_windows() {
+  local out
+  out="$(yabai -m query --windows "$@")" || return 1
+  printf '%s' "${out}" | python3 -c "${PY_WEBAPP_NAMES}"
 }
 
 # PY_HOME_SHOW_WINDOWS -- filters to "managed standard windows" (the same
@@ -4483,7 +4524,7 @@ app_bundle_running() {
 # How many readable windows an app has now (yabai sees an AX-less window but
 # cannot move it, so those do not count).
 app_window_count() {
-  yabai -m query --windows 2>/dev/null | python3 -c 'import json, sys
+  yabai_windows 2>/dev/null | python3 -c 'import json, sys
 try:
     ws = json.load(sys.stdin)
 except Exception:

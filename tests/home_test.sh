@@ -465,6 +465,20 @@ ro home save >/dev/null
 grep -q "\"Outlook\": \"${RO_HOME}/Applications/Outlook.app\"" "${RO_HOME}/.config/yabai/home-apps.json" \
   || fail "reopen: a web app's own bundle was not recorded: $(cat "${RO_HOME}/.config/yabai/home-apps.json")"
 grep -q "Web App" "${RO_HOME}/.config/yabai/home-apps.json" && fail "reopen: a Web App.app path was kept"
+# yabai often names such a window "Web App": it is saved under macOS's name.
+cat > "${RO_STUB}/lsappinfo" <<'EOF'
+#!/bin/sh
+case "$*" in
+  "find pid=14") echo ASN:0x14 ;;
+  "info -only name ASN:0x14") echo '"Outlook" ASN:0x14:' ;;
+esac
+EOF
+chmod +x "${RO_STUB}/lsappinfo"
+printf '[%s, %s]' "$(rwin 1 Mail 99 2)" "$(rwin 5 "Web App" 14 3)" > "${RO_LIVE}"
+ro home save >/dev/null
+grep -q "\"Outlook\": \"${RO_HOME}/Applications/Outlook.app\"" "${RO_HOME}/.config/yabai/home-apps.json" \
+  || fail "reopen: a window yabai calls Web App was not saved as Outlook: $(cat "${RO_HOME}/.config/yabai/home-apps.json")"
+grep -q "app='^Outlook\$'" "${RO_HOME}/.config/yabai/rules.local" || fail "reopen: the home rule is not Outlook's: $(grep add "${RO_HOME}/.config/yabai/rules.local")"
 say "reopen: home save records each app's bundle and keeps those of closed apps"
 
 # The saved desktop: Mail (Desktop 2), iTerm2 x2 + Finder + Silent (Desktop 3), Notes (Desktop 10).
