@@ -4046,16 +4046,26 @@ HOME_LOGIN_DONE_FILE="${CONFIG_DIR}/state/home-login-done"
 
 home_log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "${HOME_LOG}" 2>/dev/null || true; }
 
-# The login session: this user's loginwindow (one per login), its pid as the
-# session's identity and its age in seconds.
+# The login session: this user's loginwindow (one per login), its pid and
+# start time as the session's identity and its age in seconds. The pid alone
+# is not enough: boot is deterministic, so loginwindow gets the same pid after
+# every restart, and a marker from an earlier boot then made the login pass
+# believe it had already run.
+login_session_pid() {
+  pgrep -u "$(id -u)" -ax loginwindow 2>/dev/null | head -1
+}
 login_session_id() {
   if [ -n "${GALLERY_SESSION_ID:-}" ]; then printf '%s' "${GALLERY_SESSION_ID}"; return; fi
-  pgrep -u "$(id -u)" -ax loginwindow 2>/dev/null | head -1
+  local pid started
+  pid="$(login_session_pid)"
+  [ -n "${pid}" ] || return 0
+  started="$(LC_ALL=C ps -o lstart= -p "${pid}" 2>/dev/null | tr -s ' ' '_' | sed 's/^_//; s/_$//')"
+  printf '%s@%s' "${pid}" "${started}"
 }
 login_session_age() {
   if [ -n "${GALLERY_SESSION_AGE:-}" ]; then printf '%s' "${GALLERY_SESSION_AGE}"; return; fi
   local pid etime
-  pid="$(login_session_id)"
+  pid="$(login_session_pid)"
   [ -n "${pid}" ] || { printf '999999'; return; }
   etime="$(ps -o etime= -p "${pid}" 2>/dev/null | tr -d ' ')"
   # [[dd-]hh:]mm:ss

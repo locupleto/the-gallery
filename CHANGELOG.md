@@ -5,6 +5,21 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.6.3 (2026-10-31)
+
+- Fixed: after a restart the windows were not put back on their Desktops.
+  The login pass knew each login by loginwindow's process id, but macOS
+  gives loginwindow the same id at every boot, so the pass took the new
+  login for one it had already handled and did nothing. A login is now
+  known by loginwindow's id and start time.
+- Fixed: rebuilding a Desktop's saved tile shape after a restart could move
+  its windows to another Desktop. When a Desktop could not be rebuilt, the
+  windows set aside for the rebuild were dropped onto the Desktop in view
+  (Signal and Telegram from Desktop 10 landed on Desktop 7); they now go
+  back where they were, and only the Desktops in view are rebuilt: yabai
+  does not lay out a Desktop that is not, and a rebuild there left a broken
+  tiling behind. The others keep yabai's own split until you visit them.
+
 ## 0.6.2 (2026-10-30)
 
 - The tree guard no longer gives up on a Desktop because a rebuild ran

@@ -58,8 +58,8 @@ gallery home reopen              # status of the Gallery starting the apps after
 - `home save` also records every window's Desktop and each Desktop's tile
   shape in `~/.config/yabai/home-layout.json`. After a login the Gallery
   applies the rules once more at the first quiet moment, puts every window
-  (terminals too) back on its saved Desktop, then rebuilds the shapes where
-  the Desktop holds the same apps (logged in
+  (terminals too) back on its saved Desktop, then rebuilds the shapes of the
+  Desktops in view that hold the same apps (logged in
   `~/.config/gallery/gallery-home.log`).
 - `gallery home reopen on|off|now|status` (per Mac, `state/home-reopen`): the login
   pass starts the last save's apps itself, one at a time after unlock, before placing

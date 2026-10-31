@@ -165,6 +165,100 @@ named = yl.web_app_names([{"id": 1, "pid": 31, "app": "Web App"}, {"id": 2, "pid
                           {"id": 3, "pid": 31, "app": "Mail"}])
 check([w["app"] for w in named] == ["Outlook", "Web App", "Mail"], "web app names: %r" % named)
 
+# restore_space on a Desktop not in view, against a stand-in yabai that does
+# what the real one did after a restart: un-floating a window there tiles it
+# into the Desktop in view (7), a moment later rather than at once. Saved: Observatory left, Telegram over Signal
+# right, on Desktop 10.
+class FakeYabai:
+    def __init__(self, grow_after):
+        self.visible = 7
+        self.grow_after = grow_after   # anchor queries before it fills the Desktop
+        self.anchor_queries = 0
+        self.wins = {1: {"space": 10, "floating": False}, 2: {"space": 10, "floating": False},
+                     3: {"space": 10, "floating": False}}
+    def yabai(self, *args, check=True):
+        if args[0] == "window" and args[2:4] == ("--toggle", "float"):
+            w = self.wins[int(args[1])]
+            w["floating"] = not w["floating"]
+            if not w["floating"] and w["space"] != self.visible:
+                w["wander_in"] = 2     # moves to the Desktop in view a moment later
+        elif args[0] == "window" and args[2] == "--space":
+            self.wins[int(args[1])]["space"] = int(args[3])
+        return ""
+    def query(self, wid):
+        w = self.wins[wid]
+        if "wander_in" in w:
+            w["wander_in"] -= 1
+            if w["wander_in"] <= 0:
+                del w["wander_in"]
+                w["space"] = self.visible
+        frame = {"x": 2568, "y": 39, "w": 1268, "h": 1393}
+        if wid == 1:
+            self.anchor_queries += 1
+            if self.anchor_queries > self.grow_after:
+                frame = {"x": 2568, "y": 39, "w": 2544, "h": 1393}
+        return {"id": wid, "space": w["space"], "is-floating": w["floating"], "frame": frame}
+
+def restore_with(fake):
+    yl.yabai = fake.yabai
+    yl.query_window_by_id = fake.query
+    built = []
+    yl._build = lambda *a: built.append(a)
+    yl._clear_insert = lambda *a: None
+    yl.ANCHOR_SETTLE_S = 0.5
+    yl.RELEASE_SETTLE_S = 1.0
+    sp = {"space_index": 10, "windows": [
+        dict(saved(1, "Safari", "The Observatory", 2568, 39, 1268, 1393), space_index=10),
+        dict(saved(2, "Telegram", "Telegram", 3844, 39, 1268, 836), space_index=10),
+        dict(saved(3, "Signal", "Signal", 3844, 884, 1268, 548), space_index=10)]}
+    live_by_id = {i: dict(live(i, "x", "x", space=10), id=i) for i in (1, 2, 3)}
+    summary = []
+    yl.restore_space(sp, live_by_id, 8, 10, summary)
+    for _ in range(3):                 # let any pending move land
+        for i in (2, 3):
+            fake.query(i)
+    return built, summary
+
+# The anchor never fills the Desktop (a window wedged in the tree): the Space
+# is given up, and every window it floated stays on Desktop 10.
+fake = FakeYabai(grow_after=10**9)
+built, summary = restore_with(fake)
+check(not built, "restore: a blocked Desktop must not be rebuilt")
+check(any("immovable" in s for s in summary), "restore: the blocked Desktop should be noted: %r" % summary)
+check({w["space"] for w in fake.wins.values()} == {10},
+      "restore: given up, windows must stay on their Desktop: %r" % fake.wins)
+check(not any(w["floating"] for w in fake.wins.values()), "restore: given up, nothing may be left floating")
+
+# The anchor fills the Desktop late (a Desktop not in view): not taken for a
+# wedged window, the Desktop is rebuilt.
+fake = FakeYabai(grow_after=2)
+built, summary = restore_with(fake)
+check(len(built) == 1, "restore: an anchor that fills the Desktop late must still be rebuilt: %r" % summary)
+
+# return_strays: a window yabai moved during the restore goes back.
+fake = FakeYabai(grow_after=0)
+fake.wins[2]["space"] = 7
+yl.yabai = fake.yabai
+n = yl.return_strays({1: 10, 2: 10, 3: 10}, [{"id": i, "space": w["space"]} for i, w in fake.wins.items()])
+check(n == 1 and fake.wins[2]["space"] == 10, "return_strays: Telegram should be back on 10: %r" % fake.wins)
+
+# cmd_restore rebuilds only the Desktops in view (11 here); 10 is left alone.
+import json as _json, types
+snapf = os.path.join(tempfile.mkdtemp(), "layout.json")
+with open(snapf, "w") as fh:
+    _json.dump({"version": 1, "config": {"window_gap": 8}, "focused_window": None, "spaces": {
+        str(i): {"space_index": i, "windows": [saved(i, "App%d" % i, "T", 8, 40, 850, 970)]}
+        for i in (10, 11)}}, fh)
+touched = []
+yl.restore_space = lambda sp, *a: touched.append(sp["space_index"])
+yl.wait_for_yabai = lambda *a: True
+yl.query_windows = lambda: []
+yl.query_spaces = lambda: [{"index": 10, "is-visible": False}, {"index": 11, "is-visible": True}]
+yl.RELEASE_SETTLE_S = 0
+yl.yabai = lambda *a, **k: ""
+yl.cmd_restore(types.SimpleNamespace(file=snapf, remap=False, wait=1))
+check(touched == [11], "restore: only the Desktop in view may be rebuilt, got %r" % touched)
+
 if failures:
     for f in failures:
         print("[layout_test]   " + f)
@@ -172,5 +266,6 @@ if failures:
 PY
 say "Desktops by monitor: renumbered with the displays, follow a swapped monitor, absent ones left"
 say "place: windows matched by app+title then creation order; absent Desktops, minimized and unknown apps left"
+say "restore: only Desktops in view; a Desktop given up keeps its windows; a late anchor is waited for"
 say "remap: same-app windows matched in order, app+title exact, mismatched Spaces left alone, floats skipped; in_shape"
 say "PASS layout_test.sh"

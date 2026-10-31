@@ -507,8 +507,10 @@ connected now stays where it is (see "Several displays" above).
 
 The pass then rebuilds the saved tile shapes. Windows are matched to
 their saved places by app, and by title where that is unique; a Desktop is
-rebuilt only when its tiled windows are the same apps as when you saved, and
-left as it is otherwise (or when it is already in shape). Of several windows
+rebuilt only when it is in view on its display and its tiled windows are the
+same apps as when you saved, and left as it is otherwise (or when it is
+already in shape). yabai does not lay out a Desktop that is not in view, so
+those keep yabai's own split until you visit them. Of several windows
 of one app, which lands in which place is not guaranteed; the shape is.
 Finally, if a Desktop shows a different wallpaper from the main one (macOS
 keeps one per Desktop, and a Desktop added after the last theme change keeps

@@ -447,6 +447,51 @@ def _unfloat_here(win_id: int):
     yabai("window", str(win_id), "--toggle", "float", check=False)
 
 
+# How long released windows are watched for wandering off their Desktop.
+RELEASE_SETTLE_S = 1.5
+
+
+def _release_on(win_ids, space_index):
+    """Un-float win_ids and make sure they stay on space_index. Un-floating a
+    window on a Desktop that is not in view tiles it into the Desktop that is
+    (seen after a restart: Signal and Telegram from Desktop 10 left on
+    Desktop 7), and yabai does it a moment later, not at once -- so the
+    windows are watched for a while and any that wandered is sent back."""
+    win_ids = list(win_ids)
+    for wid in win_ids:
+        _unfloat_here(wid)
+    if not win_ids or not isinstance(space_index, int):
+        return
+    deadline = time.monotonic() + RELEASE_SETTLE_S
+    while True:
+        for wid in win_ids:
+            w = query_window_by_id(wid)
+            if w and w.get("space") != space_index:
+                yabai("window", str(wid), "--space", str(space_index), check=False)
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.25)
+
+
+# How long the anchor gets to fill the Desktop once the others are floated:
+# on a Desktop not in view yabai applies the new frame late, and a check
+# made too soon took that for a window wedged in the tree.
+ANCHOR_SETTLE_S = 2.0
+
+
+def _anchor_expanded(anchor_id: int, exp_w: float, exp_h: float, eps: float) -> bool:
+    deadline = time.monotonic() + ANCHOR_SETTLE_S
+    while True:
+        a = query_window_by_id(anchor_id)
+        if a:
+            f = a["frame"]
+            if abs(f["w"] - exp_w) <= eps and abs(f["h"] - exp_h) <= eps:
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.15)
+
+
 def _placed(win_id: int, anchor_id: int, axis: str) -> bool:
     """True if win_id is tiled on anchor_id's Space, directly east (axis x)
     or south (axis y) of it -- where an insert east|south puts it."""
@@ -572,15 +617,8 @@ def restore_space(space_snap, live_by_id, gap, eps, summary: list[str]):
     if len(present) >= 2:
         exp_w = max(_r(w) for w in present.values()) - min(_l(w) for w in present.values())
         exp_h = max(_b(w) for w in present.values()) - min(_t(w) for w in present.values())
-        anchor_live = query_window_by_id(anchor_id)
-        blocked = False
-        if anchor_live:
-            f = anchor_live["frame"]
-            if abs(f["w"] - exp_w) > eps or abs(f["h"] - exp_h) > eps:
-                blocked = True
-        if blocked:
-            for wid in movable_ids:
-                _unfloat_here(wid)
+        if not _anchor_expanded(anchor_id, exp_w, exp_h, eps):
+            _release_on(movable_ids, space_index)
             ghost_names = ", ".join(
                 f'{live_by_id[w]["app"]}#{w}' for w in orphan_ids_present + list(new_ids)
                 if w in live_by_id and not live_by_id[w].get("has-ax-reference", True)
@@ -594,10 +632,7 @@ def restore_space(space_snap, live_by_id, gap, eps, summary: list[str]):
         _clear_insert(anchor_id)
 
     # Release orphans and new windows for yabai to place; report them.
-    for wid in orphan_ids_present:
-        _unfloat_here(wid)
-    for wid in new_ids:
-        _unfloat_here(wid)
+    _release_on(orphan_ids_present + list(new_ids), space_index)
 
     restored = len(present)
     parts = [f"{restored} restored"]
@@ -801,6 +836,22 @@ def in_shape(space_snap, live_by_id, eps) -> bool:
     return True
 
 
+def visible_spaces() -> set:
+    return {s["index"] for s in query_spaces() if s.get("is-visible")}
+
+
+def return_strays(origin, live_windows) -> int:
+    """Send every window whose Desktop differs from origin (id -> space)
+    back there; the number sent back."""
+    n = 0
+    for w in live_windows:
+        was = origin.get(w["id"])
+        if isinstance(was, int) and w.get("space") != was:
+            yabai("window", str(w["id"]), "--space", str(was), check=False)
+            n += 1
+    return n
+
+
 def cmd_restore(args) -> int:
     path = Path(args.file).expanduser()
     if not path.exists():
@@ -824,12 +875,31 @@ def cmd_restore(args) -> int:
     gap = snapshot["config"]["window_gap"]
     eps = gap + EPS_MARGIN
 
+    # Restore changes shapes, never a window's Desktop; where each window is
+    # now, to send back any that yabai moved to the Desktop in view.
+    origin = {w["id"]: w["space"] for w in query_windows()}
+
+    # Only the Desktops in view: yabai does not lay out a Desktop that is not
+    # (its windows keep stale frames, an un-floated window lands on the one
+    # in view), so a rebuild there floats and un-floats windows into a broken
+    # tree instead. Those are left as they are; the tree guard tidies a
+    # Desktop when it comes into view.
+    in_view = visible_spaces()
+
     for space in sorted(snapshot["spaces"].values(), key=lambda s: (s["space_index"] or 0)):
+        if space.get("space_index") not in in_view:
+            summary.append(f"space {space.get('space_index')}: not in view -- left as it is")
+            continue
         live_by_id = {w["id"]: w for w in query_windows()}
         if args.remap and in_shape(space, live_by_id, eps):
             summary.append(f"space {space['space_index']}: already in the saved shape")
             continue
         restore_space(space, live_by_id, gap, eps, summary)
+
+    time.sleep(RELEASE_SETTLE_S)
+    strays = return_strays(origin, query_windows())
+    if strays:
+        summary.append(f"sent back to their Desktops: {strays}")
 
     live_by_id = {w["id"]: w for w in query_windows()}
     restore_floats(snapshot, live_by_id, summary)

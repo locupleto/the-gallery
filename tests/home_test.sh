@@ -301,6 +301,25 @@ HOME="${ST_HOME}" GALLERY_SESSION_ID=88 GALLERY_SESSION_AGE=30 "${GALLERY_BIN}" 
   && fail "settled: _settled said yes in a fresh login"
 HOME="${ST_HOME}" GALLERY_SESSION_ID=88 GALLERY_SESSION_AGE=99999 "${GALLERY_BIN}" home _settled \
   || fail "settled: _settled said no in an old session"
+# loginwindow gets the same pid after every boot: the session is pid plus its
+# start time, so a marker from an earlier boot does not count as this login.
+SID_STUB="${WORK_DIR}/sid-stub"; mkdir -p "${SID_STUB}"
+printf '#!/bin/sh\necho 189\n' > "${SID_STUB}/pgrep"; chmod +x "${SID_STUB}/pgrep"
+cat > "${SID_STUB}/ps" <<'PS'
+#!/bin/sh
+case "$*" in
+  *lstart*) echo "Sat Oct 31 17:24:20 2026" ;;
+  *etime*) echo "   01:00" ;;
+esac
+PS
+chmod +x "${SID_STUB}/ps"
+echo 189 > "${ST_HOME}/.config/gallery/state/home-login-done"
+HOME="${ST_HOME}" PATH="${SID_STUB}:${PATH}" "${GALLERY_BIN}" home _settled \
+  && fail "settled: a marker with an earlier boot's loginwindow pid counted as this login"
+echo "189@Sat_Oct_31_17:24:20_2026" > "${ST_HOME}/.config/gallery/state/home-login-done"
+HOME="${ST_HOME}" PATH="${SID_STUB}:${PATH}" "${GALLERY_BIN}" home _settled \
+  || fail "settled: this login's own marker (pid@start) was not recognised"
+rm -f "${ST_HOME}/.config/gallery/state/home-login-done"
 # ...and only while the Desktops have the numbers they had at the save.
 assert_contains 'if ! [ -x "$HOME/bin/gallery" ] || "$HOME/bin/gallery" home _same-desktops; then'
 mkdir -p "${ST_HOME}/.config/yabai"; echo '{}' > "${ST_HOME}/.config/yabai/home-layout.json"
