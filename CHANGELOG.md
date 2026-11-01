@@ -5,6 +5,14 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.8.1 (2026-11-01)
+
+- Fix: the Space sync for a left/right pair found nothing on a real Mac and
+  was skipped, so other Spaces kept the old wallpaper. macOS writes a
+  per-screen picture into each display's visible Space, not the primary
+  one; the sync now looks there, and a Space's default picture follows the
+  display it belongs to.
+
 ## 0.8.0 (2026-11-01)
 
 - New: left/right wallpaper pairs. Two images in a theme's `backgrounds/`

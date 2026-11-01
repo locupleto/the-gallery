@@ -142,9 +142,36 @@ grep -q "killall WallpaperAgent" "${CALLS}" || fail "WallpaperAgent was not rest
 [ "$(show S2 D2)" = "${RURL}" ] || fail "S2 D2"
 [ "$(show S2 Default)" = "${LURL}" ] || fail "S2 Default is LEFT"
 [ "$(show S3 D2)" = "${RURL}" ] || fail "S3 D2"
+[ "$(show S3 Default)" = "${RURL}" ] || fail "S3 Default follows its display (RIGHT)"
 [ "$(show S4 D2)" = "${RURL}" ] || fail "S4 untouched"
 grep -q "applied pair" "${H}/Library/Logs/gallery.log" || fail "pair apply not logged"
 say "pair apply: JXA gets LEFT then RIGHT; every Space's displays follow by UUID, Default gets LEFT"
+
+# Real macOS: a per-screen apply lands in each display's VISIBLE Space, not in
+# the primary Space or the top-level Displays (seen on macOS 27, 2026-11-01).
+python3 - "${STORE}" "${LURL}" "${RURL}" "file:///old.png" <<'PY'
+import plistlib, sys
+def desk(url):
+    return {"Desktop": {"Content": {"Choices": [{"Configuration": plistlib.dumps({"url": {"relative": url}})}]}}}
+left, right, old = sys.argv[2:5]
+data = {
+  "Displays": {"D1": desk(old), "D2": desk(old)},
+  "Spaces": {
+    "": {"Default": desk(old), "Displays": {"D1": desk(old)}},
+    "V1": {"Default": desk(left), "Displays": {"D1": desk(left)}},
+    "V2": {"Default": desk(right), "Displays": {"D2": desk(right)}},
+    "S7": {"Default": desk(old), "Displays": {"D2": desk(old)}},
+  },
+}
+with open(sys.argv[1], "wb") as fh:
+    plistlib.dump(data, fh, fmt=plistlib.FMT_BINARY)
+PY
+: > "${CALLS}"
+hook jade >/dev/null || fail "pair apply (visible-Space store) failed"
+[ "$(show "" D1)" = "${LURL}" ] || fail "visible-Space store: primary D1"
+[ "$(show S7 D2)" = "${RURL}" ] || fail "visible-Space store: S7 D2"
+[ "$(show S7 Default)" = "${RURL}" ] || fail "visible-Space store: S7 Default"
+say "pair sync: finds the pair in each display's visible Space and spreads it"
 
 # A single display gets LEFT only, and the sync needs only LEFT.
 store "${LURL}" "file:///never.png" "file:///old.png"

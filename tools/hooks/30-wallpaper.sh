@@ -51,11 +51,12 @@
 # (osascript -l JavaScript with the ObjC bridge); System Events cannot. A
 # lone .left/.right file without its partner is an ordinary single image.
 # Single images take the System Events path above, unchanged. The Space
-# sync for a pair waits until the store shows both pictures (the top-level
-# Displays entries or the primary Space's), then gives every other Space's
-# Displays entries, matched by display UUID, the picture their display
-# shows, and its Default the LEFT one. Displays a Space does not list are
-# left alone. If the store never shows both, the sync is skipped and logged
+# sync for a pair waits until the store shows both pictures on some
+# display entry (a per-screen apply lands in each display's VISIBLE Space,
+# not the primary one), then gives every Space's Displays entries, matched
+# by display UUID, the picture their display shows, and its Default the
+# picture of the display it lists (LEFT if it lists none of them).
+# Displays a Space does not list are left alone. If the store never shows both, the sync is skipped and logged
 # (the visible Spaces are still right).
 #
 # The first time it runs, the store is copied to
@@ -346,13 +347,20 @@ def url_of(desktop):
         return None
 
 def sources(data):
-    # display UUID -> Desktop dict: the top-level Displays entries, then the
-    # primary Space's own (where a per-screen apply may land instead).
+    # display UUID -> Desktop dict for every display already showing one of
+    # the wanted pictures. A per-screen apply lands in the entry of the Space
+    # currently visible on that display (each display has its own current
+    # Space), not in the primary Space, so look everywhere: the top-level
+    # Displays entries and every Space's Displays entries.
     found = {}
-    for entry in (data.get("Displays") or {}, ((data.get("Spaces") or {}).get("") or {}).get("Displays") or {}):
-        for uuid, disp in entry.items():
+    tables = [data.get("Displays") or {}]
+    for entry in (data.get("Spaces") or {}).values():
+        if isinstance(entry, dict):
+            tables.append(entry.get("Displays") or {})
+    for table in tables:
+        for uuid, disp in table.items():
             desk = disp.get("Desktop") if isinstance(disp, dict) else None
-            if desk is not None and url_of(desk) in wants:
+            if desk is not None and url_of(desk) in wants and uuid not in found:
                 found[uuid] = desk
     return found
 
@@ -375,17 +383,26 @@ for desk in src.values():
     by_url.setdefault(url_of(desk), desk)
 left_desk = by_url[wants[0]]
 changed = 0
+# Top-level per-display defaults first, so new Spaces start on the right half.
+for duuid, disp in (data.get("Displays") or {}).items():
+    if duuid in src and isinstance(disp, dict) and url_of(disp.get("Desktop") or {}) != url_of(src[duuid]):
+        disp["Desktop"] = copy.deepcopy(src[duuid])
+        changed += 1
 for uuid, entry in (data.get("Spaces") or {}).items():
-    if not uuid or not isinstance(entry, dict):
+    if not isinstance(entry, dict):
         continue
     dirty = False
-    if url_of((entry.get("Default") or {}).get("Desktop") or {}) != wants[0]:
-        entry.setdefault("Default", {})["Desktop"] = copy.deepcopy(left_desk)
-        dirty = True
-    for duuid, disp in (entry.get("Displays") or {}).items():
+    displays = entry.get("Displays") or {}
+    for duuid, disp in displays.items():
         if duuid in src and isinstance(disp, dict) and url_of(disp.get("Desktop") or {}) != url_of(src[duuid]):
             disp["Desktop"] = copy.deepcopy(src[duuid])
             dirty = True
+    # A Space's Default follows the display it lists (separate Spaces per
+    # display); a Space that lists none of the pair's displays gets LEFT.
+    own = next((src[d] for d in displays if d in src), left_desk)
+    if url_of((entry.get("Default") or {}).get("Desktop") or {}) != url_of(own):
+        entry.setdefault("Default", {})["Desktop"] = copy.deepcopy(own)
+        dirty = True
     changed += dirty
 if changed:
     with open(store, "wb") as fh:
