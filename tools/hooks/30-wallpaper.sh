@@ -42,12 +42,28 @@
 # (the visible Space is still correct). Set GALLERY_WALLPAPER_ALL_SPACES=0
 # to keep the plain System Events behaviour.
 #
+# LEFT/RIGHT PAIRS: two files in the backgrounds dir named
+# <stem>.left.<ext> and <stem>.right.<ext> (extensions may differ) form a
+# pair for a two-display desk. When the chosen file is either half of a
+# complete pair, the hook sets LEFT on the leftmost display (by frame
+# origin x, ties by y) and RIGHT on the next; any further displays also get
+# RIGHT, and a single display gets LEFT. NSWorkspace does this per screen
+# (osascript -l JavaScript with the ObjC bridge); System Events cannot. A
+# lone .left/.right file without its partner is an ordinary single image.
+# Single images take the System Events path above, unchanged. The Space
+# sync for a pair waits until the store shows both pictures (the top-level
+# Displays entries or the primary Space's), then gives every other Space's
+# Displays entries, matched by display UUID, the picture their display
+# shows, and its Default the LEFT one. Displays a Space does not list are
+# left alone. If the store never shows both, the sync is skipped and logged
+# (the visible Spaces are still right).
+#
 # The first time it runs, the store is copied to
 # ~/.config/gallery/state/wallpaper-original.plist (never overwritten);
 # `gallery bg restore` puts it back.
 #
-# Set GALLERY_WALLPAPER_DRY_RUN=1 to print the chosen path and the
-# osascript this hook would run, without applying anything or touching the
+# Set GALLERY_WALLPAPER_DRY_RUN=1 to print the chosen path (or the pair
+# assignment) and the osascript this hook would run, without applying anything or touching the
 # log file.
 #
 set -euo pipefail
@@ -90,6 +106,43 @@ first_image() {
       return 0
     fi
   done
+  return 0
+}
+
+# half_side <filename> -- prints "left" or "right" if the name is
+# <stem>.left.<ext> / <stem>.right.<ext> with a non-empty stem, else nothing.
+half_side() {
+  local base="${1%.*}" side
+  [ "${base}" != "$1" ] || return 0
+  side="$(printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]')"
+  [ "${base%.*}" != "${base}" ] && [ -n "${base%.*}" ] || return 0
+  case "${side}" in
+    left|right) printf '%s' "${side}" ;;
+  esac
+}
+
+# pair_partner <path> -- prints the path of the other half when <path> is one
+# half of a complete pair (same stem, the other side, any image extension,
+# same directory), else nothing.
+pair_partner() {
+  local path="$1" dir name side stem other f
+  dir="$(dirname "${path}")"
+  name="$(basename "${path}")"
+  side="$(half_side "${name}")"
+  [ -n "${side}" ] || return 0
+  stem="${name%.*}"
+  stem="${stem%.*}"
+  if [ "${side}" = "left" ]; then other="right"; else other="left"; fi
+  shopt -s nullglob
+  for f in "${dir}/${stem}.${other}".*; do
+    [ -f "${f}" ] || continue
+    if is_image_ext "${f}"; then
+      printf '%s' "${f}"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
   return 0
 }
 
@@ -170,12 +223,50 @@ end tell
 EOF
 )"
 
+# Pair mode: the chosen file is half of a complete LEFT/RIGHT pair.
+LEFT=""
+RIGHT=""
+PARTNER="$(pair_partner "${CHOSEN}")"
+if [ -n "${PARTNER}" ]; then
+  if [ "$(half_side "$(basename "${CHOSEN}")")" = "left" ]; then
+    LEFT="${CHOSEN}"; RIGHT="${PARTNER}"
+  else
+    LEFT="${PARTNER}"; RIGHT="${CHOSEN}"
+  fi
+fi
+
+# The paths go in as arguments (run(argv)), never spliced into the script, so
+# a quote in a filename cannot break it. Prints the display count.
+JXA_SRC='ObjC.import("AppKit");
+function run(argv) {
+  var all = $.NSScreen.screens, list = [], i;
+  for (i = 0; i < all.count; i++) {
+    var s = all.objectAtIndex(i), f = s.frame;
+    list.push({ screen: s, x: f.origin.x, y: f.origin.y });
+  }
+  list.sort(function (a, b) { return (a.x - b.x) || (a.y - b.y); });
+  var ws = $.NSWorkspace.sharedWorkspace;
+  for (i = 0; i < list.length; i++) {
+    var url = $.NSURL.fileURLWithPath(i === 0 ? argv[0] : argv[1]);
+    var err = Ref();
+    if (!ws.setDesktopImageURLForScreenOptionsError(url, list[i].screen, $({}), err)) {
+      throw new Error("could not set the picture on display " + i);
+    }
+  }
+  return String(list.length);
+}'
+
 ALL_SPACES="${GALLERY_WALLPAPER_ALL_SPACES:-1}"
 SYNC_ERR="${TMPDIR:-/tmp}/gallery-wallpaper-sync.$$.err"
+NSCREENS=1
 
 # apply_visible -- sets the picture on the visible Space of every display.
 apply_visible() {
-  echo "${APPLESCRIPT_SRC}" | osascript >/dev/null
+  if [ -n "${LEFT}" ]; then
+    NSCREENS="$(osascript -l JavaScript -e "${JXA_SRC}" "${LEFT}" "${RIGHT}")" || return 1
+  else
+    echo "${APPLESCRIPT_SRC}" | osascript >/dev/null
+  fi
 }
 
 # sync_store -- copies the primary Space's Desktop configuration into every
@@ -231,10 +322,90 @@ print(len(stale))
 PY
 }
 
+# sync_store_pair -- the pair counterpart of sync_store. Waits until the
+# store shows LEFT (and, with more than one display, RIGHT) on some display,
+# then writes each other Space's per-display entries (by display UUID) and
+# Default. Same contract: prints the number of Spaces rewritten, or returns 1
+# with the reason on stderr.
+sync_store_pair() {
+  [ -f "${STORE_FILE}" ] || { echo "store not found: ${STORE_FILE}" >&2; return 1; }
+  command -v python3 >/dev/null 2>&1 || { echo "python3 not available" >&2; return 1; }
+  python3 - "${STORE_FILE}" "${NSCREENS}" "${LEFT}" "${RIGHT}" <<'PY'
+import copy, os, plistlib, sys, time, urllib.parse
+
+store, nscreens, left, right = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+def to_url(p):
+    return "file://" + urllib.parse.quote(os.path.abspath(p))
+wants = [to_url(left)] + ([to_url(right)] if nscreens > 1 and right != left else [])
+
+def url_of(desktop):
+    try:
+        cfg = plistlib.loads(desktop["Content"]["Choices"][0]["Configuration"])
+        return cfg["url"]["relative"]
+    except Exception:
+        return None
+
+def sources(data):
+    # display UUID -> Desktop dict: the top-level Displays entries, then the
+    # primary Space's own (where a per-screen apply may land instead).
+    found = {}
+    for entry in (data.get("Displays") or {}, ((data.get("Spaces") or {}).get("") or {}).get("Displays") or {}):
+        for uuid, disp in entry.items():
+            desk = disp.get("Desktop") if isinstance(disp, dict) else None
+            if desk is not None and url_of(desk) in wants:
+                found[uuid] = desk
+    return found
+
+# WallpaperAgent persists the per-screen applies a moment after they return.
+deadline = time.time() + 8
+while True:
+    with open(store, "rb") as fh:
+        data = plistlib.load(fh)
+    src = sources(data)
+    have = set(url_of(d) for d in src.values())
+    if all(w in have for w in wants):
+        break
+    if time.time() > deadline:
+        sys.stderr.write("the store does not show every picture of the pair on a display\n")
+        sys.exit(1)
+    time.sleep(0.5)
+
+by_url = {}
+for desk in src.values():
+    by_url.setdefault(url_of(desk), desk)
+left_desk = by_url[wants[0]]
+changed = 0
+for uuid, entry in (data.get("Spaces") or {}).items():
+    if not uuid or not isinstance(entry, dict):
+        continue
+    dirty = False
+    if url_of((entry.get("Default") or {}).get("Desktop") or {}) != wants[0]:
+        entry.setdefault("Default", {})["Desktop"] = copy.deepcopy(left_desk)
+        dirty = True
+    for duuid, disp in (entry.get("Displays") or {}).items():
+        if duuid in src and isinstance(disp, dict) and url_of(disp.get("Desktop") or {}) != url_of(src[duuid]):
+            disp["Desktop"] = copy.deepcopy(src[duuid])
+            dirty = True
+    changed += dirty
+if changed:
+    with open(store, "wb") as fh:
+        plistlib.dump(data, fh, fmt=plistlib.FMT_BINARY)
+print(changed)
+PY
+}
+
 if [ "${GALLERY_WALLPAPER_DRY_RUN:-0}" = "1" ]; then
-  echo "wallpaper (dry run): would apply ${CHOSEN}"
-  echo "wallpaper (dry run): would run:"
-  echo "${APPLESCRIPT_SRC}"
+  if [ -n "${LEFT}" ]; then
+    echo "wallpaper (dry run): pair: LEFT ${LEFT}"
+    echo "wallpaper (dry run): pair: RIGHT ${RIGHT}"
+    echo "wallpaper (dry run): displays left to right by frame origin x: the first gets LEFT, the others RIGHT (a single display gets LEFT)"
+    echo "wallpaper (dry run): would run: osascript -l JavaScript -e <script> '${LEFT}' '${RIGHT}'"
+    echo "${JXA_SRC}"
+  else
+    echo "wallpaper (dry run): would apply ${CHOSEN}"
+    echo "wallpaper (dry run): would run:"
+    echo "${APPLESCRIPT_SRC}"
+  fi
   if [ "${ALL_SPACES}" = "1" ]; then
     if [ -f "${STORE_FILE}" ]; then
       echo "wallpaper (dry run): would then sync every Space entry in ${STORE_FILE} and restart WallpaperAgent"
@@ -257,7 +428,11 @@ snapshot_store() {
 snapshot_store || true
 
 if apply_visible; then
-  log "applied ${CHOSEN} for ${THEME}"
+  if [ -n "${LEFT}" ]; then
+    log "applied pair ${LEFT} + ${RIGHT} for ${THEME} (${NSCREENS} displays)"
+  else
+    log "applied ${CHOSEN} for ${THEME}"
+  fi
 else
   log "FAILED to apply ${CHOSEN} for ${THEME}"
   echo "gallery: 30-wallpaper.sh: osascript failed to apply ${CHOSEN}" >&2
@@ -265,14 +440,15 @@ else
 fi
 
 if [ "${ALL_SPACES}" = "1" ]; then
-  if N="$(sync_store 2>"${SYNC_ERR}")"; then
+  if [ -n "${LEFT}" ]; then SYNC_FN=sync_store_pair; else SYNC_FN=sync_store; fi
+  if N="$("${SYNC_FN}" 2>"${SYNC_ERR}")"; then
     if [ "${N}" -gt 0 ]; then
       # WallpaperAgent only re-reads the store on launch; launchd brings it
       # straight back.
       killall WallpaperAgent 2>/dev/null || true
-      log "synced ${N} other Space entries to ${CHOSEN}; WallpaperAgent restarted"
+      log "synced ${N} other Space entries to ${LEFT:-${CHOSEN}}${RIGHT:+ + ${RIGHT}}; WallpaperAgent restarted"
     else
-      log "all Space entries already on ${CHOSEN}"
+      log "all Space entries already on ${LEFT:-${CHOSEN}}${RIGHT:+ + ${RIGHT}}"
     fi
   else
     log "Space sync skipped: $(tr '\n' ' ' <"${SYNC_ERR}")"

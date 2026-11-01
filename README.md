@@ -450,7 +450,10 @@ the primary Space; a Space that was ever given its own picture keeps an
 override in `~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`
 that shadows it, so the hook then copies the new picture into every Space
 entry there and restarts WallpaperAgent. `GALLERY_WALLPAPER_ALL_SPACES=0`
-keeps it to the plain System Events apply.
+keeps it to the plain System Events apply. Two files named `<stem>.left.<ext>`
+and `<stem>.right.<ext>` form a pair for two displays (leftmost display gets
+left, the next right; see `docs/THEMES.md`); a pair is one entry for `bg
+list|set|next|prev`.
 
 `console ...` decides whether your everyday terminal follows the theme (see
 Terminals for Ghostty, kitty and WezTerm; this paragraph is iTerm2). The

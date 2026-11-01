@@ -5,6 +5,17 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.8.0 (2026-11-01)
+
+- New: left/right wallpaper pairs. Two images in a theme's `backgrounds/`
+  named `<stem>.left.<ext>` and `<stem>.right.<ext>` are one entry for
+  `gallery bg list|set|next|prev` and the wallpaper hook; choosing either half
+  puts the left picture on the leftmost display and the right one on the next
+  (further displays get the right one, a single display the left one). Every
+  Space follows, per display. A lone `.left`/`.right` file stays an ordinary
+  image, and single images are applied exactly as before. The login pass no
+  longer re-applies the wallpaper just because the two displays differ.
+
 ## 0.7.1 (2026-11-01)
 
 - `gallery present --reload <url>` reloads the page if it is already open in

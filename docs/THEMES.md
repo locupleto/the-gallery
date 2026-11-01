@@ -350,14 +350,37 @@ theme is the current one (otherwise they record only); `apply` re-applies the
 current choice. They call the wallpaper hook directly and do not render or run
 the other hooks.
 
-The hook sets the picture through System Events, which only reaches the
+### Left/right pairs
+
+For a desk with two displays, a theme can carry a pair: two files in
+`backgrounds/` with the same stem, `<stem>.left.<ext>` and
+`<stem>.right.<ext>` (the extensions may differ, say `.left.png` and
+`.right.webp`). A pair is one entry everywhere: `gallery bg list` shows it once
+as `<stem>.left.<ext> (+ right)`, `next` and `prev` step over it as a unit,
+`bg set` takes either half's filename (or the bare `<stem>`) and records the
+LEFT filename. Choosing either half, by any of the four selection rules above,
+applies the pair. A `.left` or `.right` file without its partner is an
+ordinary single image.
+
+The displays are ordered left to right by the x of their frame (ties by y):
+the leftmost gets LEFT, the next gets RIGHT, any further display also gets
+RIGHT, and a single display gets LEFT. The hook sets each screen through
+NSWorkspace (`osascript -l JavaScript`); single images keep the System Events
+path. For the Space sync, the hook waits until the store shows the pictures on
+the displays, then copies each display's configuration, matched by display
+UUID, into every other Space's entry for that display, and gives each Space's
+default the LEFT one. If the store never shows them, the sync is skipped and
+logged (`Space sync skipped`); the visible Spaces are still right.
+
+The hook sets a single picture through System Events, which only reaches the
 display default and the primary Space. A Space that was ever given its own
 picture keeps an override in
 `~/Library/Application Support/com.apple.wallpaper/Store/Index.plist` that
 shadows it, so by default the hook then copies the primary entry into every
 Space entry there and restarts `WallpaperAgent`. `GALLERY_WALLPAPER_ALL_SPACES=0`
 keeps the plain System Events behaviour, and `GALLERY_WALLPAPER_DRY_RUN=1`
-prints what would be applied without applying it.
+prints what would be applied (for a pair: which file goes to which side, and the
+script) without applying it.
 
 ## What re-themes when
 

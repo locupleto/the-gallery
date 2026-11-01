@@ -43,6 +43,13 @@ gallery bg next | prev
 gallery bg restore               # the user's wallpaper from before the Gallery
 ```
 
+A left/right pair for two displays is two files with the same stem,
+`<stem>.left.<ext>` and `<stem>.right.<ext>`. It is one entry in `bg list`
+(shown as `<stem>.left.<ext> (+ right)`), `bg set` takes either half or the
+bare stem, and `next`/`prev` step over it as a unit. Leftmost display gets
+LEFT, the next RIGHT (further ones RIGHT too); one display gets LEFT. A lone
+`.left`/`.right` file is just an image.
+
 To add one, copy an image into the theme's `backgrounds/` (a user's own
 theme, or a shipped one: added files survive updates).
 

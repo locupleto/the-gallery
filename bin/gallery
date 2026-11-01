@@ -163,7 +163,7 @@ commands:
   theme set <name>                switch the active theme and re-render it
   theme render                    re-run the renderers for the active theme
   theme next                      switch to the next theme alphabetically
-  bg list [theme]                 list backgrounds for a theme (marks active)
+  bg list [theme]                 list backgrounds for a theme (marks active; a LEFT/RIGHT pair is one entry)
   bg current [theme]              print the active background's filename
   bg set <file> [theme]           choose a background and apply it
   bg next [theme]                 cycle to the next background, and apply it
@@ -1407,9 +1407,63 @@ bg_dir_for() {
   printf '%s/%s/backgrounds' "${THEME_DIR}" "$1"
 }
 
+# bg_half_side <filename> -- prints "left" or "right" for <stem>.left.<ext> /
+# <stem>.right.<ext> (non-empty stem), else nothing. Same rule as
+# tools/hooks/30-wallpaper.sh's half_side, kept in sync by hand.
+bg_half_side() {
+  local base="${1%.*}" side
+  [ "${base}" != "$1" ] || return 0
+  side="$(printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]')"
+  [ "${base%.*}" != "${base}" ] && [ -n "${base%.*}" ] || return 0
+  case "${side}" in
+    left|right) printf '%s' "${side}" ;;
+  esac
+}
+
+# bg_pair_partner <theme> <filename> -- prints the basename of the other half
+# when <filename> is one half of a complete LEFT/RIGHT pair in the theme's
+# backgrounds dir (same stem, any image extension), else nothing. A lone half
+# is an ordinary single image.
+bg_pair_partner() {
+  local dir name="$2" side stem other f
+  dir="$(bg_dir_for "$1")"
+  side="$(bg_half_side "${name}")"
+  [ -n "${side}" ] || return 0
+  stem="${name%.*}"
+  stem="${stem%.*}"
+  if [ "${side}" = "left" ]; then other="right"; else other="left"; fi
+  shopt -s nullglob
+  for f in "${dir}/${stem}.${other}".*; do
+    [ -f "${f}" ] || continue
+    if bg_is_image_ext "${f}"; then
+      printf '%s' "$(basename "${f}")"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+  return 0
+}
+
+# bg_entry_name <theme> <filename> -- the name a background is listed and
+# recorded under: the LEFT file for either half of a complete pair, else the
+# name itself.
+bg_entry_name() {
+  local partner
+  if [ "$(bg_half_side "$2")" = "right" ]; then
+    partner="$(bg_pair_partner "$1" "$2")"
+    if [ -n "${partner}" ]; then
+      printf '%s' "${partner}"
+      return 0
+    fi
+  fi
+  printf '%s' "$2"
+}
+
 # bg_list_images <theme> -- newline-separated, alphabetically sorted list
 # of recognised-image basenames in <theme>'s backgrounds dir, or nothing
-# if the dir is missing/empty.
+# if the dir is missing/empty. A complete LEFT/RIGHT pair is ONE entry, named
+# by its LEFT file.
 bg_list_images() {
   local dir
   dir="$(bg_dir_for "$1")"
@@ -1420,6 +1474,10 @@ bg_list_images() {
     [ -f "${f}" ] || continue
     name="$(basename "${f}")"
     if bg_is_image_ext "${name}"; then
+      # The right half of a complete pair is covered by its left entry.
+      if [ "$(bg_half_side "${name}")" = "right" ] && [ -n "$(bg_pair_partner "$1" "${name}")" ]; then
+        continue
+      fi
       list="${list}${name}
 "
     fi
@@ -1495,7 +1553,7 @@ bg_fallback_choice() {
     [ -f "${f}" ] || continue
     name="$(basename "${f}")"
     if bg_is_image_ext "${name}"; then
-      printf '%s' "${name}"
+      printf '%s' "$(bg_entry_name "$1" "${name}")"
       shopt -u nullglob
       return 0
     fi
@@ -1504,7 +1562,7 @@ bg_fallback_choice() {
     [ -f "${f}" ] || continue
     name="$(basename "${f}")"
     if bg_is_image_ext "${name}"; then
-      printf '%s' "${name}"
+      printf '%s' "$(bg_entry_name "$1" "${name}")"
       shopt -u nullglob
       return 0
     fi
@@ -1522,7 +1580,7 @@ bg_active_choice() {
   dir="$(bg_dir_for "${theme}")"
   recorded="$(bg_read_choice "${theme}")"
   if [ -n "${recorded}" ] && [ -f "${dir}/${recorded}" ] && bg_is_image_ext "${recorded}"; then
-    printf '%s' "${recorded}"
+    bg_entry_name "${theme}" "${recorded}"
     return 0
   fi
   bg_fallback_choice "${theme}"
@@ -1580,10 +1638,15 @@ cmd_bg_list() {
   local name
   while IFS= read -r name; do
     [ -n "${name}" ] || continue
+    local label="${name}"
+    # A pair is one entry, shown by its left file.
+    if [ "$(bg_half_side "${name}")" = "left" ] && [ -n "$(bg_pair_partner "${theme}" "${name}")" ]; then
+      label="${name} (+ right)"
+    fi
     if [ "${name}" = "${active}" ] && [ -t 1 ]; then
-      printf '%s *\n' "${name}"
+      printf '%s *\n' "${label}"
     else
-      printf '%s\n' "${name}"
+      printf '%s\n' "${label}"
     fi
   done <<< "${images}"
 }
@@ -1627,6 +1690,18 @@ cmd_bg_set() {
   base="$(basename "${file}")"
   local dir
   dir="$(bg_dir_for "${theme}")"
+  # A bare pair stem names the pair: <stem> -> <stem>.left.<ext>.
+  if [ ! -f "${dir}/${base}" ]; then
+    local cand
+    shopt -s nullglob
+    for cand in "${dir}/${base}.left".*; do
+      if [ -f "${cand}" ] && bg_is_image_ext "${cand}" && [ -n "$(bg_pair_partner "${theme}" "$(basename "${cand}")")" ]; then
+        base="$(basename "${cand}")"
+        break
+      fi
+    done
+    shopt -u nullglob
+  fi
   if [ ! -f "${dir}/${base}" ]; then
     echo "gallery: no such background: ${base} (looked in ${dir})" >&2
     exit 1
@@ -1636,6 +1711,8 @@ cmd_bg_set() {
     exit 1
   fi
 
+  # Either half selects the pair; the LEFT file is what gets recorded.
+  base="$(bg_entry_name "${theme}" "${base}")"
   bg_set_and_maybe_apply "${theme}" "${base}"
 }
 
@@ -4125,7 +4202,12 @@ home_login_wallpaper() {
   local store="${GALLERY_WALLPAPER_STORE:-${HOME}/Library/Application Support/com.apple.wallpaper/Store/Index.plist}"
   [ -f "${store}" ] || return 0
   [ "$(readlink "${CONFIG_DIR}/themes/current" 2>/dev/null)" ] || return 0
-  if python3 - "${store}" <<'PY' 2>/dev/null
+  # A LEFT/RIGHT pair puts a different picture on each display on purpose, so
+  # the pictures the displays show count as in sync then.
+  local pair=0 active
+  active="$(bg_active_choice "$(theme_current_name)" 2>/dev/null)" || active=""
+  if [ -n "${active}" ] && [ -n "$(bg_pair_partner "$(theme_current_name)" "${active}")" ]; then pair=1; fi
+  if python3 - "${store}" "${pair}" <<'PY' 2>/dev/null
 import plistlib, sys
 with open(sys.argv[1], "rb") as fh:
     spaces = plistlib.load(fh).get("Spaces") or {}
@@ -4144,7 +4226,10 @@ def pictures(entry):
 main = pictures(spaces.get("") or {})
 if not main:
     sys.exit(1)
-stale = any(p != main[0] for e in spaces.values() for p in pictures(e))
+ok = {main[0]}
+if sys.argv[2] == "1":
+    ok.update(pictures({"Displays": plistlib.load(open(sys.argv[1], "rb")).get("Displays") or {}}))
+stale = any(p not in ok for e in spaces.values() for p in pictures(e))
 sys.exit(0 if stale else 1)
 PY
   then
