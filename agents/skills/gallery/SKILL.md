@@ -89,6 +89,16 @@ https://github.com/locupleto/the-gallery/tree/main/docs.
   may be Space 10.
 - `gallery off` restores the windows' pre-tiling positions and stops tiling,
   outline and keys until `gallery on` (it survives a restart).
+- The presenter: Claude artifact pages (and any URL matching `"match"` in
+  `~/.config/gallery/state/presenter.json`) open in ONE floating, centred
+  Safari window per Desktop, each further page a tab in it. It opens on the
+  PUBLISHING AGENT's Desktop (Claude Code Pre/PostToolUse hooks run
+  `gallery present hint [--before]`; the agent is found via
+  $ITERM_SESSION_ID) and takes focus only when the user is on that Desktop.
+  `gallery present <url|file>` shows a page there, on the calling agent's
+  Desktop (use it to show the user a local HTML file); `present
+  status|on|off`. Tiling the window (super+t) keeps it as an ordinary window.
+  Safari only. Log: `~/Library/Logs/gallery-presenter.log`.
 - Logs: `gallery log` (Hammerspoon side), `~/.config/gallery/gallery-home.log`
   (the after-login home pass), `~/.config/gallery/gallery-ghosts.log`
   (windows yabai cannot see).

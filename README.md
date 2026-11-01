@@ -420,6 +420,7 @@ gallery borders status | width <n> | bright on|off|toggle |
 gallery glass [status] | set <transparency 0-0.9> [<blur 0-64>] | default |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery ghosts [list] | fix [OWNER|ID] | forget |
+gallery present <url|file> | on | off | status |
 gallery agent [open [<name>]] | inline [<name>] | status | list | set <name> [--command "<line>"] |
               add <name> --command "<line>" | remove <name> | dir [<path>|--clear] |
 gallery reload | log | doctor | install
@@ -565,6 +566,14 @@ top of another tile; the watcher re-inserts it by toggling float twice.
 `gallery ghosts` lists them, `fix` relaunches or retiles on request.
 Overrides live in `~/.config/gallery/ghosts.conf`; the log is
 `~/Library/Logs/gallery-ghosts.log`.
+
+`present ...` is the presenter: a page an agent opens for you (a Claude
+artifact, by default) floats centred above the tiles in one Safari window per
+Desktop, and every further page becomes a tab in it, so several at once never
+pile up. It opens on the agent's Desktop, not the one you are looking at, and
+leaves your focus alone when you are working elsewhere (two agent hooks
+announce the pages; `present hint`). Tile the window (super+t) to keep it. `gallery present <url|file>` sends a page there yourself. See
+[docs/CUSTOMIZING.md](docs/CUSTOMIZING.md#pages-an-agent-opens-the-presenter).
 
 Run `gallery` with no arguments, or see `bin/gallery`, for the full verb
 list.

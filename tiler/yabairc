@@ -111,6 +111,18 @@ for e in window_destroyed application_terminated window_minimized space_changed 
         action='"${HOME}/.config/yabai/tree-guard" >/dev/null 2>&1 &'
 done
 
+# --- the presenter: pages an agent opens float centred (gallery present) ------
+# A Claude artifact (a UI mockup, a report) arrives as a new Safari window. The
+# Gallery checks each new Safari window's page; a matching page goes to this
+# Desktop's presenter (one floating, centred window; a tab in it if it is
+# already open) and Safari's window closes. Backgrounded: the check waits for
+# the page's URL to arrive.
+yabai -m signal --remove gallery-presenter >/dev/null 2>&1
+if [ -x "${HOME}/bin/gallery" ]; then
+    yabai -m signal --add label=gallery-presenter event=window_created app='^Safari$' \
+        action='"${HOME}/bin/gallery" present _adopt "${YABAI_WINDOW_ID}" >/dev/null 2>&1 &'
+fi
+
 # --- active-window border (JankyBorders) -------------------------------------
 # A crisp accent outline around the FOCUSED window only (unfocused windows get
 # no border), so the active window is obvious across multiple displays instead

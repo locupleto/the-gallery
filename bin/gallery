@@ -207,6 +207,8 @@ commands:
                                    snapshot the current layout into ~/.config/yabai/rules.local
   home apply                      move every window back to its saved Desktop now
   home reopen [on|off|now|status] this Mac: the Gallery, not macOS, starts the saved apps after login
+  present <url|file>              open a page in this Desktop's presenter (one floating, centred Safari window; tabs)
+  present on|off|status           agent-opened pages (Claude artifacts) go to the presenter; default on
   ghosts [list]                   windows yabai cannot see (born behind the lock screen)
   ghosts fix [OWNER|ID]           quit + relaunch the app owning ghost window(s)
   ghosts forget                   clear the ghosts service's reported/handled state
@@ -5167,6 +5169,647 @@ cmd_theme() {
   esac
 }
 
+# --- the presenter (gallery present) -----------------------------------------
+#
+# Pages an agent opens for you to look at -- a Claude artifact such as a UI
+# mockup -- arrive as a new Safari window, tiled in among the work like any
+# other, often on a Desktop full of tiles. The presenter treats them the way
+# the theme picker is treated: ONE floating Safari window per Desktop, centred
+# over the tiles, and every further page becomes a tab in it, so three
+# artifacts published in one turn, by two sessions, or by a background agent
+# never stack three windows on top of each other. One close dismisses the lot.
+# To keep a page, tile its window (super+t): a tiled window is no longer the
+# presenter, and the next page starts a new one.
+#
+# Two ways in:
+#   - the gallery-presenter signal (tiler/yabairc, window_created for Safari)
+#     runs `gallery present _adopt <id>`: if the new window's page matches a
+#     presenter pattern (default: claude.ai/artifact/ links), the page goes to
+#     this Desktop's presenter -- a tab in the one already here, or a new one
+#     -- and the window Safari opened is closed;
+#   - `gallery present <url|file>` opens a page in the presenter directly, for
+#     skills and scripts.
+#
+# Which Desktop: the AGENT's, not the one in view. The page belongs next to
+# the conversation that asks about it; with the agent on Desktop 8 and the
+# user browsing on Desktop 16 on the other display, the mockup belongs on 8.
+# Safari's window carries no trace of who opened it, so the agent leaves
+# notes, from two Claude Code hooks on the artifact tools. Both find the
+# agent's terminal window from $ITERM_SESSION_ID (iTerm2's AppleScript window
+# id is the CGWindowID too):
+#   - `gallery present hint --before` (PreToolUse): "a page from this agent is
+#     coming", filed under state/presenter-hints/pending/ by tool call id.
+#     It always comes before the window; the url is not known yet.
+#   - `gallery present hint` (PostToolUse): "this url is this agent's", and
+#     the pending note is withdrawn (a republish opens no window). It can
+#     come seconds AFTER the window (5 s, 2026-11-01), so it cannot be the
+#     only note.
+# _adopt takes, in order: the note for its url; else the one pending note
+# (several pending means sessions publishing at once: wait up to
+# PRESENTER_HINT_TRIES for the url notes that tell them apart, then take the
+# newest); else none -- a link the user clicked -- and the Desktop in view,
+# with no wait. The presenter goes to the Desktop the agent's window is on
+# NOW. A floating window moved to a
+# Desktop on the other display, or one not in view, keeps its centring.
+#
+# Focus follows the user, not the page: when the user is on the presenter's
+# Desktop the presenter takes focus (below); when they are elsewhere the
+# page appears on top of the agent's Desktop and focus goes back to the
+# window they were in (making a Safari window takes focus, and moving it
+# away dropped focus on some other window).
+#
+# The presenter is always a window this code made (AppleScript `make new
+# document`), never the one Safari opened for the link: Safari opens a link
+# from another app in a window of the frontmost window's kind, so with a
+# Private Browsing window in front the artifact came up signed out
+# (2026-11-01); a window made over AppleScript is always a normal one.
+#
+# The presenter takes focus, and that is deliberate. A floating window stays
+# above the tiles only until one of them is raised, and yabai cannot pin a
+# window above the others without its scripting addition (SIP off, which the
+# Gallery does not ask for): handing focus back to the terminal raised it
+# over the page. With focus_follows_mouse autofocus, pointing back at the
+# terminal focuses it WITHOUT raising it, and the page stays in view.
+#
+# Safari's AppleScript `id of window` is the CGWindowID, the same number yabai
+# reports, so one id names the window on both sides. Safari only: other
+# browsers open a link from another app as a tab in an existing window, which
+# yabai never sees created.
+#
+# State: state/presenter.json {"enabled": bool, "match": [regex...],
+# "windows": [id...]}. "windows" are the presenters made so far; a window
+# that is gone or tiled drops out the next time the presenter is looked up.
+# The windows float, so `gallery home save` already skips them.
+# Test seams: GALLERY_PRESENTER_TRIES / GALLERY_PRESENTER_SLEEP (how long
+# to wait for a new window's URL, or for yabai to see a new window),
+# GALLERY_PRESENTER_HINT_TRIES (how long to wait for the agent's note),
+# GALLERY_PRESENTER_GRID.
+PRESENTER_STATE_FILE="${CONFIG_DIR}/state/presenter.json"
+PRESENTER_LOCK_DIR="${CONFIG_DIR}/state/presenter.lock"
+PRESENTER_GRID="${GALLERY_PRESENTER_GRID:-8:8:1:1:6:6}"
+PRESENTER_TRIES="${GALLERY_PRESENTER_TRIES:-12}"
+PRESENTER_SLEEP="${GALLERY_PRESENTER_SLEEP:-0.25}"
+PRESENTER_HINT_TRIES="${GALLERY_PRESENTER_HINT_TRIES:-40}"
+PRESENTER_HINT_DIR="${CONFIG_DIR}/state/presenter-hints"
+# What the signal-driven runs did (they run in the background, out of sight).
+PRESENTER_LOG="${GALLERY_PRESENTER_LOG:-${HOME}/Library/Logs/gallery-presenter.log}"
+
+presenter_log() {
+  mkdir -p "$(dirname "${PRESENTER_LOG}")" 2>/dev/null || return 0
+  printf '%s [%s] %s\n' "$(date '+%F %T')" "$$" "$*" >> "${PRESENTER_LOG}" 2>/dev/null || true
+}
+
+# PY_PRESENTER <op> <state file> [args] -- the presenter's state and choices.
+#   enabled                 exit 0 unless switched off
+#   set-enabled 0|1
+#   match <url>             exit 0 if the url matches a presenter pattern
+#   registered <id>         exit 0 if <id> is a presenter
+#   add <id>
+#   find <space index>      stdin: `yabai -m query --windows`. Prints the
+#                           presenter on that Desktop, or nothing; drops gone
+#                           and tiled windows from the state.
+#   status                  stdin: `yabai -m query --windows`; a report
+#   space                   stdin: one yabai window object; prints its Desktop
+#   hook [url]              stdin: a hook's JSON. Prints "<tool call id>
+#                           <url>": <url>, else the first URL in it matching a
+#                           pattern, "-" for either when there is none
+#   hint-put <dir> <url> <window> <space>   file a url note; drop old ones
+#   hint-take <dir> <url>   print and remove the note for <url>: "window space"
+#   pending-put <dir> <id> <window> <space> / pending-drop <dir> <id>
+#   pending-get <dir> <id>  "window space" of that pending note
+#   pending-list <dir>      "id window space" per pending note, newest
+#                           first; drops ones over two minutes old
+read -r -d '' PY_PRESENTER <<'PYEOF' || true
+import json, os, re, sys
+
+DEFAULT_MATCH = [r"^https://claude\.ai/artifact/"]
+op, path, args = sys.argv[1], sys.argv[2], sys.argv[3:]
+
+def load():
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except Exception:
+        d = {}
+    return d if isinstance(d, dict) else {}
+
+def save(d):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+def ids(d):
+    return [w for w in d.get("windows", []) if isinstance(w, int)]
+
+def patterns(d):
+    m = d.get("match")
+    return [p for p in m if isinstance(p, str)] if isinstance(m, list) else DEFAULT_MATCH
+
+d = load()
+if op == "enabled":
+    sys.exit(0 if d.get("enabled", True) is not False else 1)
+elif op == "set-enabled":
+    d["enabled"] = args[0] == "1"
+    save(d)
+elif op == "match":
+    for p in patterns(d):
+        try:
+            if re.search(p, args[0]):
+                sys.exit(0)
+        except re.error:
+            pass
+    sys.exit(1)
+elif op == "registered":
+    sys.exit(0 if int(args[0]) in ids(d) else 1)
+elif op == "add":
+    w = int(args[0])
+    d["windows"] = [i for i in ids(d) if i != w] + [w]
+    save(d)
+elif op == "find":
+    space = int(args[0])
+    try:
+        windows = {w.get("id"): w for w in json.load(sys.stdin)}
+    except Exception:
+        sys.exit(0)
+    # A tiled presenter is the user's window now (super+t to keep a page).
+    keep = [i for i in ids(d) if i in windows and windows[i].get("is-floating")]
+    if keep != ids(d):
+        d["windows"] = keep
+        save(d)
+    print(next((str(i) for i in keep if windows[i].get("space") == space), ""))
+elif op == "status":
+    try:
+        windows = {w.get("id"): w for w in json.load(sys.stdin)}
+    except Exception:
+        windows = {}
+    print("presenter: %s" % ("on" if d.get("enabled", True) is not False else "off"))
+    print("patterns:  %s" % "  ".join(patterns(d)))
+    live = [windows[i] for i in ids(d) if i in windows and windows[i].get("is-floating")]
+    if not live:
+        print("windows:   none open")
+    for w in live:
+        print("window %d on Desktop %s: %s" % (w["id"], w.get("space"), w.get("title") or ""))
+elif op in ("hint-put", "hint-take"):
+    import hashlib, time, urllib.parse
+    def key(u):
+        # Safari adds ?via=auto_preview to the link the agent opened.
+        p = urllib.parse.urlsplit(u)
+        return hashlib.sha1(("%s://%s%s" % (p.scheme, p.netloc, p.path)).encode()).hexdigest()
+    hdir, url = args[0], args[1]
+    f = os.path.join(hdir, key(url) + ".json")
+    if op == "hint-put":
+        os.makedirs(hdir, exist_ok=True)
+        now = time.time()
+        for old in os.listdir(hdir):
+            try:
+                if now - os.path.getmtime(os.path.join(hdir, old)) > 600:
+                    os.remove(os.path.join(hdir, old))
+            except OSError:
+                pass
+        with open(f + ".tmp", "w") as fh:
+            json.dump({"url": url, "window": int(args[2] or 0), "space": int(args[3] or 0), "time": now}, fh)
+        os.replace(f + ".tmp", f)
+    else:
+        try:
+            with open(f) as fh:
+                h = json.load(fh)
+            os.remove(f)
+        except Exception:
+            sys.exit(1)
+        if time.time() - h.get("time", 0) > 600:
+            sys.exit(1)
+        print("%s %s" % (h.get("window") or "", h.get("space") or ""))
+elif op == "hook":
+    text = sys.stdin.read()
+    try:
+        tid = str(json.loads(text).get("tool_use_id") or "-")
+    except Exception:
+        tid = "-"
+    tid = re.sub(r"[^A-Za-z0-9_-]", "", tid) or "-"
+    url = args[0] if args and args[0] else "-"
+    if url == "-":
+        for u in re.findall(r"https?://[^\s\"'\\<>]+", text):
+            if any(re.search(p, u) for p in patterns(d) if p):
+                url = u
+                break
+    print("%s %s" % (tid, url))
+elif op in ("pending-put", "pending-drop", "pending-list", "pending-get"):
+    import time
+    pdir = os.path.join(args[0], "pending")
+    os.makedirs(pdir, exist_ok=True)
+    if op == "pending-put":
+        f = os.path.join(pdir, args[1] + ".json")
+        with open(f + ".tmp", "w") as fh:
+            json.dump({"window": int(args[2] or 0), "space": int(args[3] or 0), "time": time.time()}, fh)
+        os.replace(f + ".tmp", f)
+    elif op == "pending-get":
+        try:
+            with open(os.path.join(pdir, args[1] + ".json")) as fh:
+                h = json.load(fh)
+            print("%s %s" % (h.get("window") or "", h.get("space") or ""))
+        except Exception:
+            sys.exit(1)
+    elif op == "pending-drop":
+        try:
+            os.remove(os.path.join(pdir, args[1] + ".json"))
+        except OSError:
+            pass
+    else:
+        now, rows = time.time(), []
+        for name in os.listdir(pdir):
+            f = os.path.join(pdir, name)
+            try:
+                with open(f) as fh:
+                    h = json.load(fh)
+                if now - h.get("time", 0) > 120:
+                    os.remove(f)
+                    continue
+                rows.append((h["time"], name[:-5], h.get("window") or "", h.get("space") or ""))
+            except Exception:
+                continue
+        for t, i, w, sp in sorted(rows, reverse=True):
+            print("%s %s %s" % (i, w, sp))
+elif op == "space":
+    try:
+        print(int(json.load(sys.stdin)["space"]))
+    except Exception:
+        pass
+else:
+    sys.exit(2)
+PYEOF
+
+presenter_py() {
+  local op="$1"
+  shift
+  python3 -c "${PY_PRESENTER}" "${op}" "${PRESENTER_STATE_FILE}" "$@"
+}
+
+# One presenter run at a time: the window a run creates fires the signal
+# again, and three artifacts published at once fire it three times; each must
+# see the presenter the one before it made. Safari can take many seconds to
+# answer while it loads pages (a run once held the lock 18 s), so a waiting
+# run is patient; a lock older than 60 s was left by a killed run.
+presenter_lock() {
+  local tries=0 age
+  mkdir -p "$(dirname "${PRESENTER_LOCK_DIR}")"
+  while ! mkdir "${PRESENTER_LOCK_DIR}" 2>/dev/null; do
+    age=$(( $(date +%s) - $(stat -f %m "${PRESENTER_LOCK_DIR}" 2>/dev/null || date +%s) ))
+    if [ "${age}" -gt 60 ]; then
+      rmdir "${PRESENTER_LOCK_DIR}" 2>/dev/null || true
+      continue
+    fi
+    tries=$((tries + 1))
+    [ "${tries}" -lt 180 ] || return 1
+    sleep 0.25
+  done
+}
+
+presenter_unlock() {
+  rmdir "${PRESENTER_LOCK_DIR}" 2>/dev/null || true
+}
+
+# presenter_safari_url <id> -- the URL in window <id>'s current tab, empty
+# while it has none yet. Fails once the window is gone.
+presenter_safari_url() {
+  osascript \
+    -e 'on run argv' \
+    -e 'tell application "Safari"' \
+    -e 'set u to URL of current tab of window id ((item 1 of argv) as integer)' \
+    -e 'end tell' \
+    -e 'if u is missing value then return ""' \
+    -e 'return u' \
+    -e 'end run' "$1" 2>/dev/null
+}
+
+# presenter_safari_show <id> <url> -- bring <url> up in window <id>: its tab
+# if one already shows it (a page opened twice), else a new tab.
+presenter_safari_show() {
+  osascript \
+    -e 'on run argv' \
+    -e 'set u to item 2 of argv' \
+    -e 'tell application "Safari"' \
+    -e 'set w to window id ((item 1 of argv) as integer)' \
+    -e 'repeat with t in tabs of w' \
+    -e 'if URL of t is u then' \
+    -e 'set current tab of w to t' \
+    -e 'return "existing"' \
+    -e 'end if' \
+    -e 'end repeat' \
+    -e 'set t to make new tab at end of tabs of w with properties {URL:u}' \
+    -e 'set current tab of w to t' \
+    -e 'return "new"' \
+    -e 'end tell' \
+    -e 'end run' "$1" "$2" >/dev/null 2>&1
+}
+
+# presenter_safari_new <url> -- a new (never private) Safari window on <url>;
+# prints its id.
+presenter_safari_new() {
+  osascript \
+    -e 'on run argv' \
+    -e 'tell application "Safari"' \
+    -e 'make new document with properties {URL:(item 1 of argv)}' \
+    -e 'return id of front window' \
+    -e 'end tell' \
+    -e 'end run' "$1" 2>/dev/null
+}
+
+presenter_safari_close() {
+  osascript \
+    -e 'on run argv' \
+    -e 'tell application "Safari" to close window id ((item 1 of argv) as integer)' \
+    -e 'end run' "$1" >/dev/null 2>&1 || true
+}
+
+# presenter_float <id> -- float window <id> and centre it on the presenter
+# grid. yabai may not know a window Safari has only just made, so wait for it
+# a moment first.
+presenter_float() {
+  local wid="$1" tries=0 floating
+  until yabai -m query --windows --window "${wid}" >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    [ "${tries}" -lt "${PRESENTER_TRIES}" ] || return 1
+    sleep "${PRESENTER_SLEEP}"
+  done
+  floating="$(yabai -m query --windows --window "${wid}" 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("is-floating"))' 2>/dev/null || true)"
+  if [ "${floating}" != "True" ]; then
+    yabai -m window "${wid}" --toggle float >/dev/null 2>&1 || true
+  fi
+  yabai -m window "${wid}" --grid "${PRESENTER_GRID}" >/dev/null 2>&1 || true
+}
+
+# presenter_show <space index> <url> -- (lock held) put <url> in that
+# Desktop's presenter, making the presenter first if there is none (Safari
+# makes it on the Desktop in view; it is moved). Focus is the caller's
+# business. Prints the presenter's id.
+presenter_show() {
+  local space="$1" url="$2" pres at
+  pres="$(yabai -m query --windows 2>/dev/null | presenter_py find "${space}")" || pres=""
+  if [ -n "${pres}" ]; then
+    presenter_safari_show "${pres}" "${url}" || return 1
+  else
+    pres="$(presenter_safari_new "${url}")" || return 1
+    presenter_log "new presenter window ${pres}"
+    case "${pres}" in ''|*[!0-9]*) return 1 ;; esac
+    # Recorded before it floats: its own window_created signal is waiting
+    # on the lock and must find it is a presenter, not a page to adopt.
+    presenter_py add "${pres}"
+    presenter_float "${pres}" || return 1
+    at="$(yabai -m query --windows --window "${pres}" 2>/dev/null | presenter_py space)" || at=""
+    if [ -n "${at}" ] && [ "${at}" != "${space}" ]; then
+      yabai -m window "${pres}" --space "${space}" >/dev/null 2>&1 || true
+    fi
+  fi
+  printf '%s' "${pres}"
+}
+
+# presenter_settle_focus <presenter> <its Desktop> <user's Desktop> <window
+# the user was in> -- with the user: focus the presenter (raising it over a
+# tile clicked since). Elsewhere: give the user their window back.
+presenter_settle_focus() {
+  local pres="$1" space="$2" user_space="$3" prev="$4" now
+  if [ "${space}" = "${user_space}" ]; then
+    yabai -m window --focus "${pres}" >/dev/null 2>&1 || true
+    return 0
+  fi
+  [ -n "${prev}" ] || return 0
+  now="$(yabai -m query --windows --window 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null)" || now=""
+  [ "${now}" = "${prev}" ] || yabai -m window --focus "${prev}" >/dev/null 2>&1 || true
+}
+
+# presenter_user_space -- the Desktop with focus (the user's).
+presenter_user_space() {
+  yabai -m query --spaces --space 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["index"])' 2>/dev/null
+}
+
+# presenter_window_of_focus [skip id] -- the focused window's id; when that
+# is <skip id> (Safari's new window took focus), the one focused before it.
+presenter_window_of_focus() {
+  local skip="${1:-}" cur
+  cur="$(yabai -m query --windows --window 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null)" || cur=""
+  if [ -n "${skip}" ] && [ "${cur}" = "${skip}" ]; then
+    cur="$(yabai -m query --windows --window recent 2>/dev/null \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null)" || cur=""
+  fi
+  printf '%s' "${cur}"
+}
+
+# presenter_agent_window -- the yabai id of the terminal window this agent
+# runs in: iTerm2, from $ITERM_SESSION_ID ("w0t1p0:<unique id>"). Nothing
+# outside iTerm2.
+presenter_agent_window() {
+  local sid="${ITERM_SESSION_ID:-}"
+  sid="${sid#*:}"
+  [ -n "${sid}" ] || return 0
+  osascript \
+    -e 'on run argv' \
+    -e 'if application "iTerm2" is not running then return ""' \
+    -e 'tell application "iTerm2"' \
+    -e 'repeat with w in windows' \
+    -e 'repeat with t in tabs of w' \
+    -e 'repeat with s in sessions of t' \
+    -e 'if unique id of s is (item 1 of argv) then return id of w' \
+    -e 'end repeat' \
+    -e 'end repeat' \
+    -e 'end repeat' \
+    -e 'end tell' \
+    -e 'return ""' \
+    -e 'end run' "${sid}" 2>/dev/null || true
+}
+
+# presenter_window_space <id> -- the Desktop window <id> is on now.
+presenter_window_space() {
+  [ -n "$1" ] || return 0
+  yabai -m query --windows --window "$1" 2>/dev/null | presenter_py space || true
+}
+
+# presenter_url <url|file> -- a file becomes a file:// URL.
+presenter_url() {
+  if [ -e "$1" ]; then
+    python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())' "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+# `gallery present <url|file>` -- on the Desktop of the agent that runs it
+# (an agent's shell carries $ITERM_SESSION_ID), else the one in view.
+cmd_present_open() {
+  local url space user_space prev pres rc=0
+  url="$(presenter_url "$1")"
+  command -v yabai >/dev/null 2>&1 || { echo "gallery: present needs yabai" >&2; return 1; }
+  user_space="$(presenter_user_space)"
+  [ -n "${user_space}" ] || { echo "gallery: yabai did not report the Desktop in view" >&2; return 1; }
+  space="$(presenter_window_space "$(presenter_agent_window)")"
+  [ -n "${space}" ] || space="${user_space}"
+  presenter_lock || { echo "gallery: presenter busy" >&2; return 1; }
+  prev="$(presenter_window_of_focus)"
+  pres="$(presenter_show "${space}" "${url}")" || rc=1
+  [ "${rc}" = 0 ] && presenter_settle_focus "${pres}" "${space}" "${user_space}" "${prev}"
+  presenter_unlock
+  [ "${rc}" = 0 ] || { echo "gallery: could not show ${url} in the presenter" >&2; return 1; }
+  echo "present: ${url} (window ${pres}, Desktop ${space})"
+}
+
+# `gallery present hint [--before] [<url>]` -- the agent's notes (see the
+# header), from its PreToolUse (--before) and PostToolUse hooks; the hook's
+# JSON comes on stdin. Run from a hook, so silent and always successful.
+cmd_present_hint() {
+  local before=0 parsed tid url win space note
+  if [ "${1:-}" = "--before" ]; then
+    before=1
+    shift
+  fi
+  if [ -t 0 ]; then
+    parsed="$(presenter_py hook "${1:-}" < /dev/null)" || return 0
+  else
+    parsed="$(presenter_py hook "${1:-}")" || return 0
+  fi
+  tid="${parsed%% *}"
+  url="${parsed#* }"
+  if [ "${before}" = 0 ]; then
+    # The url note goes in BEFORE the pending note is withdrawn: a window
+    # arriving in between found neither and went to the wrong Desktop
+    # (2026-11-01). The pending note already knows the Desktop; looking it
+    # up again took two seconds.
+    if [ "${url}" != "-" ]; then
+      note=""
+      [ "${tid}" = "-" ] || note="$(presenter_py pending-get "${PRESENTER_HINT_DIR}" "${tid}")" || note=""
+      win="${note%% *}"
+      space="${note#* }"
+      if [ -z "${note}" ]; then
+        command -v yabai >/dev/null 2>&1 || return 0
+        win="$(presenter_agent_window)"
+        space="$(presenter_window_space "${win}")"
+      fi
+      if [ -n "${space}" ]; then
+        presenter_py hint-put "${PRESENTER_HINT_DIR}" "${url}" "${win}" "${space}" || true
+        presenter_log "hint: ${url} -> Desktop ${space} (agent window ${win})"
+      fi
+    fi
+    [ "${tid}" = "-" ] || presenter_py pending-drop "${PRESENTER_HINT_DIR}" "${tid}" || true
+    return 0
+  fi
+  [ "${tid}" != "-" ] || return 0
+  command -v yabai >/dev/null 2>&1 || return 0
+  win="$(presenter_agent_window)"
+  space="$(presenter_window_space "${win}")"
+  [ -n "${space}" ] || return 0
+  presenter_py pending-put "${PRESENTER_HINT_DIR}" "${tid}" "${win}" "${space}" || true
+  presenter_log "hint: a page from agent window ${win} (Desktop ${space}) is coming (${tid})"
+}
+
+# presenter_note_for <url> -- "window space" from the agent's notes for a new
+# window showing <url> (see the header), or nothing.
+presenter_note_for() {
+  local url="$1" note pending n tries=0
+  if note="$(presenter_py hint-take "${PRESENTER_HINT_DIR}" "${url}")"; then
+    printf '%s' "${note}"
+    return 0
+  fi
+  pending="$(presenter_py pending-list "${PRESENTER_HINT_DIR}")" || pending=""
+  n="$(printf '%s' "${pending}" | grep -c . || true)"
+  [ "${n}" -gt 0 ] || return 0
+  if [ "${n}" -gt 1 ]; then
+    while [ "${tries}" -lt "${PRESENTER_HINT_TRIES}" ]; do
+      if note="$(presenter_py hint-take "${PRESENTER_HINT_DIR}" "${url}")"; then
+        printf '%s' "${note}"
+        return 0
+      fi
+      tries=$((tries + 1))
+      sleep "${PRESENTER_SLEEP}"
+    done
+    pending="$(presenter_py pending-list "${PRESENTER_HINT_DIR}")" || pending=""
+    [ -n "${pending}" ] || return 0
+  fi
+  pending="$(printf '%s\n' "${pending}" | head -n 1)"
+  presenter_py pending-drop "${PRESENTER_HINT_DIR}" "${pending%% *}" || true
+  printf '%s' "${pending#* }"
+}
+
+# `gallery present _adopt <window id>` -- the gallery-presenter signal, on
+# every new Safari window. Silent, and always succeeds: yabai runs it.
+cmd_present_adopt() {
+  local wid="${1:-}" url="" tries=0 space pres hint="" user_space prev
+  case "${wid}" in ''|*[!0-9]*) return 0 ;; esac
+  command -v yabai >/dev/null 2>&1 || return 0
+  presenter_py enabled || return 0
+  # A window from `open <url>` gets its URL a beat after it is created; a
+  # blank window (super+b) never gets one.
+  while :; do
+    url="$(presenter_safari_url "${wid}")" || return 0
+    [ -z "${url}" ] || break
+    tries=$((tries + 1))
+    [ "${tries}" -lt "${PRESENTER_TRIES}" ] || return 0
+    sleep "${PRESENTER_SLEEP}"
+  done
+  presenter_py match "${url}" || return 0
+  # A presenter's own creation fires this too; it needs no note.
+  presenter_py registered "${wid}" && return 0
+  hint="$(presenter_note_for "${url}")" || hint=""
+  presenter_log "window ${wid}: ${url}; agent note: '${hint}'; taking the lock"
+  presenter_lock || { presenter_log "window ${wid}: lock not free, left alone"; return 0; }
+  presenter_log "window ${wid}: lock taken"
+  # A presenter's own creation fires this too.
+  if ! presenter_py registered "${wid}"; then
+    user_space="$(presenter_user_space)"
+    prev="$(presenter_window_of_focus "${wid}")"
+    # The agent window's Desktop now (it may have moved since the note), else
+    # the one noted, else where Safari opened the page.
+    space="$(presenter_window_space "${hint%% *}")"
+    [ -n "${space}" ] || space="${hint#* }"
+    [ -n "${space}" ] || space="$(presenter_window_space "${wid}")"
+    if [ -n "${space}" ] && pres="$(presenter_show "${space}" "${url}")"; then
+      presenter_safari_close "${wid}"
+      presenter_settle_focus "${pres}" "${space}" "${user_space}" "${prev}"
+      presenter_log "window ${wid}: shown in presenter ${pres} on Desktop ${space} (user on ${user_space}); closed"
+    else
+      presenter_log "window ${wid}: could not reach a presenter on Desktop '${space}'; left alone"
+    fi
+  else
+    presenter_log "window ${wid}: is a presenter"
+  fi
+  presenter_unlock
+}
+
+cmd_present() {
+  local sub="${1:-}"
+  case "${sub}" in
+    ''|-h|--help)
+      echo "usage: gallery present <url|file> | hint [--before] [<url>] | on | off | status" >&2
+      [ -n "${sub}" ] || return 1
+      ;;
+    on)
+      presenter_py set-enabled 1
+      echo "presenter: on (agent-opened pages float centred, one window per Desktop)"
+      ;;
+    off)
+      presenter_py set-enabled 0
+      echo "presenter: off (pages open as ordinary Safari windows)"
+      ;;
+    status)
+      yabai -m query --windows 2>/dev/null | presenter_py status
+      ;;
+    _adopt)
+      cmd_present_adopt "${2:-}"
+      ;;
+    hint)
+      shift
+      cmd_present_hint "$@"
+      ;;
+    *)
+      cmd_present_open "${sub}"
+      ;;
+  esac
+}
+
 # --- off / on --------------------------------------------------------------
 # A way to try the Omarchy way of working and step back out of it at will.
 #
@@ -5810,6 +6453,9 @@ case "${command}" in
     ;;
   home)
     cmd_home "$@"
+    ;;
+  present)
+    cmd_present "$@"
     ;;
   ghosts)
     cmd_ghosts "$@"

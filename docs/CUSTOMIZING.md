@@ -1057,6 +1057,67 @@ because a window opened by a keypress could not show a prompt anyway. Choose
 the start directory with that in mind, do not point it at your home folder, and do not set a custom command whose "do not ask" flag you do not
 want.
 
+### Pages an agent opens: the presenter
+
+When an agent shows you a page -- a Claude artifact such as a UI mockup or a
+report -- it arrives as a new Safari window. Instead of joining the tiles, it
+goes to the Desktop's **presenter**: one floating Safari window, centred and
+held above the tiles, like the theme picker. Every further page on that
+Desktop becomes a tab in it, so several artifacts published at once (by one
+session, two, or a background agent) never stack windows on top of each
+other, and one close dismisses them all. Each Desktop has its own presenter.
+
+**Which Desktop: the agent's.** The page opens on the Desktop of the agent
+that published it, next to the conversation that asks about it, not on the
+Desktop you happen to be looking at. If you are on that Desktop, the
+presenter takes keyboard focus (a floating window stays on top only until a
+tile is raised; point back at the terminal and focus follows the pointer
+without raising, so the page stays in view). If you are working elsewhere,
+on the other display, say, the page appears on the agent's Desktop and your
+focus stays where it is. A Desktop not in view gets the page too; it is there
+when you go back. A page nobody announced (a link you clicked) opens on the
+Desktop in view.
+
+The agent announces its pages through two hooks. For Claude Code, in
+`~/.claude/settings.json`:
+
+```json
+"hooks": {
+  "PreToolUse": [{ "matcher": "Artifact|mcp__claude-artifacts__.*", "hooks": [
+    { "type": "command", "timeout": 10,
+      "command": "[ -x \"$HOME/bin/gallery\" ] && \"$HOME/bin/gallery\" present hint --before; exit 0" }]}],
+  "PostToolUse": [{ "matcher": "Artifact|mcp__claude-artifacts__.*", "hooks": [
+    { "type": "command", "timeout": 10,
+      "command": "[ -x \"$HOME/bin/gallery\" ] && \"$HOME/bin/gallery\" present hint; exit 0" }]}]
+}
+```
+
+`present hint --before` says "a page from this agent is coming" (the hook
+runs before the browser opens anything); `present hint` names the page's URL,
+which tells two agents publishing at the same moment apart. Both find the
+agent's window from `$ITERM_SESSION_ID`, so this works for agents running in
+iTerm2; elsewhere pages go to the Desktop in view. Without the hooks the
+presenter still works, on the Desktop in view.
+
+The presenter is always a normal window, even when the Safari window in
+front is a Private Browsing one (which would show the page signed out).
+
+- **Keep a page**: tile its window (super+t). It is an ordinary window from
+  then on, and the next page starts a new presenter.
+- **Open a page there yourself** (from a script or a skill):
+  `gallery present <url|file>`. Run from an agent's shell, it goes to that
+  agent's Desktop.
+- `gallery present status` shows the open presenters; `gallery present off`
+  lets pages open as ordinary windows again, `on` turns it back on.
+- **Which pages**: Claude artifact links (`https://claude.ai/artifact/...`) by
+  default. Put your own list of regular expressions in
+  `~/.config/gallery/state/presenter.json` as `"match": ["^https://...", ...]`.
+
+Safari only: other browsers open a link from another app as a tab in an
+existing window, which the tiler never sees created. The check is a yabai
+signal on new Safari windows (`gallery-presenter` in `yabairc`); what it did
+is logged in `~/Library/Logs/gallery-presenter.log`.
+
 ## Learn sheets
 
 Learn (`super + space`) lists markdown files as a menu and renders the one you

@@ -5,6 +5,26 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.7.0 (2026-11-01)
+
+- New: the presenter. A page an agent opens for you -- a Claude artifact such
+  as a UI mockup -- no longer lands among the tiles as one more Safari
+  window. It floats centred above them, like the theme picker, in one Safari
+  window per Desktop; every further page becomes a tab in that window, so
+  several artifacts published at once never stack windows, and one close
+  dismisses them all. The presenter is always a normal window, so a page no
+  longer opens signed out because a Private Browsing window was in front.
+  The page opens on the Desktop of the agent that published it, next to its
+  conversation, not on the one you are looking at, and your focus is left
+  alone when you are working elsewhere; two agent hooks announce the pages
+  (`gallery present hint`, see docs/CUSTOMIZING.md for Claude Code's).
+  Tile the window (super+t) to keep it. `gallery present <url|file>` sends a
+  page there yourself; `gallery present on|off|status`. Which pages: Claude
+  artifact links by default, your own patterns in `state/presenter.json`.
+  Safari only.
+- Installing this release changes `yabairc` (a new signal), so the installer
+  restarts yabai once, saving and restoring the layout around it.
+
 ## 0.6.3 (2026-10-31)
 
 - Fixed: after a restart the windows were not put back on their Desktops.
