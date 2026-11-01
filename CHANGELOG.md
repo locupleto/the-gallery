@@ -5,6 +5,13 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.8.2 (2026-11-01)
+
+- Fix: the wallpaper picker showed no preview for a left/right pair and
+  Enter did nothing. `gallery bg list` labelled a pair "(+ right)" even
+  when piped, and the picker used that label as the file name. The label
+  now appears only in a terminal; piped output is bare file names again.
+
 ## 0.8.1 (2026-11-01)
 
 - Fix: the Space sync for a left/right pair found nothing on a real Mac and

@@ -56,10 +56,10 @@ touch "${BG}/a.png" "${BG}/b.left.png" "${BG}/b.right.jpg" "${BG}/c.left.png" "$
 # --- list / current / next / prev / set ------------------------------------
 LIST="$(gallery bg list jade)"
 [ "${LIST}" = "a.png
-b.left.png (+ right)
+b.left.png
 c.left.png
 d.png" ] || fail "list: unexpected output: ${LIST}"
-say "list: a pair is one entry; a lone .left is an ordinary image"
+say "list: a pair is one entry (bare names when piped); a lone .left is an ordinary image"
 
 [ "$(gallery bg current jade)" = "a.png" ] || fail "current: expected the first image"
 gallery bg next jade >/dev/null

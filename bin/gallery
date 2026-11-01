@@ -1639,8 +1639,10 @@ cmd_bg_list() {
   while IFS= read -r name; do
     [ -n "${name}" ] || continue
     local label="${name}"
-    # A pair is one entry, shown by its left file.
-    if [ "$(bg_half_side "${name}")" = "left" ] && [ -n "$(bg_pair_partner "${theme}" "${name}")" ]; then
+    # A pair is one entry, shown by its left file. The "(+ right)" hint is
+    # for people only: piped output stays bare file names, which the
+    # gallery.backgrounds picker passes straight to --preview and bg set.
+    if [ -t 1 ] && [ "$(bg_half_side "${name}")" = "left" ] && [ -n "$(bg_pair_partner "${theme}" "${name}")" ]; then
       label="${name} (+ right)"
     fi
     if [ "${name}" = "${active}" ] && [ -t 1 ]; then
