@@ -59,6 +59,7 @@ esac
 FAKE
 
 # osascript: tell the scripts apart by their text; argv follows the -e pairs.
+# A presenter's tabs (the URL listing) come from $TABS, one per line.
 cat > "${FAKE_BIN}/osascript" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -67,6 +68,8 @@ while [ $# -gt 0 ]; do
   if [ "$1" = "-e" ]; then script="${script}$2"$'\n'; shift 2; else args+=("$1"); shift; fi
 done
 case "${script}" in
+  *"set out to out"*)    printf '%b' "${TABS:-}" ;;
+  *"tab ((item 2"*)      echo "osascript select ${args[*]}" >> "$LOG" ;;
   *"make new document"*) echo "osascript new ${args[*]}" >> "$LOG"; echo "${NEW_ID}" ;;
   *"make new tab"*)      echo "osascript show ${args[*]}" >> "$LOG" ;;
   *"close window"*)      echo "osascript close ${args[*]}" >> "$LOG" ;;
@@ -384,5 +387,31 @@ printf '{"tool_use_id": "toolu_F", "tool_response": {"url": "https://claude.ai/a
 grep -q '"space": 8' "${HINTS}"/*.json || fail "race: url note lacks the pending note's Desktop"
 [ -z "$(ls "${HINTS}/pending")" ] || fail "race: pending note not withdrawn"
 say "ok: the url note takes the pending note's Desktop, then the pending note goes"
+
+# --- 17. the page already open: matched without its #fragment, reloaded ----
+# A uhf deck keeps its slide in the fragment, and the server prints its
+# address without the trailing slash.
+windows reload <<'EOF2'
+[
+  {"id": 50,  "app": "iTerm2", "space": 4, "is-floating": false, "has-focus": true},
+  {"id": 910, "app": "Safari", "space": 4, "is-floating": true,  "has-focus": false}
+]
+EOF2
+python3 - "${STATE}" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["windows"] = [910]
+json.dump(d, open(sys.argv[1], "w"))
+PY
+TABS='https://claude.ai/artifact/X\nhttp://localhost:3004/#slide-5\n'
+TABS="${TABS}" SPACE=4 run present --reload "http://localhost:3004" >/dev/null
+logged "osascript select 910 2 1" "reload"
+not_logged "osascript show" "reload"
+TABS="${TABS}" SPACE=4 run present "http://localhost:3004/" >/dev/null
+logged "osascript select 910 2 0" "bring forward"
+TABS="${TABS}" SPACE=4 run present "http://localhost:3004/?film=1" >/dev/null
+logged "osascript show 910 http://localhost:3004/?film=1" "other query"
+not_logged "osascript select" "other query"
+run present --reload >/dev/null 2>&1 && fail "present --reload without a url must fail"
+say "ok: an open page is found despite #slide-N and reloaded in place with --reload"
 
 say "all presenter tests passed"

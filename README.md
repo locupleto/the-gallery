@@ -420,7 +420,7 @@ gallery borders status | width <n> | bright on|off|toggle |
 gallery glass [status] | set <transparency 0-0.9> [<blur 0-64>] | default |
 gallery home show | save [--roam A,B] [--dry-run] | apply |
 gallery ghosts [list] | fix [OWNER|ID] | forget |
-gallery present <url|file> | on | off | status |
+gallery present [--reload] <url|file> | on | off | status |
 gallery agent [open [<name>]] | inline [<name>] | status | list | set <name> [--command "<line>"] |
               add <name> --command "<line>" | remove <name> | dir [<path>|--clear] |
 gallery reload | log | doctor | install

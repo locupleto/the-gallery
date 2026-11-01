@@ -1106,7 +1106,13 @@ front is a Private Browsing one (which would show the page signed out).
   then on, and the next page starts a new presenter.
 - **Open a page there yourself** (from a script or a skill):
   `gallery present <url|file>`. Run from an agent's shell, it goes to that
-  agent's Desktop.
+  agent's Desktop. A page already open there is brought forward rather than
+  opened twice; the match ignores the `#...` part and a trailing slash, so a
+  deck that keeps its current slide in the address
+  (`localhost:3004/#slide-5`) is still the same page.
+- **A dev server restarted after an edit**: `gallery present --reload <url>`
+  reloads the open tab (on its current `#slide`) instead of adding one.
+  urban-hyperframes' `uhf present` does this.
 - `gallery present status` shows the open presenters; `gallery present off`
   lets pages open as ordinary windows again, `on` turns it back on.
 - **Which pages**: Claude artifact links (`https://claude.ai/artifact/...`) by

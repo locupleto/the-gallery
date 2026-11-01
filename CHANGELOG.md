@@ -5,6 +5,16 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.7.1 (2026-11-01)
+
+- `gallery present --reload <url>` reloads the page if it is already open in
+  the presenter (a dev server restarted after an edit) instead of adding a
+  tab. A page counts as already open whatever its `#...` part, so a slide
+  deck that keeps its current slide in the address is found, and keeps that
+  slide when reloaded. urban-hyperframes' `uhf present` uses it: restarting
+  the presenter after every edit no longer leaves a new Safari window each
+  time.
+
 ## 0.7.0 (2026-11-01)
 
 - New: the presenter. A page an agent opens for you -- a Claude artifact such

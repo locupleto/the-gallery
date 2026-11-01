@@ -5484,25 +5484,59 @@ presenter_safari_url() {
     -e 'end run' "$1" 2>/dev/null
 }
 
-# presenter_safari_show <id> <url> -- bring <url> up in window <id>: its tab
-# if one already shows it (a page opened twice), else a new tab.
+# presenter_safari_show <id> <url> [reload] -- bring <url> up in window <id>:
+# the tab already showing that page if there is one, else a new tab. "That
+# page" ignores the #fragment and a bare trailing slash: a uhf deck keeps its
+# current slide in the fragment (localhost:3004/#slide-5 is the deck at
+# localhost:3004), and the address a server prints may lack the slash. With
+# reload (1), that tab is reloaded: AppleScript has no reload, but setting a
+# tab to the URL it already shows makes Safari fetch it again, keeping the
+# fragment (a fragment-only change would not; 2026-11-01).
 presenter_safari_show() {
-  osascript \
+  local wid="$1" url="$2" reload="${3:-0}" urls idx
+  urls="$(osascript \
     -e 'on run argv' \
-    -e 'set u to item 2 of argv' \
+    -e 'set out to ""' \
     -e 'tell application "Safari"' \
-    -e 'set w to window id ((item 1 of argv) as integer)' \
-    -e 'repeat with t in tabs of w' \
-    -e 'if URL of t is u then' \
-    -e 'set current tab of w to t' \
-    -e 'return "existing"' \
-    -e 'end if' \
+    -e 'repeat with t in tabs of window id ((item 1 of argv) as integer)' \
+    -e 'set u to URL of t' \
+    -e 'if u is missing value then set u to ""' \
+    -e 'set out to out & u & linefeed' \
     -e 'end repeat' \
-    -e 'set t to make new tab at end of tabs of w with properties {URL:u}' \
-    -e 'set current tab of w to t' \
-    -e 'return "new"' \
     -e 'end tell' \
-    -e 'end run' "$1" "$2" >/dev/null 2>&1
+    -e 'return out' \
+    -e 'end run' "${wid}" 2>/dev/null)" || return 1
+  idx="$(printf '%s' "${urls}" | python3 -c '
+import sys, urllib.parse
+def same(u):
+    p = urllib.parse.urlsplit(u.strip())
+    return (p.scheme, p.netloc, p.path.rstrip("/"), p.query)
+want = same(sys.argv[1])
+for i, u in enumerate(sys.stdin.read().split("\n"), 1):
+    if u.strip() and same(u) == want:
+        print(i)
+        break
+' "${url}")" || idx=""
+  if [ -n "${idx}" ]; then
+    osascript \
+      -e 'on run argv' \
+      -e 'tell application "Safari"' \
+      -e 'set w to window id ((item 1 of argv) as integer)' \
+      -e 'set t to tab ((item 2 of argv) as integer) of w' \
+      -e 'set current tab of w to t' \
+      -e 'if (item 3 of argv) is "1" then set URL of t to (URL of t)' \
+      -e 'end tell' \
+      -e 'end run' "${wid}" "${idx}" "${reload}" >/dev/null 2>&1
+  else
+    osascript \
+      -e 'on run argv' \
+      -e 'tell application "Safari"' \
+      -e 'set w to window id ((item 1 of argv) as integer)' \
+      -e 'set t to make new tab at end of tabs of w with properties {URL:(item 2 of argv)}' \
+      -e 'set current tab of w to t' \
+      -e 'end tell' \
+      -e 'end run' "${wid}" "${url}" >/dev/null 2>&1
+  fi
 }
 
 # presenter_safari_new <url> -- a new (never private) Safari window on <url>;
@@ -5542,15 +5576,15 @@ presenter_float() {
   yabai -m window "${wid}" --grid "${PRESENTER_GRID}" >/dev/null 2>&1 || true
 }
 
-# presenter_show <space index> <url> -- (lock held) put <url> in that
+# presenter_show <space index> <url> [reload] -- (lock held) put <url> in that
 # Desktop's presenter, making the presenter first if there is none (Safari
 # makes it on the Desktop in view; it is moved). Focus is the caller's
 # business. Prints the presenter's id.
 presenter_show() {
-  local space="$1" url="$2" pres at
+  local space="$1" url="$2" reload="${3:-0}" pres at
   pres="$(yabai -m query --windows 2>/dev/null | presenter_py find "${space}")" || pres=""
   if [ -n "${pres}" ]; then
-    presenter_safari_show "${pres}" "${url}" || return 1
+    presenter_safari_show "${pres}" "${url}" "${reload}" || return 1
   else
     pres="$(presenter_safari_new "${url}")" || return 1
     presenter_log "new presenter window ${pres}"
@@ -5639,10 +5673,17 @@ presenter_url() {
   fi
 }
 
-# `gallery present <url|file>` -- on the Desktop of the agent that runs it
-# (an agent's shell carries $ITERM_SESSION_ID), else the one in view.
+# `gallery present [--reload] <url|file>` -- on the Desktop of the agent that
+# runs it (an agent's shell carries $ITERM_SESSION_ID), else the one in view.
+# --reload: a page already open there is reloaded (a dev server restarted
+# after an edit), not just brought forward.
 cmd_present_open() {
-  local url space user_space prev pres rc=0
+  local url space user_space prev pres rc=0 reload=0
+  if [ "${1:-}" = "--reload" ]; then
+    reload=1
+    shift
+  fi
+  [ -n "${1:-}" ] || { echo "usage: gallery present [--reload] <url|file>" >&2; return 1; }
   url="$(presenter_url "$1")"
   command -v yabai >/dev/null 2>&1 || { echo "gallery: present needs yabai" >&2; return 1; }
   user_space="$(presenter_user_space)"
@@ -5651,7 +5692,7 @@ cmd_present_open() {
   [ -n "${space}" ] || space="${user_space}"
   presenter_lock || { echo "gallery: presenter busy" >&2; return 1; }
   prev="$(presenter_window_of_focus)"
-  pres="$(presenter_show "${space}" "${url}")" || rc=1
+  pres="$(presenter_show "${space}" "${url}" "${reload}")" || rc=1
   [ "${rc}" = 0 ] && presenter_settle_focus "${pres}" "${space}" "${user_space}" "${prev}"
   presenter_unlock
   [ "${rc}" = 0 ] || { echo "gallery: could not show ${url} in the presenter" >&2; return 1; }
@@ -5783,7 +5824,7 @@ cmd_present() {
   local sub="${1:-}"
   case "${sub}" in
     ''|-h|--help)
-      echo "usage: gallery present <url|file> | hint [--before] [<url>] | on | off | status" >&2
+      echo "usage: gallery present [--reload] <url|file> | hint [--before] [<url>] | on | off | status" >&2
       [ -n "${sub}" ] || return 1
       ;;
     on)
@@ -5805,7 +5846,7 @@ cmd_present() {
       cmd_present_hint "$@"
       ;;
     *)
-      cmd_present_open "${sub}"
+      cmd_present_open "$@"
       ;;
   esac
 }

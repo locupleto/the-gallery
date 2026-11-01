@@ -95,9 +95,10 @@ https://github.com/locupleto/the-gallery/tree/main/docs.
   PUBLISHING AGENT's Desktop (Claude Code Pre/PostToolUse hooks run
   `gallery present hint [--before]`; the agent is found via
   $ITERM_SESSION_ID) and takes focus only when the user is on that Desktop.
-  `gallery present <url|file>` shows a page there, on the calling agent's
-  Desktop (use it to show the user a local HTML file); `present
-  status|on|off`. Tiling the window (super+t) keeps it as an ordinary window.
+  `gallery present [--reload] <url|file>` shows a page there, on the calling
+  agent's Desktop (use it to show the user a local HTML file or a video; an
+  open tab is reused, ignoring `#...`; --reload refreshes it after a server
+  restart); `present status|on|off`. Never `open` a page for the user. Tiling the window (super+t) keeps it as an ordinary window.
   Safari only. Log: `~/Library/Logs/gallery-presenter.log`.
 - Logs: `gallery log` (Hammerspoon side), `~/.config/gallery/gallery-home.log`
   (the after-login home pass), `~/.config/gallery/gallery-ghosts.log`
