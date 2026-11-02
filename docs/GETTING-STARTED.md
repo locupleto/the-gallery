@@ -112,8 +112,9 @@ space the focused one had.
    The first press asks for permission to control System Events: allow it.
 8. **Change the look.** super + shift + ctrl + space opens the theme picker:
    Enter applies a theme to the terminals, the outline, the wallpaper, btop
-   and superfile at once. super + shift + ctrl + b opens the background
-   picker, and super + ctrl + space switches to the next wallpaper of the
+   and superfile at once, then lists the theme's wallpapers: Enter there
+   applies one and stays open so you can try the next. super + shift + ctrl + b
+   opens the same background picker, and super + ctrl + space switches to the next wallpaper of the
    current theme. Wallpapers are not in the repository, see
    [Wallpapers](CUSTOMIZING.md#wallpapers).
 9. **Gallery plugins.** super + shift + 0 opens the System Monitor (btop),

@@ -676,7 +676,12 @@ whenever you switch to that theme. With nothing chosen the hook uses
 `backgrounds/` leaves the desktop picture alone.
 
 `super + ctrl + space` is `gallery bg next`; `super + shift + ctrl + b` opens
-the background picker. `bg restore` brings back the wallpaper store that was
+the background picker. Its preview shows a left/right pair as the whole
+panorama, both halves side by side with a black strip for the bezels (drawn
+once and kept in `~/.config/gallery/cache/pair-previews`). Enter applies the
+highlighted wallpaper and leaves the picker open, so you can try several in
+a row; Esc closes it, or goes back to the theme picker if you came from
+there. `bg restore` brings back the wallpaper store that was
 saved the first time a background was applied, and the uninstaller does the
 same unless you pass `--keep-wallpaper`. How the picture reaches every Space,
 and the `GALLERY_WALLPAPER_ALL_SPACES` switch, are in

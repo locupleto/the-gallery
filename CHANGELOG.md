@@ -5,6 +5,17 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.9.0 (2026-11-02)
+
+- The wallpaper picker previews a left/right pair as the whole panorama:
+  both halves side by side with a black strip for the bezels, instead of the
+  left half alone. The stitched preview is drawn once (AppKit, no extra
+  install) and cached in `~/.config/gallery/cache/pair-previews`; a changed
+  half draws a new one. The preview label reads `<stem>  pair, 2 x WxH`.
+- Enter in the wallpaper picker now applies the wallpaper and keeps the
+  picker open, so several can be tried in a row; the "(current)" mark moves
+  and the cursor stays put. Esc closes it, or returns to the theme picker.
+
 ## 0.8.2 (2026-11-01)
 
 - Fix: the wallpaper picker showed no preview for a left/right pair and

@@ -178,4 +178,6 @@ say "running tests/offon_test.sh"; "${SCRIPT_DIR}/offon_test.sh" || fail "offon_
 
 say "running tests/terminal_test.sh"; "${SCRIPT_DIR}/terminal_test.sh" || fail "terminal_test.sh failed"
 
+say "running tests/backgrounds_picker_test.sh"; "${SCRIPT_DIR}/backgrounds_picker_test.sh" || fail "backgrounds_picker_test.sh failed"
+
 say "all checks passed"

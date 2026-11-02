@@ -69,16 +69,93 @@ image_dims() {
   [[ -n "$width" && -n "$height" ]] && printf '%s %s\n' "$width" "$height"
 }
 
+# pair_partner FILE -- for "<stem>.left.<ext>", print the matching
+# "<stem>.right.<ext>" path when that file exists (a left/right pair, one
+# wallpaper across two displays); print nothing otherwise. The list only
+# ever shows the left file of a pair (`gallery bg list`), so the left name
+# is the only one that needs resolving.
+pair_partner() {
+  local file="$1" base dir right
+  base="$(basename "$file")"
+  dir="$(dirname "$file")"
+  case "$base" in
+    *.left.*) right="${dir}/${base%.left.*}.right.${base##*.left.}" ;;
+    *) return 0 ;;
+  esac
+  [[ -r "$right" ]] && printf '%s\n' "$right"
+  return 0
+}
+
+# PAIR_GAP_PERMILLE -- the black strip between the halves of a stitched
+# preview, standing in for the two displays' bezels (per mille of one half's
+# width).
+PAIR_GAP_PERMILLE=12
+
+# stitch_pair LEFT RIGHT -- print the path of one image with LEFT and RIGHT
+# side by side, as the two displays show them, so the preview shows the
+# whole panorama instead of its left half. Drawn once by AppKit (JXA, on
+# every Mac, no extra install) at 1600 px per half and cached under
+# ~/.config/gallery/cache/pair-previews (inside the Gallery's own folder,
+# so an uninstall takes it along), keyed by both paths and their
+# modification times, so a replaced half draws a new preview. Prints
+# nothing when drawing fails; the caller then shows the left half alone.
+stitch_pair() {
+  local left="$1" right="$2" cache key out
+  cache="${GALLERY_CACHE_DIR:-${CONFIG_HOME}/gallery/cache}/pair-previews"
+  key="$(printf '%s|%s|%s|%s' "$left" "$right" \
+    "$(stat -f %m "$left" 2>/dev/null)" "$(stat -f %m "$right" 2>/dev/null)" | md5 -q 2>/dev/null)"
+  [[ -n "$key" ]] || return 0
+  out="${cache}/${key}.jpg"
+  if [[ ! -s "$out" ]]; then
+    mkdir -p "$cache" 2>/dev/null || return 0
+    osascript -l JavaScript - "$left" "$right" "${out}.tmp" 1600 "$PAIR_GAP_PERMILLE" >/dev/null 2>&1 <<'JXA' || return 0
+ObjC.import('AppKit');
+function run(argv) {
+  const [l, r, out, hw, gapPm] = argv;
+  const L = $.NSImage.alloc.initWithContentsOfFile(l);
+  const R = $.NSImage.alloc.initWithContentsOfFile(r);
+  if (L.isNil() || R.isNil()) throw new Error('unreadable image');
+  const w = parseInt(hw, 10);
+  const h = Math.round(w * L.size.height / L.size.width);
+  const gap = Math.max(2, Math.round(w * parseInt(gapPm, 10) / 1000));
+  const W = 2 * w + gap;
+  const rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
+    null, W, h, 8, 4, true, false, 'NSDeviceRGBColorSpace', 0, 0);
+  $.NSGraphicsContext.saveGraphicsState;
+  $.NSGraphicsContext.setCurrentContext($.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep));
+  $.NSColor.blackColor.setFill;
+  $.NSRectFill($.NSMakeRect(0, 0, W, h));
+  // 1 = NSCompositingOperationCopy
+  L.drawInRectFromRectOperationFraction($.NSMakeRect(0, 0, w, h), $.NSZeroRect, 1, 1.0);
+  R.drawInRectFromRectOperationFraction($.NSMakeRect(w + gap, 0, w, h), $.NSZeroRect, 1, 1.0);
+  $.NSGraphicsContext.restoreGraphicsState;
+  // 3 = NSBitmapImageFileTypeJPEG
+  const data = rep.representationUsingTypeProperties(3, $({ NSImageCompressionFactor: 0.85 }));
+  if (!data.writeToFileAtomically(out, true)) throw new Error('write failed');
+}
+JXA
+    mv -f "${out}.tmp" "$out" 2>/dev/null || return 0
+  fi
+  printf '%s\n' "$out"
+}
+
 # print_dims NAME_OR_PATH -- "NAME  WxH" (or "NAME  ?x?" if dims lookup
 # fails), for fzf's `transform-preview-label` bind (see fzf_args below).
-# Deliberately kept separate from render_preview: this is the ONLY thing
-# that ends up as fzf's preview-window border label, never mixed into the
-# preview command's own stdout (see render_preview's comment for why).
+# A left/right pair reads "STEM  pair, 2 x WxH": one wallpaper, two
+# displays. Deliberately kept separate from render_preview: this is the
+# ONLY thing that ends up as fzf's preview-window border label, never mixed
+# into the preview command's own stdout (see render_preview's comment for
+# why).
 print_dims() {
-  local arg="$1" file dims
+  local arg="$1" file dims base
   file="$(resolve_bg "$arg")"
   dims="$(image_dims "$file")"
-  printf '%s  %sx%s\n' "$(basename "$file")" "${dims%% *}" "${dims##* }"
+  base="$(basename "$file")"
+  if [[ -n "$(pair_partner "$file")" ]]; then
+    printf '%s  pair, 2 x %sx%s\n' "${base%.left.*}" "${dims%% *}" "${dims##* }"
+  else
+    printf '%s  %sx%s\n' "$base" "${dims%% *}" "${dims##* }"
+  fi
 }
 
 # render_preview NAME_OR_PATH -- the image card fzf's --preview shells out
@@ -117,6 +194,15 @@ render_preview() {
   if [[ ! -r "$file" ]]; then
     printf '(not readable: %s)\n' "$file"
     return 0
+  fi
+
+  # A left/right pair previews as the whole panorama (both halves, a bezel
+  # strip between), not just the left file the list names.
+  local right stitched
+  right="$(pair_partner "$file")"
+  if [[ -n "$right" ]]; then
+    stitched="$(stitch_pair "$file" "$right")"
+    [[ -n "$stitched" ]] && file="$stitched"
   fi
 
   dims="$(image_dims "$file")"
@@ -302,6 +388,9 @@ else
   header="Theme: ${theme:-(unknown)} -- Enter applies, Esc closes"
 fi
 
+gallery_q="$(printf '%q' "$GALLERY_BIN")"
+header_q="$(printf '%q' "$header")"
+
 fzf_args=(
   --delimiter=$'\t'
   --with-nth=2
@@ -315,15 +404,25 @@ fzf_args=(
   --preview-window=right:60%,border-rounded
   --preview-label=' Background '
   --bind "focus:transform-preview-label(${self_q} --dims {1})"
+  # Enter applies the highlighted wallpaper and keeps the picker open, so
+  # several can be tried in a row: set it (execute-silent waits for the
+  # wallpaper hook), say which one is applied under the header, and reload
+  # the list to move "(current)". Esc leaves (or goes back to the themes).
+  # The cursor keeps its row across the reload (same order, same length).
+  # Do not add --id-nth + --track to "follow" it: on fzf 0.74 that pair
+  # drops every action after the reload and then ignores keys.
+  --bind "enter:execute-silent(${gallery_q} bg set {1})+transform-header(printf '%s\\nApplied: %s' ${header_q} {1})+reload(${self_q} --list)"
 )
 # `load`, not `start`: the list is streamed in, so pos() on `start` runs
 # against an empty list and does nothing. The initial preview-label also
 # has to be set here (chained onto the same bind) since `focus` doesn't
 # fire for the row fzf highlights by default before any navigation.
+# unbind(load) because Enter's reload fires `load` again, and pos() would
+# then pull the cursor back to the wallpaper that was current at start.
 if [[ -n "$pos" ]]; then
-  fzf_args+=(--bind "load:pos(${pos})+transform-preview-label(${self_q} --dims {1})")
+  fzf_args+=(--bind "load:pos(${pos})+transform-preview-label(${self_q} --dims {1})+unbind(load)")
 else
-  fzf_args+=(--bind "load:transform-preview-label(${self_q} --dims {1})")
+  fzf_args+=(--bind "load:transform-preview-label(${self_q} --dims {1})+unbind(load)")
 fi
 if [[ "$from_themes" -eq 1 ]]; then
   # Only when we were handed off from the theme picker: Esc becomes it
@@ -332,19 +431,8 @@ if [[ "$from_themes" -eq 1 ]]; then
   fzf_args+=(--bind "esc:become(${themes_q})")
 fi
 
-selected=""
-status=0
-selected=$(printf '%s\n' "$lines" | fzf "${fzf_args[@]}") || status=$?
-
-if [[ -z "$selected" ]]; then
-  # Esc / no selection (only reachable here when NOT --from-themes, since
-  # that case rebinds esc to become() above instead of falling through):
-  # close quietly.
-  exit 0
-fi
-
-name=$(cut -f1 <<<"$selected")
-
-"${GALLERY_BIN}" bg set "$name"
+# Enter no longer ends fzf (see its bind above), so this returns only on
+# Esc when launched directly: close quietly.
+printf '%s\n' "$lines" | fzf "${fzf_args[@]}" >/dev/null || true
 
 exit 0
