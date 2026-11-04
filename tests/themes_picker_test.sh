@@ -195,11 +195,17 @@ picker --offload-key epsilon >/dev/null
 picker --swatches gamma >/dev/null   # the cursor moved: cancels
 [ ! -f "${GALLERY_THEMES_STATE}/pending" ] || fail "moving away must cancel"
 picker --offload-key epsilon >/dev/null
-[[ "$(picker --offload-key epsilon)" == "reload-sync("*"--list)"* ]] || fail "ctrl-x 2: reloads the list"
+out="$(picker --offload-key epsilon)"
+[[ "${out}" == "reload-sync("*"--list)"* ]] || fail "ctrl-x 2: reloads the list"
+# No {1} in the outcome: fzf drops an action whose placeholder is empty, and
+# the list may be empty after the offload (the query matched only that theme).
+[[ "${out}" != *"{1}"* ]] || fail "ctrl-x 2: the outcome must show even with an empty list"
+picker --header-only | sed 's/\x1b\[[0-9;]*m//g' | head -1 | grep -q '^epsilon offloaded, ' \
+  || fail "ctrl-x 2: --header-only shows the outcome"
 [ ! -e "${T}/epsilon" ] || fail "ctrl-x 2: offloaded"
 picker --swatches gamma | sed 's/\x1b\[[0-9;]*m//g' | head -1 | grep -q '^epsilon offloaded, ' \
   || fail "ctrl-x 2: outcome replaces the Current line"
-picker --offload-key alpha >/dev/null
+[[ "$(picker --offload-key alpha)" != *"{1}"* ]] || fail "ctrl-x refused: the reason must show even with an empty list"
 picker --swatches alpha | sed 's/\x1b\[[0-9;]*m//g' | head -1 | grep -q 'current theme' \
   || fail "ctrl-x on the current theme: reason shown"
 [ ! -f "${GALLERY_THEMES_STATE}/pending" ] || fail "ctrl-x on the current theme: nothing pending"

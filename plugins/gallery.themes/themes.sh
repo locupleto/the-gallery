@@ -360,9 +360,10 @@ offload_key() {
     out="$("${GALLERY_BIN}" theme offload "$name" 2>&1)" || rc=$?
     out="${out#gallery: }"
     if [[ "$rc" -eq 0 ]]; then set_message 32 "$out"; else set_message 31 "$out"; fi
-    # reload-sync, so {1} below is the row the cursor lands on afterwards.
-    printf 'reload-sync(%s --list)+transform-header(%s --swatches {1})+transform-preview-label(%s --dims {1})+refresh-preview\n' \
-      "$self_q" "$self_q" "$self_q"
+    # The outcome goes up without {1}: fzf skips an action whose placeholder
+    # is empty, and after an offload the list may well be empty (the query
+    # matched only the theme just removed). The next focus redraws the grid.
+    printf 'reload-sync(%s --list)+transform-header(%s --header-only)+refresh-preview\n' "$self_q" "$self_q"
     return 0
   fi
   out="$("${GALLERY_BIN}" theme offload --check "$name" 2>&1)" || rc=$?
@@ -371,6 +372,8 @@ offload_key() {
   else
     rm -f "$(state_file pending)"
     set_message 31 "${out#gallery: }"
+    printf 'transform-header(%s --header-only)\n' "$self_q"
+    return 0
   fi
   printf 'transform-header(%s --swatches {1})\n' "$self_q"
 }
@@ -631,6 +634,11 @@ case "${1:-}" in
     offload_header "$name" || static_header
     printf '\n'
     render_swatches "$name"
+    exit 0
+    ;;
+  --header-only)
+    # The key lines alone (with any outcome message), no palette grid.
+    static_header
     exit 0
     ;;
   --offload-key)

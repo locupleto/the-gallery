@@ -5,6 +5,14 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.10.1 (2026-11-04)
+
+- Fix: after the second `ctrl-x` in the theme picker, the outcome line
+  ("<theme> offloaded, ... freed") did not appear when the list was left
+  empty, as it is when the search matched only the theme just offloaded:
+  fzf skips a header refresh whose `{1}` is empty. The outcome (and a
+  refusal's reason) now goes up without it.
+
 ## 0.10.0 (2026-11-04)
 
 - Offload a theme: `gallery theme offload <name>`, or `ctrl-x` twice in the
