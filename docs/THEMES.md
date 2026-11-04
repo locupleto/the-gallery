@@ -324,7 +324,7 @@ at a different hooks directory (the tests use it).
 ## Offloading a theme
 
 A theme's wallpapers can take hundreds of megabytes. `gallery theme offload
-<name>` (or `ctrl-x` twice in the theme picker) removes a theme from this Mac
+<name>` (or `ctrl-x` in the theme picker, at once, with no confirmation) removes a theme from this Mac
 when a copy of it is kept somewhere else, and `gallery theme restore <name>`
 brings it back. `--check` reports what would be freed (in KB) and where the
 copy is, without removing anything. The current theme is refused, and so is

@@ -28,10 +28,10 @@
 #                              `transform-preview-label` shells out to, to
 #                              caption the preview pane's border
 #   themes.sh --offload-key NAME
-#                              what ctrl-x does on NAME (prints fzf actions):
-#                              the first press asks, the second offloads
-#   themes.sh --esc NAME       what Esc does: cancels a pending offload,
-#                              else closes the picker (prints fzf actions)
+#                              what ctrl-x does on NAME: offloads it, then
+#                              prints the fzf actions that show the outcome
+#   themes.sh --header-only    the header's key lines (and the last outcome)
+#                              without the palette grid
 #   themes.sh --warm-previews  make the downscaled preview copy of every
 #                              theme's active wallpaper and exit (the picker
 #                              runs this in the background when it opens)
@@ -53,12 +53,12 @@
 #                              mixed toward the theme's bright_foreground --
 #                              see `gallery borders bright`; same header line
 #   ctrl-x                     offload the highlighted theme from this Mac
-#                              (`gallery theme offload`): the first press
-#                              shows what it frees and where the copy is
-#                              kept, a second press does it, Esc or moving
-#                              to another theme cancels. The current theme
-#                              and a theme with no copy elsewhere are
-#                              refused, with the reason in the header
+#                              (`gallery theme offload`) at once, no
+#                              confirmation; the outcome replaces the
+#                              header's first line. The current theme and a
+#                              theme with no copy elsewhere are refused, with
+#                              the reason there; `gallery theme restore`
+#                              undoes an offload
 #   ctrl-u                     toggle whether the Übersicht crystal widgets
 #                              follow the theme or keep their own shipped
 #                              colours -- see `gallery widgets`. The key and
@@ -330,18 +330,9 @@ native_label() {
 
 # --- offloading (ctrl-x) ------------------------------------------------------
 # One picker's state lives in GALLERY_THEMES_STATE, a temp dir made at
-# startup and inherited by every fzf subprocess: `pending` holds the theme
-# awaiting its second ctrl-x ("NAME<TAB>KB<TAB>WHERE"), `message` the last
-# outcome, shown in place of the "Current:" line until the next ctrl-x.
+# startup and inherited by every fzf subprocess: `message` holds the last
+# offload's outcome, shown in place of the "Current:" line until the next.
 state_file() { printf '%s/%s' "${GALLERY_THEMES_STATE:-/nonexistent}" "$1"; }
-
-# human_kb KB -- "215 MB", "1.2 GB", "40 KB" (as bin/gallery prints it).
-human_kb() {
-  awk -v k="$1" 'BEGIN {
-    if (k >= 1048576) printf "%.1f GB", k / 1048576;
-    else if (k >= 1024) printf "%d MB", k / 1024 + 0.5;
-    else printf "%d KB", k }'
-}
 
 # set_message COLOUR TEXT -- the outcome line (31 red, 32 green), first line only.
 set_message() {
@@ -349,61 +340,24 @@ set_message() {
   printf '\033[%sm%s\033[0m' "$1" "${2%%$'\n'*}" > "$(state_file message)"
 }
 
-# offload_key NAME -- ctrl-x. Prints the fzf actions to run next.
+# offload_key NAME -- ctrl-x: offload NAME now (Urban's call: no
+# confirmation; the refusals in `gallery theme offload` are the safety net,
+# and `gallery theme restore` undoes it). Prints the fzf actions to run next.
 offload_key() {
-  local name="$1" pending="" out rc=0 self_q
+  local name="$1" out rc=0 self_q
   self_q="$(printf '%q' "$SELF")"
-  rm -f "$(state_file message)"   # a new ctrl-x replaces the last outcome
-  [[ -f "$(state_file pending)" ]] && pending="$(cut -f1 "$(state_file pending)")"
-  if [[ "$pending" == "$name" ]]; then
-    rm -f "$(state_file pending)"
-    out="$("${GALLERY_BIN}" theme offload "$name" 2>&1)" || rc=$?
-    out="${out#gallery: }"
-    if [[ "$rc" -eq 0 ]]; then set_message 32 "$out"; else set_message 31 "$out"; fi
+  out="$("${GALLERY_BIN}" theme offload "$name" 2>&1)" || rc=$?
+  out="${out#gallery: }"
+  if [[ "$rc" -eq 0 ]]; then
+    set_message 32 "$out"
     # The outcome goes up without {1}: fzf skips an action whose placeholder
     # is empty, and after an offload the list may well be empty (the query
     # matched only the theme just removed). The next focus redraws the grid.
     printf 'reload-sync(%s --list)+transform-header(%s --header-only)+refresh-preview\n' "$self_q" "$self_q"
-    return 0
-  fi
-  out="$("${GALLERY_BIN}" theme offload --check "$name" 2>&1)" || rc=$?
-  if [[ "$rc" -eq 0 ]]; then
-    printf '%s\t%s\n' "$name" "$out" > "$(state_file pending)"
   else
-    rm -f "$(state_file pending)"
-    set_message 31 "${out#gallery: }"
+    set_message 31 "$out"
     printf 'transform-header(%s --header-only)\n' "$self_q"
-    return 0
   fi
-  printf 'transform-header(%s --swatches {1})\n' "$self_q"
-}
-
-# esc_key NAME -- Esc cancels a pending offload; otherwise it closes.
-esc_key() {
-  if [[ -f "$(state_file pending)" ]]; then
-    rm -f "$(state_file pending)"
-    printf 'transform-header(%s --swatches {1})\n' "$(printf '%q' "$SELF")"
-  else
-    printf 'abort\n'
-  fi
-}
-
-# offload_header NAME -- the confirmation that replaces the header's key
-# lines while NAME awaits its second ctrl-x; prints nothing (and drops the
-# pending offload) when the highlighted theme is another one, so moving
-# away cancels. Returns 0 when it printed the confirmation.
-offload_header() {
-  local name="$1" p_name p_kb p_where
-  [[ -f "$(state_file pending)" ]] || return 1
-  IFS=$'\t' read -r p_name p_kb p_where < "$(state_file pending)"
-  if [[ "$p_name" != "$name" ]]; then
-    rm -f "$(state_file pending)"
-    return 1
-  fi
-  printf '\033[31mOffload %s from this Mac?\033[0m\n' "$name"
-  printf '\033[31m%s freed. Kept: %s\033[0m\n' "$(human_kb "$p_kb")" "$p_where"
-  printf '\033[33mctrl-x\033[0m again offloads   \033[33mEsc\033[0m keeps it\n'
-  return 0
 }
 
 # static_header -- the header's fixed first three lines: which theme is
@@ -631,7 +585,7 @@ case "${1:-}" in
     ;;
   --swatches)
     name="${2:?usage: themes.sh --swatches <name>}"
-    offload_header "$name" || static_header
+    static_header
     printf '\n'
     render_swatches "$name"
     exit 0
@@ -643,10 +597,6 @@ case "${1:-}" in
     ;;
   --offload-key)
     offload_key "${2:?usage: themes.sh --offload-key <name>}"
-    exit 0
-    ;;
-  --esc)
-    esc_key "${2:-}"
     exit 0
     ;;
   --dims)
@@ -756,10 +706,8 @@ fzf_args=(
   # ctrl-b: toggle whether the focus outline's colour is mixed toward the
   # theme's bright_foreground.
   --bind "ctrl-b:execute-silent(${gallery_q} borders bright toggle)+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"
-  # ctrl-x: offload the highlighted theme, in two presses (offload_key);
-  # Esc first cancels a pending offload, and only then closes (esc_key).
+  # ctrl-x: offload the highlighted theme at once (offload_key).
   --bind "ctrl-x:transform(${self_q} --offload-key {1})"
-  --bind "esc:transform(${self_q} --esc {1})"
 )
 # ctrl-u: toggle whether the Übersicht crystal widgets follow the theme.
 # Bound only when Übersicht is running with those widgets on this Mac, so

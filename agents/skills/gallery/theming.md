@@ -12,8 +12,8 @@ gallery theme restore <name>     # bring it back
 gallery theme offloaded          # what is offloaded here
 ```
 
-super + shift + ctrl + space opens the picker; `ctrl-x` twice there offloads
-the highlighted theme. Offload refuses the current theme and any theme with
+super + shift + ctrl + space opens the picker; `ctrl-x` there offloads
+the highlighted theme at once (no confirmation). Offload refuses the current theme and any theme with
 no copy elsewhere (only installer-vendored themes and themes claimed by a
 hook in `~/.config/gallery/hooks/theme-offload.d/` have one; see
 docs/THEMES.md "Offloading a theme"). Never delete a theme folder by hand to

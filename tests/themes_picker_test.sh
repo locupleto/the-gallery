@@ -182,36 +182,31 @@ g theme offload beta >/dev/null
 out="$(g theme restore beta 2>&1)" && fail "restore: a theme not offloaded must be refused"
 say "offload: refusals, hook keeper, vendored keeper, restore, failing check"
 
-# --- offload: picker (ctrl-x twice, Esc cancels, moving cancels) -----------------------------
+# --- offload: picker (one ctrl-x offloads at once) ---------------------------------------------
 export GALLERY_THEMES_STATE="${WORK}/pickerstate"; mkdir -p "${GALLERY_THEMES_STATE}"
-[ "$(picker --esc epsilon)" = "abort" ] || fail "esc: closes when nothing is pending"
-[[ "$(picker --offload-key epsilon)" == "transform-header("*"--swatches {1})" ]] || fail "ctrl-x 1: asks"
-h="$(picker --swatches epsilon | sed 's/\x1b\[[0-9;]*m//g')"
-[[ "${h}" == "Offload epsilon from this Mac?"* ]] || fail "ctrl-x 1: confirmation header, got: ${h%%$'\n'*}"
-[[ "${h}" == *"Kept: kept in test"* && "${h}" == *"ctrl-x again offloads"* ]] || fail "ctrl-x 1: size, where, keys"
-[[ "$(picker --esc epsilon)" == "transform-header("* ]] || fail "esc: cancels a pending offload"
-[ -L "${T}/epsilon" ] || fail "esc: nothing offloaded"
-picker --offload-key epsilon >/dev/null
-picker --swatches gamma >/dev/null   # the cursor moved: cancels
-[ ! -f "${GALLERY_THEMES_STATE}/pending" ] || fail "moving away must cancel"
-picker --offload-key epsilon >/dev/null
 out="$(picker --offload-key epsilon)"
-[[ "${out}" == "reload-sync("*"--list)"* ]] || fail "ctrl-x 2: reloads the list"
+[ ! -e "${T}/epsilon" ] || fail "ctrl-x: one press offloads, no confirmation"
+[[ "${out}" == "reload-sync("*"--list)"* ]] || fail "ctrl-x: reloads the list"
 # No {1} in the outcome: fzf drops an action whose placeholder is empty, and
 # the list may be empty after the offload (the query matched only that theme).
-[[ "${out}" != *"{1}"* ]] || fail "ctrl-x 2: the outcome must show even with an empty list"
+[[ "${out}" != *"{1}"* ]] || fail "ctrl-x: the outcome must show even with an empty list"
 picker --header-only | sed 's/\x1b\[[0-9;]*m//g' | head -1 | grep -q '^epsilon offloaded, ' \
-  || fail "ctrl-x 2: --header-only shows the outcome"
-[ ! -e "${T}/epsilon" ] || fail "ctrl-x 2: offloaded"
+  || fail "ctrl-x: --header-only shows the outcome"
 picker --swatches gamma | sed 's/\x1b\[[0-9;]*m//g' | head -1 | grep -q '^epsilon offloaded, ' \
-  || fail "ctrl-x 2: outcome replaces the Current line"
-[[ "$(picker --offload-key alpha)" != *"{1}"* ]] || fail "ctrl-x refused: the reason must show even with an empty list"
-picker --swatches alpha | sed 's/\x1b\[[0-9;]*m//g' | head -1 | grep -q 'current theme' \
-  || fail "ctrl-x on the current theme: reason shown"
-[ ! -f "${GALLERY_THEMES_STATE}/pending" ] || fail "ctrl-x on the current theme: nothing pending"
+  || fail "ctrl-x: outcome replaces the Current line"
 picker --list | grep -q '^epsilon' && fail "list: an offloaded theme is gone from the list"
+out="$(picker --offload-key alpha)"
+[[ "${out}" != *"{1}"* && "${out}" != reload* ]] || fail "ctrl-x refused: header only, shown even with an empty list"
+[ -d "${T}/alpha" ] || fail "ctrl-x on the current theme: kept"
+picker --header-only | sed 's/\x1b\[[0-9;]*m//g' | head -1 | grep -q 'current theme' \
+  || fail "ctrl-x on the current theme: reason shown"
+out="$(picker --offload-key delta)"
+[ -d "${T}/delta" ] || fail "ctrl-x on a theme with no copy elsewhere: kept"
+picker --header-only | sed 's/\x1b\[[0-9;]*m//g' | head -1 | grep -q 'no copy elsewhere' \
+  || fail "ctrl-x on a theme with no copy elsewhere: reason shown"
+grep -q -- '--esc\|esc:' "${PICKER}" && fail "Esc keeps fzf's own meaning (close)"
 unset GALLERY_THEMES_STATE
-say "picker: ctrl-x asks then offloads, Esc and moving cancel, refusals shown"
+say "picker: one ctrl-x offloads at once; refusals keep the theme and say why"
 
 bash -n "${PICKER}" || fail "syntax"
 /bin/bash -n "${PICKER}" || fail "syntax under /bin/bash (3.2)"

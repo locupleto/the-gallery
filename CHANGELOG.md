@@ -5,6 +5,14 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.10.2 (2026-11-04)
+
+- `ctrl-x` in the theme picker now offloads the highlighted theme at once,
+  with no confirmation; the outcome replaces the header's first line. The
+  refusals stay (the current theme, a theme with no copy elsewhere), and
+  `gallery theme restore <name>` undoes an offload. Esc simply closes the
+  picker again.
+
 ## 0.10.1 (2026-11-04)
 
 - Fix: after the second `ctrl-x` in the theme picker, the outcome line
