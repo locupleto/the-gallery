@@ -229,6 +229,10 @@ trigger that same render (`borders` also re-applies the outline); `bg` records
 the wallpaper choice and calls the wallpaper hook directly. See
 [docs/THEMES.md](docs/THEMES.md#what-re-themes-when).
 
+`theme offload <name>` (`ctrl-x` twice in the theme picker) frees a theme's
+disk on this Mac when a copy is kept elsewhere, and `theme restore` brings it
+back; see [docs/THEMES.md](docs/THEMES.md#offloading-a-theme).
+
 ### Where it all lives
 
 `install.sh` copies the repo onto the boot volume (launchd-started tools

@@ -5,6 +5,25 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.10.0 (2026-11-04)
+
+- Offload a theme: `gallery theme offload <name>`, or `ctrl-x` twice in the
+  theme picker, removes a theme from this Mac when a copy is kept elsewhere,
+  and `gallery theme restore <name>` brings it back (`gallery theme
+  offloaded` lists them). The first `ctrl-x` shows what it frees and where
+  the copy is; Esc or moving to another theme cancels. The current theme
+  and a theme nothing keeps are refused. Vendored Omarchy themes are kept by
+  the installer (now listed in `state/vendored-themes`; an offloaded one is
+  not reinstalled); other themes by a hook in
+  `~/.config/gallery/hooks/theme-offload.d/` (see docs/THEMES.md).
+- The theme picker opens and moves faster. It lists the themes once instead
+  of three times, reads the console, widget and border prefs in one go, and
+  draws the palette without a hundred subprocesses per key; the preview
+  shows a downscaled copy of each wallpaper (cached in
+  `~/.config/gallery/cache/theme-previews`, filled in the background when
+  the picker opens) instead of decoding the 5K original on every move.
+  `gallery theme list` is about six times quicker.
+
 ## 0.9.0 (2026-11-02)
 
 - The wallpaper picker previews a left/right pair as the whole panorama:

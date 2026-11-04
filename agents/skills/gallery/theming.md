@@ -7,9 +7,17 @@ gallery theme list               # marks the current and light themes
 gallery theme set <name>
 gallery theme next
 gallery theme render             # re-run the renderers only (no hooks)
+gallery theme offload <name>     # free a theme's disk on this Mac; its copy stays elsewhere
+gallery theme restore <name>     # bring it back
+gallery theme offloaded          # what is offloaded here
 ```
 
-super + shift + ctrl + space opens the picker. A theme change recolours the
+super + shift + ctrl + space opens the picker; `ctrl-x` twice there offloads
+the highlighted theme. Offload refuses the current theme and any theme with
+no copy elsewhere (only installer-vendored themes and themes claimed by a
+hook in `~/.config/gallery/hooks/theme-offload.d/` have one; see
+docs/THEMES.md "Offloading a theme"). Never delete a theme folder by hand to
+free space: offload it. A theme change recolours the
 terminals, the focus outline, the wallpaper, btop and superfile together.
 
 ## A new or changed theme

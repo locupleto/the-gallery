@@ -14,6 +14,9 @@ gallery theme list          # installed themes; marks the current one and light 
 gallery theme set <name>    # switch and re-render everything
 gallery theme next          # next theme alphabetically, wrapping around
 gallery theme render        # re-run the renderer only
+gallery theme offload <name>   # remove a theme from this Mac, keeping its copy elsewhere
+gallery theme restore <name>   # bring an offloaded theme back
+gallery theme offloaded        # the themes offloaded from this Mac
 ```
 
 Themes live in `~/.config/gallery/themes/<name>/`. `install.sh` copies the
@@ -317,6 +320,35 @@ Write your own as an executable script that takes the theme name as `$1`,
 for example `~/.config/gallery/hooks/theme-set.d/40-editor.sh`. Hooks run
 synchronously, so keep them quick. `GALLERY_THEME_HOOKS_DIR` points the CLI
 at a different hooks directory (the tests use it).
+
+## Offloading a theme
+
+A theme's wallpapers can take hundreds of megabytes. `gallery theme offload
+<name>` (or `ctrl-x` twice in the theme picker) removes a theme from this Mac
+when a copy of it is kept somewhere else, and `gallery theme restore <name>`
+brings it back. `--check` reports what would be freed (in KB) and where the
+copy is, without removing anything. The current theme is refused, and so is
+a theme nothing keeps: offloading it would delete it.
+
+Two things can keep a theme:
+
+- **The installer**, for the themes it vendored from Omarchy (it lists them
+  in `~/.config/gallery/state/vendored-themes`). The theme's small files are
+  kept in `~/.config/gallery/state/offloaded/<name>/`; restore puts them back,
+  and the next `./install.sh` fetches the wallpapers again. While a theme is
+  offloaded, `./install.sh` neither copies it back nor fetches its wallpapers.
+- **A hook** in `~/.config/gallery/hooks/theme-offload.d/`, for themes that
+  live somewhere else, such as a synced folder. Each executable is called as
+
+  | Call | Does |
+  |---|---|
+  | `hook check <name> <path>` | exit 0 and print one line saying where the copy is when it keeps `<name>`; exit 3 when `<name>` is not its theme; anything else stops the offload, with its output as the reason |
+  | `hook offload <name> <path>` | free its own copy on this Mac; the Gallery then removes `<path>` |
+  | `hook restore <name> <path>` | put the theme back at `<path>` |
+
+  The first hook, in name order, whose check exits 0 keeps the theme.
+  `GALLERY_THEME_OFFLOAD_HOOKS_DIR` points the CLI at another directory (the
+  tests use it).
 
 ## Wallpapers
 

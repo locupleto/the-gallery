@@ -708,7 +708,25 @@ echo "[gallery] installing themes to ${THEMES_DEST}"
 run mkdir -p "${THEMES_DEST}"
 # No --delete: user-authored themes may already live under THEMES_DEST, and
 # the `current` symlink (also under THEMES_DEST) must never be touched here.
-run rsync -a --exclude 'current' "${THEMES_SRC}/" "${THEMES_DEST}/"
+# A theme the user offloaded (`gallery theme offload`, recorded under
+# state/offloaded/) stays offloaded: neither copied back nor given wallpapers.
+OFFLOADED_SRC_DIR="${CONFIG_DIR}/state/offloaded"
+theme_excludes=(--exclude 'current')
+for d in "${OFFLOADED_SRC_DIR}"/*/; do
+  [ -f "${d}.source" ] || continue
+  d="${d%/}"
+  theme_excludes+=(--exclude "/${d##*/}")
+done
+run rsync -a "${theme_excludes[@]}" "${THEMES_SRC}/" "${THEMES_DEST}/"
+# The vendored themes, so `gallery theme offload` knows the installer can
+# bring each of them back.
+if [ "${DRY_RUN}" -eq 0 ]; then
+  mkdir -p "${CONFIG_DIR}/state"
+  for d in "${THEMES_SRC}"/*/; do
+    d="${d%/}"
+    printf '%s\n' "${d##*/}"
+  done > "${CONFIG_DIR}/state/vendored-themes"
+fi
 
 # Omarchy's wallpapers are not in this repository: they are their artists'
 # work, which Omarchy ships with no licence of its own, so they are downloaded
@@ -722,6 +740,7 @@ else
   missing=()
   for theme_dir in "${THEMES_SRC}"/*/; do
     name="$(basename "${theme_dir}")"
+    [ -f "${OFFLOADED_SRC_DIR}/${name}/.source" ] && continue
     ls "${THEMES_DEST}/${name}/backgrounds/"* >/dev/null 2>&1 || missing+=("${name}")
   done
   if [ "${#missing[@]}" -gt 0 ]; then

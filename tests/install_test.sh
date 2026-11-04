@@ -200,6 +200,18 @@ assert_same "${SNAP}" "${ORIG}/Library/Application Support/com.apple.wallpaper/S
 "${GAL}" theme render >/dev/null 2>&1 || fail "A: theme render"
 say "A: console wiring, wallpaper snapshot and theme render recorded"
 
+# The vendored themes are recorded, so `gallery theme offload` knows the
+# installer can bring each back; an offloaded one is not reinstalled.
+grep -qx tokyo-night "${H}/.config/gallery/state/vendored-themes" || fail "A: vendored-themes lists tokyo-night"
+[ "$(wc -l < "${H}/.config/gallery/state/vendored-themes" | tr -d ' ')" = "$(ls -d "${REPO_ROOT}"/themes/*/ | wc -l | tr -d ' ')" ] \
+  || fail "A: vendored-themes lists every theme in the repo"
+"${GAL}" theme offload gruvbox >/dev/null 2>&1 || fail "A: offload a vendored theme"
+"${INSTALL}" --minimal >/dev/null 2>&1 || fail "A: reinstall after an offload"
+[ ! -e "${H}/.config/gallery/themes/gruvbox" ] || fail "A: reinstall brought an offloaded theme back"
+"${GAL}" theme restore gruvbox >/dev/null 2>&1 || fail "A: restore the vendored theme"
+assert_same "${H}/.config/gallery/themes/gruvbox/colors.toml" "${REPO_ROOT}/themes/gruvbox/colors.toml" "A restored colors.toml"
+say "A: vendored themes recorded; an offloaded one stays offloaded across a reinstall"
+
 # Reinstall: idempotent.
 find "${H}" -name '*.gallery-*' | sort > "${WORK_DIR}/A.baks1"
 cp "${MAN}" "${WORK_DIR}/A.manifest1"

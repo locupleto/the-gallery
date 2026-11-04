@@ -27,6 +27,14 @@
 #                              backgrounds") and exit -- this is what fzf's
 #                              `transform-preview-label` shells out to, to
 #                              caption the preview pane's border
+#   themes.sh --offload-key NAME
+#                              what ctrl-x does on NAME (prints fzf actions):
+#                              the first press asks, the second offloads
+#   themes.sh --esc NAME       what Esc does: cancels a pending offload,
+#                              else closes the picker (prints fzf actions)
+#   themes.sh --warm-previews  make the downscaled preview copy of every
+#                              theme's active wallpaper and exit (the picker
+#                              runs this in the background when it opens)
 #
 # Keys (inside the picker):
 #   Enter                      apply the highlighted theme, drop into its
@@ -44,6 +52,13 @@
 #   ctrl-b                     toggle whether the focus outline's colour is
 #                              mixed toward the theme's bright_foreground --
 #                              see `gallery borders bright`; same header line
+#   ctrl-x                     offload the highlighted theme from this Mac
+#                              (`gallery theme offload`): the first press
+#                              shows what it frees and where the copy is
+#                              kept, a second press does it, Esc or moving
+#                              to another theme cancels. The current theme
+#                              and a theme with no copy elsewhere are
+#                              refused, with the reason in the header
 #   ctrl-u                     toggle whether the Übersicht crystal widgets
 #                              follow the theme or keep their own shipped
 #                              colours -- see `gallery widgets`. The key and
@@ -60,18 +75,9 @@ THEME_DIR="${HOME}/.config/gallery/themes"
 CONSOLE_STATE_FILE="${HOME}/.config/gallery/state/console.json"
 WIDGETS_STATE_FILE="${HOME}/.config/gallery/state/widgets.json"
 BORDERS_STATE_FILE="${HOME}/.config/gallery/state/borders.json"
+# Downscaled copies of the wallpapers for the preview pane (see preview_image).
+PREVIEW_CACHE="${GALLERY_CACHE_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/gallery/cache}/theme-previews"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-
-# get_val FILE KEY -- print the (unquoted) value of a flat `key = "value"`
-# line in a colors.toml, anchored to the start of the line so e.g. "foreground"
-# never matches "dark_foreground" / "bright_foreground". Prints nothing (and
-# still exits 0) when the key is absent -- colors.toml files are allowed to
-# be missing keys and callers must tolerate that.
-get_val() {
-  local file="$1" key="$2"
-  [[ -f "$file" ]] || return 0
-  sed -n "s/^${key}[[:space:]]*=[[:space:]]*\"\\(.*\\)\"[[:space:]]*\$/\\1/p" "$file" | head -1
-}
 
 # --- width awareness ---------------------------------------------------------
 # The header (instructions + swatch grid) lives in fzf's LIST pane, which is
@@ -96,56 +102,77 @@ list_cols() {
 COMPACT=0
 [[ "$(list_cols)" -lt "$COMPACT_BELOW" ]] && COMPACT=1
 
-# swatch LABEL HEX -- one truecolor block + label + hex value, or nothing if
-# HEX is empty/malformed (missing-key tolerance lives here). Fixed visible
-# width when HEX is present -- see CELL_WIDTH below, which depends on this
-# exact format string. Compact mode drops the hex value (block + label only).
-swatch() {
-  local label="$1" hex="$2" r g b
-  [[ -n "$hex" ]] || return 0
-  hex="${hex#\#}"
-  [[ "${#hex}" -eq 6 ]] || return 0
-  case "$hex" in
-    *[!0-9a-fA-F]*) return 0 ;;
-  esac
-  r=$((16#${hex:0:2}))
-  g=$((16#${hex:2:2}))
-  b=$((16#${hex:4:2}))
-  if [[ "$COMPACT" -eq 1 ]]; then
-    printf '\033[48;2;%d;%d;%dm   \033[0m  %-17.17s\n' "$r" "$g" "$b" "$label"
-  else
-    printf '\033[48;2;%d;%d;%dm   \033[0m  %-16s #%s\n' "$r" "$g" "$b" "$label" "$hex"
-  fi
-}
-
 # --- swatches (list-side header) -------------------------------------------
 
-# CELL_WIDTH -- the visible (non-ANSI) column width of one swatch() line:
+# CELL_WIDTH -- the visible (non-ANSI) column width of one swatch_cell line:
 # 3 (block) + 2 (spacing) + 16 (label field) + 1 (space) + 1 (#) + 6 (hex).
 # Used to pad out a missing/malformed colour's cell to the same width, so
 # the right-hand column still lines up across rows even when a theme is
 # missing one of the left-hand keys.
 CELL_WIDTH=29
-[[ "$COMPACT" -eq 1 ]] && CELL_WIDTH=22   # 3 + 2 + 17, no hex (see swatch)
+[[ "$COMPACT" -eq 1 ]] && CELL_WIDTH=22   # 3 + 2 + 17, no hex (see swatch_cell)
 
 # Two-column layout: 16 colours in 8 rows. Index i pairs LEFT_KEYS[i] with
 # RIGHT_KEYS[i]. The last right-hand slot is a spare -- most colors.toml
 # files don't define bright_foreground, in which case that cell is just
-# left blank (swatch()'s own missing-key tolerance handles it).
+# left blank (swatch_cell's missing-key tolerance handles it).
 LEFT_KEYS=(accent background foreground red yellow green cyan blue)
 RIGHT_KEYS=(magenta bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta bright_foreground)
 
-# swatch_cell LABEL HEX -- swatch()'s output, or CELL_WIDTH blank spaces if
-# HEX was missing/malformed (swatch() itself prints nothing in that case) --
-# keeps a two-up row's right column aligned regardless of which keys a given
-# colors.toml happens to define.
+# load_colors FILE -- read FILE's flat `key = "value"` lines once into
+# COLOR_KEYS/COLOR_VALS (first line wins for a repeated key), so the grid
+# below looks its 16 colours up without a sed per cell. Anchored at the
+# start of the line, so "foreground" never matches "bright_foreground".
+# colors.toml files may lack keys; callers tolerate that. Plain indexed
+# arrays: the picker may run on bash 3.2.
+COLOR_KEYS=()
+COLOR_VALS=()
+load_colors() {
+  local line re='^([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*"(.*)"[[:space:]]*$'
+  COLOR_KEYS=()
+  COLOR_VALS=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ $re ]]; then
+      COLOR_KEYS+=("${BASH_REMATCH[1]}")
+      COLOR_VALS+=("${BASH_REMATCH[2]}")
+    fi
+  done < "$1"
+}
+
+# color_of KEY -- sets COLOR to KEY's value from load_colors, or "".
+COLOR=""
+color_of() {
+  local i
+  COLOR=""
+  for i in "${!COLOR_KEYS[@]}"; do
+    if [[ "${COLOR_KEYS[$i]}" == "$1" ]]; then
+      COLOR="${COLOR_VALS[$i]}"
+      return 0
+    fi
+  done
+}
+
+# swatch_cell LABEL HEX -- sets CELL to one truecolor block + label + hex
+# value (compact mode drops the hex), at a fixed visible width of CELL_WIDTH,
+# or to CELL_WIDTH blank spaces if HEX was missing/malformed -- keeps a
+# two-up row's right column aligned regardless of which keys a given
+# colors.toml happens to define. Sets a variable rather than printing, so
+# the grid needs no subshell per cell.
+CELL=""
 swatch_cell() {
-  local label="$1" hex="$2" out
-  out="$(swatch "$label" "$hex")"
-  if [[ -z "$out" ]]; then
-    printf '%*s' "$CELL_WIDTH" ''
+  local label="$1" hex="$2" r g b
+  hex="${hex#\#}"
+  if [[ "${#hex}" -ne 6 || "$hex" == *[!0-9a-fA-F]* ]]; then
+    printf -v CELL '%*s' "$CELL_WIDTH" ''
+    return 0
+  fi
+  r=$((16#${hex:0:2}))
+  g=$((16#${hex:2:2}))
+  b=$((16#${hex:4:2}))
+  if [[ "$COMPACT" -eq 1 ]]; then
+    printf -v CELL '\033[48;2;%d;%d;%dm   \033[0m  %-17.17s' "$r" "$g" "$b" "$label"
   else
-    printf '%s' "$out"
+    printf -v CELL '\033[48;2;%d;%d;%dm   \033[0m  %-16s #%s' "$r" "$g" "$b" "$label" "$hex"
   fi
 }
 
@@ -155,73 +182,63 @@ swatch_cell() {
 render_swatches() {
   local name="$1"
   local file="${THEME_DIR}/${name}/colors.toml"
-  local i left_key right_key left_cell right_cell
+  local i left_cell
 
   if [[ ! -f "$file" ]]; then
     printf '(no colors.toml found)\n'
     return 0
   fi
 
+  load_colors "$file"
   for i in "${!LEFT_KEYS[@]}"; do
-    left_key="${LEFT_KEYS[$i]}"
-    right_key="${RIGHT_KEYS[$i]}"
-    left_cell="$(swatch_cell "$left_key" "$(get_val "$file" "$left_key")")"
-    right_cell="$(swatch_cell "$right_key" "$(get_val "$file" "$right_key")")"
-    printf '%s  %s\n' "$left_cell" "$right_cell"
+    color_of "${LEFT_KEYS[$i]}"
+    swatch_cell "${LEFT_KEYS[$i]}" "$COLOR"
+    left_cell="$CELL"
+    color_of "${RIGHT_KEYS[$i]}"
+    swatch_cell "${RIGHT_KEYS[$i]}" "$COLOR"
+    printf '%s  %s\n' "$left_cell" "$CELL"
   done
 }
 
-# console_mode -- prints "theme" or "native" straight from
-# CONSOLE_STATE_FILE (default "native" if missing/unreadable/garbage), same
-# contract as bin/gallery's console_read_mode. Reads the state file directly
-# instead of shelling out to `gallery console status` -- this runs on every
-# `focus` event (i.e. every arrow key in the picker), and status's extra
-# `defaults read` call is needless work per keystroke.
-console_mode() {
-  if [[ ! -f "$CONSOLE_STATE_FILE" ]]; then
-    printf 'native'
-    return 0
-  fi
+# read_prefs -- prints "CONSOLE WIDGETS WIDTH BRIGHT" (e.g. "native theme 5
+# off") straight from the three state files, each with its own default when
+# missing/unreadable/garbage: console and widgets "theme"/"native" (default
+# "native", bin/gallery's console_read_mode contract), width 1..12 (default
+# 5) and bright "on"/"off" (default "off", bin/gallery's borders_read_prefs).
+# One python3 for all three files: this runs on every highlight change, and
+# a python start is the expensive part, not the reading.
+read_prefs() {
   python3 -c '
 import json, sys
 
-mode = "native"
-try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        data = json.load(fh)
-    if isinstance(data, dict):
-        val = data.get("mode")
-        if val in ("theme", "native"):
-            mode = val
-except Exception:
-    pass
-sys.stdout.write(mode)
-' "$CONSOLE_STATE_FILE" 2>/dev/null || printf 'native'
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def mode(path):
+    val = load(path).get("mode")
+    return val if val in ("theme", "native") else "native"
+
+borders = load(sys.argv[3])
+width = 5
+w = borders.get("width")
+if isinstance(w, int) and not isinstance(w, bool):
+    width = max(1, min(12, w))
+bright = borders.get("bright") is True
+sys.stdout.write("%s %s %d %s" % (mode(sys.argv[1]), mode(sys.argv[2]), width, "on" if bright else "off"))
+' "$CONSOLE_STATE_FILE" "$WIDGETS_STATE_FILE" "$BORDERS_STATE_FILE" 2>/dev/null \
+    || printf 'native native 5 off'
 }
 
-# widgets_mode -- prints "theme" or "native" straight from
-# WIDGETS_STATE_FILE (default "native"), same contract and same
-# per-keystroke direct-file-read reasoning as console_mode.
-widgets_mode() {
-  if [[ ! -f "$WIDGETS_STATE_FILE" ]]; then
-    printf 'native'
-    return 0
-  fi
-  python3 -c '
-import json, sys
-
-mode = "native"
-try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        data = json.load(fh)
-    if isinstance(data, dict):
-        val = data.get("mode")
-        if val in ("theme", "native"):
-            mode = val
-except Exception:
-    pass
-sys.stdout.write(mode)
-' "$WIDGETS_STATE_FILE" 2>/dev/null || printf 'native'
+# borders_prefs -- "WIDTH BRIGHT" from read_prefs.
+borders_prefs() {
+  local prefs
+  prefs="$(read_prefs)"
+  printf '%s' "${prefs#* * }"
 }
 
 # widgets_available -- 0 when Übersicht is running on this Mac with the
@@ -230,6 +247,14 @@ sys.stdout.write(mode)
 # this runs on every focus event. Decides whether the picker shows the
 # "Widgets: ..." line and honours ctrl-u at all.
 widgets_available() {
+  # Decided once when the picker starts (see GALLERY_THEMES_WIDGETS below)
+  # and inherited by every fzf subprocess: Übersicht does not come and go
+  # while the picker is open, and the ps costs more than the rest of a
+  # header refresh.
+  case "${GALLERY_THEMES_WIDGETS:-}" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
   local args dir w
   args="$(ps -axo args= 2>/dev/null | grep '[R]esources/server.js' | head -n 1)"
   [[ -n "$args" ]] || return 1
@@ -240,36 +265,6 @@ widgets_available() {
     [[ -d "$w" ]] && return 0
   done
   return 1
-}
-
-# borders_prefs -- prints "WIDTH BRIGHT" (bright as "on"/"off") straight
-# from BORDERS_STATE_FILE, default "5 off" if missing/unreadable/garbage --
-# same contract (and same per-keystroke direct-file-read reasoning) as
-# console_mode above, mirroring bin/gallery's own borders_read_prefs.
-borders_prefs() {
-  if [[ ! -f "$BORDERS_STATE_FILE" ]]; then
-    printf '5 off'
-    return 0
-  fi
-  python3 -c '
-import json, sys
-
-width = 5
-bright = False
-try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        data = json.load(fh)
-    if isinstance(data, dict):
-        w = data.get("width")
-        if isinstance(w, int) and not isinstance(w, bool):
-            width = max(1, min(12, w))
-        b = data.get("bright")
-        if isinstance(b, bool):
-            bright = b
-except Exception:
-    pass
-sys.stdout.write(str(width) + " " + ("on" if bright else "off"))
-' "$BORDERS_STATE_FILE" 2>/dev/null || printf '5 off'
 }
 
 # next_width -- prints the next width preset after the currently stored
@@ -329,22 +324,101 @@ bright_radio() {
 # iTerm2's Default profile, or on any other terminal simply its own config.
 native_label() {
   local t
-  t="$("${HOME}/bin/gallery-term" name 2>/dev/null || echo iterm2)"
+  t="${GALLERY_THEMES_TERM:-$("${HOME}/bin/gallery-term" name 2>/dev/null || echo iterm2)}"
   if [[ "$t" == iterm2 ]]; then printf 'iTerm Default'; else printf 'own config'; fi
+}
+
+# --- offloading (ctrl-x) ------------------------------------------------------
+# One picker's state lives in GALLERY_THEMES_STATE, a temp dir made at
+# startup and inherited by every fzf subprocess: `pending` holds the theme
+# awaiting its second ctrl-x ("NAME<TAB>KB<TAB>WHERE"), `message` the last
+# outcome, shown in place of the "Current:" line until the next ctrl-x.
+state_file() { printf '%s/%s' "${GALLERY_THEMES_STATE:-/nonexistent}" "$1"; }
+
+# human_kb KB -- "215 MB", "1.2 GB", "40 KB" (as bin/gallery prints it).
+human_kb() {
+  awk -v k="$1" 'BEGIN {
+    if (k >= 1048576) printf "%.1f GB", k / 1048576;
+    else if (k >= 1024) printf "%d MB", k / 1024 + 0.5;
+    else printf "%d KB", k }'
+}
+
+# set_message COLOUR TEXT -- the outcome line (31 red, 32 green), first line only.
+set_message() {
+  [[ -n "${GALLERY_THEMES_STATE:-}" ]] || return 0
+  printf '\033[%sm%s\033[0m' "$1" "${2%%$'\n'*}" > "$(state_file message)"
+}
+
+# offload_key NAME -- ctrl-x. Prints the fzf actions to run next.
+offload_key() {
+  local name="$1" pending="" out rc=0 self_q
+  self_q="$(printf '%q' "$SELF")"
+  rm -f "$(state_file message)"   # a new ctrl-x replaces the last outcome
+  [[ -f "$(state_file pending)" ]] && pending="$(cut -f1 "$(state_file pending)")"
+  if [[ "$pending" == "$name" ]]; then
+    rm -f "$(state_file pending)"
+    out="$("${GALLERY_BIN}" theme offload "$name" 2>&1)" || rc=$?
+    out="${out#gallery: }"
+    if [[ "$rc" -eq 0 ]]; then set_message 32 "$out"; else set_message 31 "$out"; fi
+    # reload-sync, so {1} below is the row the cursor lands on afterwards.
+    printf 'reload-sync(%s --list)+transform-header(%s --swatches {1})+transform-preview-label(%s --dims {1})+refresh-preview\n' \
+      "$self_q" "$self_q" "$self_q"
+    return 0
+  fi
+  out="$("${GALLERY_BIN}" theme offload --check "$name" 2>&1)" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    printf '%s\t%s\n' "$name" "$out" > "$(state_file pending)"
+  else
+    rm -f "$(state_file pending)"
+    set_message 31 "${out#gallery: }"
+  fi
+  printf 'transform-header(%s --swatches {1})\n' "$self_q"
+}
+
+# esc_key NAME -- Esc cancels a pending offload; otherwise it closes.
+esc_key() {
+  if [[ -f "$(state_file pending)" ]]; then
+    rm -f "$(state_file pending)"
+    printf 'transform-header(%s --swatches {1})\n' "$(printf '%q' "$SELF")"
+  else
+    printf 'abort\n'
+  fi
+}
+
+# offload_header NAME -- the confirmation that replaces the header's key
+# lines while NAME awaits its second ctrl-x; prints nothing (and drops the
+# pending offload) when the highlighted theme is another one, so moving
+# away cancels. Returns 0 when it printed the confirmation.
+offload_header() {
+  local name="$1" p_name p_kb p_where
+  [[ -f "$(state_file pending)" ]] || return 1
+  IFS=$'\t' read -r p_name p_kb p_where < "$(state_file pending)"
+  if [[ "$p_name" != "$name" ]]; then
+    rm -f "$(state_file pending)"
+    return 1
+  fi
+  printf '\033[31mOffload %s from this Mac?\033[0m\n' "$name"
+  printf '\033[31m%s freed. Kept: %s\033[0m\n' "$(human_kb "$p_kb")" "$p_where"
+  printf '\033[33mctrl-x\033[0m again offloads   \033[33mEsc\033[0m keeps it\n'
+  return 0
 }
 
 # static_header -- the header's fixed first three lines: which theme is
 # presently active plus the key hints, the terminal console's current mode,
 # and the JankyBorders width/bright prefs. Queries `gallery theme current`,
-# console_mode, and borders_prefs itself (rather than taking them as
+# and read_prefs itself (rather than taking them as
 # arguments) so both the top-level --header (built once, interactively) and
 # every --swatches subprocess (fzf shells this whole script back out to,
 # fresh, on load/each highlight) print identical lines without needing to
 # thread state between processes.
 static_header() {
-  local current mode console_line prefs width bright border_line widgets_line
-  current="$("${GALLERY_BIN}" theme current 2>/dev/null || true)"
-  mode="$(console_mode)"
+  local current mode wmode console_line prefs width bright border_line widgets_line message=""
+  [[ -f "$(state_file message)" ]] && message="$(cat "$(state_file message)")"
+  # The current theme cannot change while the picker is open (Enter hands
+  # over to the backgrounds picker), so the startup value is passed down.
+  current="${GALLERY_THEMES_CURRENT-$("${GALLERY_BIN}" theme current 2>/dev/null || true)}"
+  prefs="$(read_prefs)"
+  read -r mode wmode width bright <<< "$prefs"
   if [[ "$mode" == "theme" ]]; then
     console_line="Console: follows theme  (ctrl-t toggles)"
   else
@@ -354,14 +428,11 @@ static_header() {
   # (see widgets_available); elsewhere the header is exactly as before.
   widgets_line=""
   if widgets_available; then
-    case "$(widgets_mode)" in
+    case "$wmode" in
       theme) widgets_line="Widgets: follow theme  (ctrl-u toggles)" ;;
       *)     widgets_line="Widgets: own colours  (ctrl-u toggles)" ;;
     esac
   fi
-  prefs="$(borders_prefs)"
-  width="${prefs%% *}"
-  bright="${prefs##* }"
   if [[ "$COMPACT" -eq 1 ]]; then
     # Narrow list pane (see list_cols): same facts, four short lines (five
     # with the widgets line), so every key hint stays visible.
@@ -370,16 +441,23 @@ static_header() {
       *)     console_line="Console: $(native_label)  ctrl-t" ;;
     esac
     [[ -n "$widgets_line" ]] && widgets_line="${widgets_line/  (ctrl-u toggles)/  ctrl-u}"
-    printf 'Current: %s  Enter applies, Esc closes\n%s\nBorder width %s  ctrl-w\nBorder bright %s  ctrl-b\n' \
-      "${current:-(none)}" "$console_line" "$(width_radio "$width")" "$(bright_radio "$bright")"
+    if [[ -n "$message" ]]; then printf '%s\n' "$message"; else printf 'Current: %s  Enter applies, Esc closes\n' "${current:-(none)}"; fi
+    printf '%s\nBorder width %s  ctrl-w\nBorder bright %s  ctrl-b\n' \
+      "$console_line" "$(width_radio "$width")" "$(bright_radio "$bright")"
     [[ -n "$widgets_line" ]] && printf '%s\n' "$widgets_line"
+    printf 'Offload from this Mac  ctrl-x\n'
     return 0
   fi
   border_line="$(printf 'Border: width %s  ctrl-w cycles   bright %s  ctrl-b toggles' \
     "$(width_radio "$width")" "$(bright_radio "$bright")")"
-  printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n%s\n%s\n' \
-    "${current:-(none)}" "$console_line" "$border_line"
+  if [[ -n "$message" ]]; then
+    printf '%s\n' "$message"
+  else
+    printf 'Current: %s -- Enter applies theme and shows its backgrounds, Esc closes\n' "${current:-(none)}"
+  fi
+  printf '%s\n%s\n' "$console_line" "$border_line"
   [[ -n "$widgets_line" ]] && printf '%s\n' "$widgets_line"
+  printf 'Offload: ctrl-x removes the highlighted theme from this Mac\n'
   return 0
 }
 
@@ -417,6 +495,43 @@ print_dims() {
   fi
 }
 
+# preview_image FILE -- prints the path of a copy of FILE at most 1600 px
+# wide (JPEG, in PREVIEW_CACHE), making it on first use; prints FILE itself
+# when it cannot. chafa decodes the whole image on every highlight, and a 5K
+# PNG wallpaper takes it ~400 ms where the copy takes ~50 ms. The key covers
+# path, size and mtime, so a replaced wallpaper gets a fresh copy.
+preview_image() {
+  local file="$1" key out tmp
+  key="$(printf '%s|%s' "$file" "$(stat -f '%z %m' "$file" 2>/dev/null)" | md5 -q 2>/dev/null)" \
+    || { printf '%s\n' "$file"; return 0; }
+  out="${PREVIEW_CACHE}/${key}.jpg"
+  if [[ ! -s "$out" ]]; then
+    tmp="${out}.$$.tmp"
+    if ! { mkdir -p "$PREVIEW_CACHE" \
+           && sips -s format jpeg -s formatOptions 85 -Z 1600 "$file" --out "$tmp" >/dev/null 2>&1 \
+           && [[ -s "$tmp" ]] && mv -f "$tmp" "$out"; } 2>/dev/null; then
+      rm -f "$tmp" 2>/dev/null
+      printf '%s\n' "$file"
+      return 0
+    fi
+  fi
+  printf '%s\n' "$out"
+}
+
+# warm_previews -- make the preview copy of every theme's active wallpaper,
+# so the first pass down the list is as quick as the next one. Run in the
+# background when the picker opens; a copy that already exists costs a stat.
+warm_previews() {
+  local dir name bg
+  for dir in "${THEME_DIR}"/*/; do
+    name="${dir%/}"
+    name="${name##*/}"
+    [[ "$name" == current ]] && continue
+    bg="$("${GALLERY_BIN}" bg current "$name" 2>/dev/null)" || continue
+    [[ -r "${dir}backgrounds/${bg}" ]] && preview_image "${dir}backgrounds/${bg}" >/dev/null
+  done
+}
+
 # render_preview NAME -- the image card fzf's --preview shells out to: NAME's
 # active background image ALONE, sized from $FZF_PREVIEW_COLUMNS /
 # $FZF_PREVIEW_LINES and the image's own aspect ratio (via sips) -- the exact
@@ -449,6 +564,8 @@ render_preview() {
     return 0
   fi
 
+  # Dimensions from the copy (same aspect ratio, and sips reads it faster).
+  bg_path="$(preview_image "$bg_path")"
   dims="$(image_dims "$bg_path")"
   width="${dims%% *}"
   height="${dims##* }"
@@ -481,24 +598,26 @@ render_preview() {
 #   field 2: display text shown/searched in fzf (gallery's own annotation,
 #            e.g. "tokyo-night (current)")
 list_lines() {
-  "${GALLERY_BIN}" theme list | while IFS= read -r line; do
+  local line
+  while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     printf '%s\t%s\n' "${line%% (*}" "$line"
-  done
+  done < <("${GALLERY_BIN}" theme list)
 }
 
-# current_pos NAME -- 1-based line number of NAME in list_lines' output, so
-# fzf can start with the cursor already on the active theme. Empty/failure
-# if not found (e.g. no current theme set yet) -- caller tolerates that.
+# current_pos LINES -- 1-based line number of the "(current" row in
+# list_lines' output LINES, so fzf can start with the cursor already on the
+# active theme. Empty/failure if there is none (no current theme set yet) --
+# caller tolerates that.
 current_pos() {
-  local current="$1" n=0 name
-  while IFS=$'\t' read -r name _; do
+  local n=0 name display
+  while IFS=$'\t' read -r name display; do
     n=$((n + 1))
-    if [[ "$name" == "$current" ]]; then
-      printf '%s\n' "$n"
+    if [[ "$display" == *"(current"* ]]; then
+      printf '%s\t%s\n' "$n" "$name"
       return 0
     fi
-  done < <(list_lines)
+  done <<< "$1"
   return 1
 }
 
@@ -509,9 +628,17 @@ case "${1:-}" in
     ;;
   --swatches)
     name="${2:?usage: themes.sh --swatches <name>}"
-    static_header
+    offload_header "$name" || static_header
     printf '\n'
     render_swatches "$name"
+    exit 0
+    ;;
+  --offload-key)
+    offload_key "${2:?usage: themes.sh --offload-key <name>}"
+    exit 0
+    ;;
+  --esc)
+    esc_key "${2:-}"
     exit 0
     ;;
   --dims)
@@ -520,6 +647,10 @@ case "${1:-}" in
     ;;
   --next-width)
     next_width
+    exit 0
+    ;;
+  --warm-previews)
+    warm_previews
     exit 0
     ;;
   --list)
@@ -548,9 +679,31 @@ fi
 # resolve the sibling by path rather than assuming it's on PATH.
 BACKGROUNDS_SH="$(cd "$(dirname "$SELF")/../gallery.backgrounds" && pwd)/backgrounds.sh"
 
-current="$("${GALLERY_BIN}" theme current 2>/dev/null || true)"
-pos="$(current_pos "$current" || true)"
+# Everything below is worked out once, here, and handed to the fzf
+# subprocesses (--swatches/--dims run on every highlight) through the
+# environment: the list, the current theme, whether the Übersicht widgets
+# are there, and which terminal this is. Opening used to cost three
+# `gallery theme list` calls and several ps/python runs before fzf drew.
+lines="$(list_lines)"
+pos="" current=""
+if found="$(current_pos "$lines")"; then
+  pos="${found%%$'\t'*}"
+  current="${found#*$'\t'}"
+fi
+export GALLERY_THEMES_CURRENT="$current"
+GALLERY_THEMES_WIDGETS=0
+widgets_available && GALLERY_THEMES_WIDGETS=1
+export GALLERY_THEMES_WIDGETS
+GALLERY_THEMES_TERM="$("${HOME}/bin/gallery-term" name 2>/dev/null || echo iterm2)"
+export GALLERY_THEMES_TERM
+GALLERY_THEMES_STATE="$(mktemp -d "${TMPDIR:-/tmp}/gallery-themes.XXXXXX")"
+export GALLERY_THEMES_STATE
 header_line="$(static_header)"
+
+# Fill the preview cache for the themes not looked at yet, at low priority,
+# without holding the picker up (its output and lifetime are its own).
+# No tty file descriptors, so closing the window never waits on it.
+( nice -n 10 "$SELF" --warm-previews </dev/null >/dev/null 2>&1 & ) 2>/dev/null
 
 gallery_q="$(printf '%q' "$GALLERY_BIN")"
 bg_q="$(printf '%q' "$BACKGROUNDS_SH")"
@@ -595,6 +748,10 @@ fzf_args=(
   # ctrl-b: toggle whether the focus outline's colour is mixed toward the
   # theme's bright_foreground.
   --bind "ctrl-b:execute-silent(${gallery_q} borders bright toggle)+transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})"
+  # ctrl-x: offload the highlighted theme, in two presses (offload_key);
+  # Esc first cancels a pending offload, and only then closes (esc_key).
+  --bind "ctrl-x:transform(${self_q} --offload-key {1})"
+  --bind "esc:transform(${self_q} --esc {1})"
 )
 # ctrl-u: toggle whether the Übersicht crystal widgets follow the theme.
 # Bound only when Übersicht is running with those widgets on this Mac, so
@@ -612,7 +769,8 @@ else
   fzf_args+=(--bind "load:transform-header(${self_q} --swatches {1})+transform-preview-label(${self_q} --dims {1})")
 fi
 
-list_lines | fzf "${fzf_args[@]}" || true
+printf '%s' "${lines:+${lines}$'\n'}" | fzf "${fzf_args[@]}" || true
+rm -rf "$GALLERY_THEMES_STATE"
 
 # Reached only once the become() chain (however many theme<->backgrounds
 # hops the user made) has really wound down -- i.e. Esc all the way out.

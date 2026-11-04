@@ -41,6 +41,8 @@ touched. Put lasting changes in the places marked "you".
 | `~/.config/gallery/gallery.json` (enabled and disabled plugins) | you | yes | kept; deleted by `--purge` |
 | `~/.config/gallery/hooks/theme-set.d/10-`, `20-`, `30-` (shipped hooks) | Gallery | no, overwritten | removed |
 | `~/.config/gallery/hooks/theme-set.d/<your hooks>` | you | yes | kept; deleted by `--purge` |
+| `~/.config/gallery/hooks/theme-offload.d/<your hooks>` (keepers for `gallery theme offload`) | you | yes | kept; deleted by `--purge` |
+| `~/.config/gallery/state/offloaded/<name>/` (themes offloaded from this Mac) | Gallery, for you | yes; an offloaded theme stays offloaded | kept; deleted by `--purge` |
 | `~/.config/gallery/sheets/` | you, except `Tiler-Keys.md`, which is generated | yes | kept; deleted by `--purge` |
 | `~/.config/gallery/patches/`, `qml/`, `bin/render-theme.py` | Gallery | no, synced from the checkout (extra files go to `backup/<timestamp>/`) | kept; deleted by `--purge` |
 | `~/bin/gallery`, `gallery-hs`, `gallery-tui`, `gallery-term`, `gallery-menu`, `gallery-borders`, `gallery-agent`, `gallery-qml` | Gallery | no, overwritten | removed; a file of yours they replaced comes back |
