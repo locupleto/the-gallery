@@ -5,6 +5,16 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.10.3 (2026-11-10)
+
+- Fix: focus now follows a Desktop switch. super+N changed what the display
+  showed but left focus behind, on the Desktop just left or on the other
+  display, so the next new window (the agent key, super+return) opened there.
+  Each switch is now followed by the new `~/.config/skhd/space-focus <index>`,
+  which focuses the front window of the Desktop in view, or its display when
+  the Desktop is empty. Desktop keys of your own in `local.skhd` (for a second
+  display, say) can call it the same way after they switch.
+
 ## 0.10.2 (2026-11-04)
 
 - `ctrl-x` in the theme picker now offloads the highlighted theme at once,

@@ -28,7 +28,7 @@ touched. Put lasting changes in the places marked "you".
 |---|---|---|---|
 | `~/.config/skhd/local.skhd` | you | yes, never overwritten | yes if you edited it; removed only while it is still the untouched seed copy |
 | `~/.config/skhd/skhdrc`, `tiler.skhd`, `gallery.skhd` | Gallery | no, overwritten (an edited copy is saved first, see below) | removed; your original `skhdrc` comes back from `.gallery-bak` |
-| `~/.config/skhd/learn`, `focus-dir`, `browser-window`, `app-focus`, `learn.style.json`; `~/.config/yabai/yabai-layout`, `tree-guard` | Gallery | no, overwritten | removed |
+| `~/.config/skhd/learn`, `focus-dir`, `browser-window`, `app-focus`, `space-focus`, `learn.style.json`; `~/.config/yabai/yabai-layout`, `tree-guard` | Gallery | no, overwritten | removed |
 | `~/.config/yabai/yabairc` | Gallery | no, overwritten | removed; your original comes back from `.gallery-bak` |
 | `~/.config/yabai/yabairc.local` | you | yes, the installer never creates or touches it | yes |
 | `~/.config/yabai/rules.local`, `home-layout.json` | you (written by `gallery home save`) | yes | yes |
@@ -340,7 +340,8 @@ Read the caveats before you do:
   stop copying, `cmd - w` closes a tab, `cmd - m` and `cmd - tab` and
   `cmd - space` belong to macOS. Expect to rebind many keys by hand.
 - Switching Spaces works by sending the Mission Control shortcut `ctrl - N`
-  (`lalt - 1` runs `skhd -k "ctrl - 1"`). Make `ctrl` your super and the
+  (`lalt - 1` runs `skhd -k "ctrl - 1"`, then `space-focus 1` so focus, and
+  every new window, follows to that Desktop). Make `ctrl` your super and the
   binding becomes the key it sends, which defeats Mission Control itself, and
   the Gallery's `ctrl + lalt` and `shift + ctrl + lalt` chords turn into
   duplicates. Do not use `ctrl`.

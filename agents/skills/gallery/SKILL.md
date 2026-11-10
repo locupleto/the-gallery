@@ -87,6 +87,11 @@ https://github.com/locupleto/the-gallery/tree/main/docs.
 - Desktops are macOS Spaces. yabai numbers them in one sequence across all
   displays (`yabai -m query --spaces`), so on a second display "Desktop 1"
   may be Space 10.
+- A Desktop switch (super+N) is followed by `~/.config/skhd/space-focus <index>`,
+  which hands focus to the Desktop now in view (its front window, or the
+  display itself when it is empty): macOS alone leaves focus behind, so new
+  windows (the agent key, super+return) opened on the old Desktop or display.
+  A Desktop key of the user's own in local.skhd should call it the same way.
 - `gallery off` restores the windows' pre-tiling positions and stops tiling,
   outline and keys until `gallery on` (it survives a restart).
 - The presenter: Claude artifact pages (and any URL matching `"match"` in

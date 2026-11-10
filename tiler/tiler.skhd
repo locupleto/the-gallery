@@ -60,16 +60,20 @@ shift + lalt - k : "$HOME/.config/skhd/focus-dir" swap north || (yabai -m window
 shift + lalt - l : "$HOME/.config/skhd/focus-dir" swap east  || (yabai -m window --display east && yabai -m display --focus east)
 
 # --- Spaces: super+N switches, super+shift+N sends the window and follows ------
+# macOS switches what the display shows but leaves focus behind (on the Desktop
+# just left, or on the other display), so new windows -- the agent key,
+# super+return -- would open there. space-focus hands focus to the Desktop now
+# in view. Call it the same way after your own Desktop keys in local.skhd.
 ## switch to Space N (via the Mission Control Ctrl+N shortcut)
-lalt - 1 : skhd -k "ctrl - 1"
-lalt - 2 : skhd -k "ctrl - 2"
-lalt - 3 : skhd -k "ctrl - 3"
-lalt - 4 : skhd -k "ctrl - 4"
-lalt - 5 : skhd -k "ctrl - 5"
-lalt - 6 : skhd -k "ctrl - 6"
-lalt - 7 : skhd -k "ctrl - 7"
-lalt - 8 : skhd -k "ctrl - 8"
-lalt - 9 : skhd -k "ctrl - 9"
+lalt - 1 : skhd -k "ctrl - 1"; "$HOME/.config/skhd/space-focus" 1
+lalt - 2 : skhd -k "ctrl - 2"; "$HOME/.config/skhd/space-focus" 2
+lalt - 3 : skhd -k "ctrl - 3"; "$HOME/.config/skhd/space-focus" 3
+lalt - 4 : skhd -k "ctrl - 4"; "$HOME/.config/skhd/space-focus" 4
+lalt - 5 : skhd -k "ctrl - 5"; "$HOME/.config/skhd/space-focus" 5
+lalt - 6 : skhd -k "ctrl - 6"; "$HOME/.config/skhd/space-focus" 6
+lalt - 7 : skhd -k "ctrl - 7"; "$HOME/.config/skhd/space-focus" 7
+lalt - 8 : skhd -k "ctrl - 8"; "$HOME/.config/skhd/space-focus" 8
+lalt - 9 : skhd -k "ctrl - 9"; "$HOME/.config/skhd/space-focus" 9
 ## send the window to Space N and follow it
 shift + lalt - 1 : yabai -m window --space 1 && skhd -k "ctrl - 1"
 shift + lalt - 2 : yabai -m window --space 2 && skhd -k "ctrl - 2"

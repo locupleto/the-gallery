@@ -1,0 +1,54 @@
+#!/usr/bin/env sh
+# space-focus — give focus to a Desktop that was just brought into view.
+#
+#   space-focus <space index>       the index yabai reports (1.., across displays)
+#
+# Desktops are switched through the Mission Control shortcuts (yabai cannot
+# switch them without its scripting addition). macOS then changes what the
+# display SHOWS but leaves focus where it was: with a window on the Desktop
+# just left, or on the other display. Everything after the switch followed that
+# stale focus -- the agent key, super+return and a new browser window opened on
+# the other display, and super+h/j/k/l started from a window no longer in view.
+#
+# So after a switch: wait until the Desktop is in view, then focus its
+# frontmost window; an empty Desktop gets its display focused instead (yabai
+# focuses a display without windows by clicking its empty desktop), which moves
+# the menu bar there and with it every new window. Focus already on the
+# Desktop is left alone.
+#
+# Installed by tiler/install.sh next to skhdrc. Test seam: SPACE_FOCUS_TRIES,
+# the 0.05 s polls to wait for the Desktop to come into view (default 40).
+
+set -eu
+# skhd's PATH may lack Homebrew; appended, so a test's stubs still come first.
+PATH="${PATH}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+case "${1:-}" in
+  ''|*[!0-9]*) echo "usage: space-focus <space index>" >&2; exit 2 ;;
+esac
+sp=$1
+
+# The switch is animated; until it lands the Desktop's windows are not visible
+# and the focus would go to the wrong place.
+tries=${SPACE_FOCUS_TRIES:-40}
+while :; do
+  info=$(yabai -m query --spaces --space "${sp}" 2>/dev/null) || exit 0
+  [ "$(printf '%s' "${info}" | jq -r '."is-visible"')" = true ] && break
+  tries=$((tries - 1))
+  [ "${tries}" -gt 0 ] || exit 0
+  sleep 0.05
+done
+disp=$(printf '%s' "${info}" | jq -r '.display')
+
+cur=$(yabai -m query --windows --window 2>/dev/null | jq -r '.space // empty' 2>/dev/null || true)
+[ "${cur}" = "${sp}" ] && exit 0
+
+# yabai lists a Desktop's windows front to back: the first one in view is the
+# one macOS itself would have raised.
+win=$(yabai -m query --windows --space "${sp}" 2>/dev/null \
+  | jq -r '[.[] | select(."is-visible" and (."is-minimized" | not) and (."is-hidden" | not))][0].id // empty' 2>/dev/null || true)
+if [ -n "${win}" ]; then
+  yabai -m window --focus "${win}" >/dev/null 2>&1 && exit 0
+fi
+yabai -m display --focus "${disp}" >/dev/null 2>&1 || true
+exit 0
