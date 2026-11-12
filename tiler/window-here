@@ -1,0 +1,90 @@
+#!/usr/bin/env sh
+# window-here — a window that comes back on a Desktop out of view is brought
+# to the Desktop in view (the tiler-window-here signal, on window_created).
+#
+#   window-here <window id>
+#
+# Some apps never destroy a window when it is closed: Screen Sharing only
+# hides it, still tied to the Desktop it was closed on. Starting the app again
+# from another Desktop brings that same window back over there, and macOS
+# drags the view along -- away from where the app was asked for (2026-11-12).
+# yabai loses such a window while it is hidden, so it cannot be moved ahead of
+# time; it reports it as created when it returns, and this runs then: the
+# window is moved to the Desktop in view, and because macOS is by then already
+# on its way to the old Desktop, the window is focused until the view is back.
+#
+# Left alone:
+#   - a window on a Desktop in view (the other display's included);
+#   - anything but a standard window;
+#   - a window of an app younger than WINDOW_HERE_GRACE seconds: an app that
+#     is starting puts its windows back where they were, after a login most
+#     of all;
+#   - every window while the home rules are loaded (`gallery home`, the first
+#     minutes of a login): they send windows to their Desktops on purpose.
+# Hiding, unhiding and minimizing do not report a window as created, so the
+# app keys still take the view to a window that is open on another Desktop.
+#
+# Installed by tiler/install.sh next to yabairc. Test seams: WINDOW_HERE_GRACE
+# (default 60), WINDOW_HERE_APP_AGE (the app's age in seconds instead of asking
+# ps), WINDOW_HERE_TRIES (0.1 s polls spent following the window, default 30).
+
+set -eu
+# yabai's PATH may lack Homebrew; appended, so a test's stubs still come first.
+PATH="${PATH}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+case "${1:-}" in
+  ''|*[!0-9]*) echo "usage: window-here <window id>" >&2; exit 2 ;;
+esac
+wid=$1
+
+# First of all, before macOS has switched: the Desktop the user is on.
+cur=$(yabai -m query --spaces --space 2>/dev/null | jq -r '.index // empty' 2>/dev/null || true)
+[ -n "${cur}" ] || exit 0
+win=$(yabai -m query --windows --window "${wid}" 2>/dev/null) || exit 0
+[ "$(printf '%s' "${win}" | jq -r '.subrole // empty')" = AXStandardWindow ] || exit 0
+wsp=$(printf '%s' "${win}" | jq -r '.space // empty')
+[ -n "${wsp}" ] || exit 0
+[ "${wsp}" = "${cur}" ] && exit 0
+vis=$(yabai -m query --spaces --space "${wsp}" 2>/dev/null | jq -r '."is-visible"' 2>/dev/null || true)
+[ "${vis}" = false ] || exit 0
+
+if yabai -m rule --list 2>/dev/null | jq -e 'any(.[]; (.label // "") | startswith("home-"))' >/dev/null 2>&1; then
+  exit 0
+fi
+
+age=${WINDOW_HERE_APP_AGE:-}
+if [ -z "${age}" ]; then
+  pid=$(printf '%s' "${win}" | jq -r '.pid // empty')
+  [ -n "${pid}" ] || exit 0
+  # etime is [[dd-]hh:]mm:ss
+  age=$(ps -o etime= -p "${pid}" 2>/dev/null | awk '{
+    n = split($1, a, /[-:]/)
+    if (n < 2) exit
+    s = a[n] + 60 * a[n-1]
+    if (n >= 3) s += 3600 * a[n-2]
+    if (n >= 4) s += 86400 * a[n-3]
+    print s
+  }')
+  [ -n "${age}" ] || exit 0
+fi
+[ "${age}" -ge "${WINDOW_HERE_GRACE:-60}" ] || exit 0
+
+yabai -m window "${wid}" --space "${cur}" >/dev/null 2>&1 || exit 0
+
+# Follow the window until the view has stayed on it for half a second: the
+# switch macOS started lands after the move and would leave the view behind.
+tries=${WINDOW_HERE_TRIES:-30}
+calm=0
+while [ "${tries}" -gt 0 ] && [ "${calm}" -lt 5 ]; do
+  now=$(yabai -m query --spaces --space 2>/dev/null | jq -r '.index // empty' 2>/dev/null || true)
+  foc=$(yabai -m query --windows --window "${wid}" 2>/dev/null | jq -r '."has-focus"' 2>/dev/null || true)
+  if [ "${now}" = "${cur}" ] && [ "${foc}" = true ]; then
+    calm=$((calm + 1))
+  else
+    calm=0
+    yabai -m window --focus "${wid}" >/dev/null 2>&1 || true
+  fi
+  tries=$((tries - 1))
+  sleep 0.1
+done
+exit 0

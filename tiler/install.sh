@@ -109,7 +109,7 @@ if [ "$UNINSTALL" = 1 ]; then
             gl_note removed "the running borders process"
         fi
     fi
-    for f in "$YABAI_RC" "$SKHD_RC" "$SKHD_DIR/tiler.skhd" "$SKHD_DIR/gallery.skhd" "$SKHD_DIR/learn" "$SKHD_DIR/learn.style.json"              "$SKHD_DIR/focus-dir" "$SKHD_DIR/browser-window" "$SKHD_DIR/app-focus" "$SKHD_DIR/space-focus" "$YABAI_DIR/yabai-layout" "$YABAI_DIR/tree-guard"; do
+    for f in "$YABAI_RC" "$SKHD_RC" "$SKHD_DIR/tiler.skhd" "$SKHD_DIR/gallery.skhd" "$SKHD_DIR/learn" "$SKHD_DIR/learn.style.json"              "$SKHD_DIR/focus-dir" "$SKHD_DIR/browser-window" "$SKHD_DIR/app-focus" "$SKHD_DIR/space-focus" "$YABAI_DIR/yabai-layout" "$YABAI_DIR/tree-guard" "$YABAI_DIR/window-here"; do
         gl_uninstall_file "$f"
     done
     # local.skhd is the user's: removed only while it is still the untouched
@@ -257,6 +257,8 @@ if [ "$DRY" = 1 ]; then echo "[dry] learn install skhdrc"; else "$SKHD_DIR/learn
 # copy, never the checkout on the external volume.
 gl_install_file yabai-layout "$YABAI_DIR/yabai-layout" 755
 gl_install_file tree-guard "$YABAI_DIR/tree-guard" 755
+# window-here: brings a window that returns on a Desktop out of view to the one in view.
+gl_install_file window-here "$YABAI_DIR/window-here" 755
 
 # --- services --------------------------------------------------------------------------
 # A running service is restarted so a changed rc file takes effect

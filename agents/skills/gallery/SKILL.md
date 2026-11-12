@@ -92,6 +92,12 @@ https://github.com/locupleto/the-gallery/tree/main/docs.
   display itself when it is empty): macOS alone leaves focus behind, so new
   windows (the agent key, super+return) opened on the old Desktop or display.
   A Desktop key of the user's own in local.skhd should call it the same way.
+- A window that comes back on a Desktop out of view is brought to the Desktop
+  in view (`~/.config/yabai/window-here`, a yabai signal): an app that only
+  hides a closed window (Screen Sharing) used to bring it back on the Desktop
+  it was closed on and pull the view there. A window that is open on another
+  Desktop is not touched, so the app keys still go to it. Apps younger than a
+  minute and the time the home rules are loaded are exempt.
 - `gallery off` restores the windows' pre-tiling positions and stops tiling,
   outline and keys until `gallery on` (it survives a restart).
 - The presenter: Claude artifact pages (and any URL matching `"match"` in

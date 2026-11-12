@@ -5,6 +5,17 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.10.4 (2026-11-12)
+
+- Fix: starting an app whose window was closed on another Desktop no longer
+  throws you to that Desktop. Some apps (Screen Sharing) only hide a closed
+  window, still tied to the Desktop it was closed on; started again from
+  elsewhere, the window came back over there and macOS switched to it. The new
+  `~/.config/yabai/window-here` brings a window that returns on a Desktop out
+  of view to the Desktop you are on. The view may flick to the old Desktop and
+  back, since macOS starts its switch first. A window that is open on another
+  Desktop stays there, and the app keys still take you to it.
+
 ## 0.10.3 (2026-11-10)
 
 - Fix: focus now follows a Desktop switch. super+N changed what the display

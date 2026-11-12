@@ -166,6 +166,8 @@ say "running tests/layout_test.sh"; "${SCRIPT_DIR}/layout_test.sh" || fail "layo
 
 say "running tests/tree_guard_test.sh"; "${SCRIPT_DIR}/tree_guard_test.sh" || fail "tree_guard_test.sh failed"
 
+say "running tests/window_here_test.sh"; "${SCRIPT_DIR}/window_here_test.sh" || fail "window_here_test.sh failed"
+
 say "running tests/agent_test.sh"; "${SCRIPT_DIR}/agent_test.sh" || fail "agent_test.sh failed"
 
 say "running tests/weather_test.sh"; "${SCRIPT_DIR}/weather_test.sh" || fail "weather_test.sh failed"

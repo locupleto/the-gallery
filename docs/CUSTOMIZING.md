@@ -28,7 +28,7 @@ touched. Put lasting changes in the places marked "you".
 |---|---|---|---|
 | `~/.config/skhd/local.skhd` | you | yes, never overwritten | yes if you edited it; removed only while it is still the untouched seed copy |
 | `~/.config/skhd/skhdrc`, `tiler.skhd`, `gallery.skhd` | Gallery | no, overwritten (an edited copy is saved first, see below) | removed; your original `skhdrc` comes back from `.gallery-bak` |
-| `~/.config/skhd/learn`, `focus-dir`, `browser-window`, `app-focus`, `space-focus`, `learn.style.json`; `~/.config/yabai/yabai-layout`, `tree-guard` | Gallery | no, overwritten | removed |
+| `~/.config/skhd/learn`, `focus-dir`, `browser-window`, `app-focus`, `space-focus`, `learn.style.json`; `~/.config/yabai/yabai-layout`, `tree-guard`, `window-here` | Gallery | no, overwritten | removed |
 | `~/.config/yabai/yabairc` | Gallery | no, overwritten | removed; your original comes back from `.gallery-bak` |
 | `~/.config/yabai/yabairc.local` | you | yes, the installer never creates or touches it | yes |
 | `~/.config/yabai/rules.local`, `home-layout.json` | you (written by `gallery home save`) | yes | yes |

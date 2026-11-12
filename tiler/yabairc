@@ -111,6 +111,16 @@ for e in window_destroyed application_terminated window_minimized space_changed 
         action='"${HOME}/.config/yabai/tree-guard" >/dev/null 2>&1 &'
 done
 
+# --- a window that comes back on a Desktop out of view is brought here --------
+# An app that only hides a closed window (Screen Sharing) brings it back on the
+# Desktop it was closed on, and macOS drags the view there, away from where the
+# app was started. window-here moves such a window to the Desktop in view; see
+# the script for what it leaves alone. Backgrounded: it follows the window for
+# a moment.
+yabai -m signal --remove tiler-window-here >/dev/null 2>&1
+yabai -m signal --add label=tiler-window-here event=window_created \
+    action='"${HOME}/.config/yabai/window-here" "${YABAI_WINDOW_ID}" >/dev/null 2>&1 &'
+
 # --- the presenter: pages an agent opens float centred (gallery present) ------
 # A Claude artifact (a UI mockup, a report) arrives as a new Safari window. The
 # Gallery checks each new Safari window's page; a matching page goes to this
