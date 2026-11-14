@@ -5,6 +5,16 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.10.5 (2026-11-13)
+
+- Fix: an empty tile that shows only wallpaper is now found and repaired. A
+  window macOS restores at login can end up on its Desktop, tiled by yabai
+  and known to Accessibility, yet never drawn; the tiles around it then leave
+  a gap. The Ghost Windows check lists such a window as `undrawn` and
+  relaunches its app like any other ghost (same grace period, `NO_RELAUNCH`
+  list and one-attempt limit). It acts only when the window is missing from
+  the on-screen list in two samples and another tile is confirmed on screen.
+
 ## 0.10.4 (2026-11-12)
 
 - Fix: starting an app whose window was closed on another Desktop no longer

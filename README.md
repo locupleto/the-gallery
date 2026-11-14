@@ -570,6 +570,12 @@ spoken line through an optional `~/bin/tts-say`). The opposite failure is caught
 yabai sees but that has lost its node in the Space's tree (it reports
 `split-type` none while its neighbours report a split) and sits unmanaged on
 top of another tile; the watcher re-inserts it by toggling float twice.
+The inverse of a ghost is caught as well: an "undrawn" window is one yabai
+holds as an ordinary visible tile while the window server does not draw it,
+so its tile shows only wallpaper (seen with a window macOS restored at
+login). It is relaunched like a ghost, once it has been missing from the
+on-screen list in two samples and for the grace period, and only while
+another tile is confirmed on screen.
 `gallery ghosts` lists them, `fix` relaunches or retiles on request.
 Overrides live in `~/.config/gallery/ghosts.conf`; the log is
 `~/Library/Logs/gallery-ghosts.log`.

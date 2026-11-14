@@ -92,7 +92,8 @@ If no window tiles at all, `gallery doctor` may print "yabai is blind". It
 means yabai has no Accessibility access: dismiss any pending prompt and
 restart the service as the message says. Windows created while the screen is
 locked are invisible to yabai; `gallery ghosts` lists them and
-`gallery ghosts fix` relaunches their app
+`gallery ghosts fix` relaunches their app. The same goes for an empty tile
+that shows only wallpaper: a window yabai tiles but macOS does not draw
 ([Troubleshooting](INSTALL.md#troubleshooting)).
 
 ### The layout got messed up

@@ -151,6 +151,46 @@ printf '%s\n' "${fixture_hits}" | grep -q '^900004' \
   && fail "a floating window was flagged; floating windows are not tiled"
 say "900004 floating -> ignored (correct)"
 
+# --- the undrawn class: yabai shows a tile the window server does not draw ----
+# Reminders, restored at login on 2026-11-13, kept a tile that showed only
+# wallpaper. Both sides are faked here, so nothing on this machine is read.
+say "exercising scan()'s undrawn class against a fake yabai and window server"
+
+tile() {  # id app visible floating hidden split
+  printf '{"id":%s,"pid":%s,"app":"%s","title":"t","role":"AXWindow","subrole":"AXStandardWindow","frame":{"x":0,"y":0,"w":800,"h":600},"space":1,"has-ax-reference":true,"is-visible":%s,"is-minimized":false,"is-hidden":%s,"is-floating":%s,"split-type":"%s","can-move":true,"can-resize":true}' \
+    "$1" "$1" "$2" "$3" "$5" "$4" "$6"
+}
+{
+  printf '['
+  tile 900010 DrawnApp    true  false false vertical; printf ','
+  tile 900011 UndrawnApp  true  false false vertical; printf ','
+  tile 900012 FloatingApp true  true  false none;     printf ','
+  tile 900013 HiddenApp   false false true  vertical; printf ','
+  tile 900014 AwayApp     false false false vertical
+  printf ']'
+} > "${TMP}/windows.json"
+
+cat > "${TMP}/fake-ws" <<FAKE
+#!/bin/sh
+cat "${TMP}/ws.txt"
+FAKE
+chmod +x "${TMP}/fake-ws"
+
+printf '900010\0370\037900010\037DrawnApp\037t\0370\0370\037800\037600\n' > "${TMP}/ws.txt"
+undrawn_out="$(GHOSTS_YABAI="${TMP}/fake-yabai" GHOSTS_WINDOW_SERVER="${TMP}/fake-ws" sh "${GHOSTS}" scan 2>/dev/null || true)"
+printf '%s\n' "${undrawn_out}" | sed 's/^/[ghosts_test]   /'
+printf '%s\n' "${undrawn_out}" | grep -q "^900011	undrawn	" \
+  || fail "a visible tile the window server does not draw was NOT flagged -- the Reminders case"
+[ "$(printf '%s\n' "${undrawn_out}" | grep -c '^9000')" = 1 ] \
+  || fail "only 900011 may be flagged: drawn, floating, hidden and out-of-view windows are not undrawn"
+say "900011 visible tile, not drawn -> flagged; the other four -> ignored (correct)"
+
+: > "${TMP}/ws.txt"
+blind_out="$(GHOSTS_YABAI="${TMP}/fake-yabai" GHOSTS_WINDOW_SERVER="${TMP}/fake-ws" sh "${GHOSTS}" scan 2>/dev/null || true)"
+printf '%s\n' "${blind_out}" | grep -q 'undrawn' \
+  && fail "with no tile on the on-screen list every app would be relaunched; nothing may be flagged"
+say "no tile confirmed on screen -> nothing flagged (correct)"
+
 # --- diagnostic logging ------------------------------------------------------
 say "flag-time logging must record the fields that decide harm"
 grep -q '^window_diag() {' "${GHOSTS}" || fail "window_diag helper is gone"

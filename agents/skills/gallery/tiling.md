@@ -102,4 +102,6 @@ The colour comes from the theme (`hyprland_active_border`, else `accent`).
 
 super + shift + b balances the tiles; ctrl + super + r rebuilds the current
 Space's tree. `gallery ghosts` lists windows yabai cannot see (born while the
-screen was locked) and `gallery ghosts fix` relaunches their app.
+screen was locked) and windows macOS does not draw although yabai tiles them
+(an empty tile showing only wallpaper); `gallery ghosts fix` relaunches
+their app.

@@ -1,5 +1,5 @@
 #!/bin/sh
-# ghosts -- find windows the tiler cannot see, and get rid of them.
+# ghosts -- find windows the tiler cannot see, or macOS does not draw, and get rid of them.
 #
 #   ghosts check            service run: skip while the screen is locked, else
 #                           scan, relaunch allow-listed apps, report the rest once
@@ -38,6 +38,14 @@
 # float twice, which re-inserts it next to the focused window. Overrides:
 # ~/.config/gallery/ghosts.conf (sh syntax, sets NO_RELAUNCH / IGNORE /
 # ANNOUNCE / GRACE).
+#
+# A fourth class is the first one inverted: an "undrawn" window is one yabai
+# and Accessibility both hold as an ordinary visible tile, while the window
+# server does not draw it. Its tile is an empty strip of wallpaper (Reminders,
+# restored at login on 2026-11-13: on the right Space, not minimised, content
+# intact when captured by id, absent from the on-screen list). The cure is the
+# same fresh window, so it goes down the relaunch path with the same
+# NO_RELAUNCH list, grace period and breaker.
 
 set -eu
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"   # ioreg is in /usr/sbin
@@ -75,6 +83,9 @@ US=$(printf '\037')   # field separator: not IFS whitespace, so empty titles kee
 
 # All on-screen windows from the window server, US-separated, before any filtering.
 window_server_list() {
+  # GHOSTS_WINDOW_SERVER overrides the source (tests: a command printing the
+  # same US-separated lines).
+  if [ -n "${GHOSTS_WINDOW_SERVER:-}" ]; then "$GHOSTS_WINDOW_SERVER"; return 0; fi
   osascript -l JavaScript -e '
     ObjC.import("CoreGraphics");
     var opts = $.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements;
@@ -89,6 +100,30 @@ window_server_list() {
     }
     out.join("\n")' 2>/dev/null
 }
+
+# Ids of the tiles yabai shows that the window server does not draw. Prints
+# nothing unless at least one other tile IS on the on-screen list: when the
+# list is empty or holds none of them (the JXA call failed, another user's
+# session is in front) every tile would look undrawn, and the cure for this
+# class is quitting the app.
+undrawn_ids() {
+  _tiles=$(${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r '
+    .[] | select(.["has-ax-reference"] and .["is-visible"] and (.["split-type"] != "none")
+                 and (.["is-floating"] | not) and (.["is-minimized"] | not) and (.["is-hidden"] | not))
+    | .id' 2>/dev/null | tr '\n' ' ')
+  [ -n "$_tiles" ] || return 0
+  _drawn=$(window_server_list | cut -d "$US" -f1 | tr '\n' ' ')
+  _missing=""; _witness=0
+  for _t in $_tiles; do
+    case " $_drawn " in *" $_t "*) _witness=1 ;; *) _missing="$_missing$_t " ;; esac
+  done
+  [ "$_witness" = 1 ] || return 0
+  printf '%s' "$_missing"
+}
+# Seconds between the two samples an undrawn window must fail. yabai marks a
+# Space's windows visible a moment before the window server has drawn them
+# (a Desktop switch, an app being unhidden).
+UNDRAWN_CONFIRM=2
 
 # Ghosts: normal-ish layer (-20..0), at least 200x100, owner not ignored, and
 # not a window yabai holds an accessibility reference for. yabai does list some
@@ -143,6 +178,23 @@ scan() {
     case " $IGNORE " in *" $owner "*) continue ;; esac
     printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$id" "$layer" "$pid" "$owner" "$name" "$x" "$y" "$w" "$h"
   done
+  # Fourth source: undrawn -- tiles yabai shows that the window server does not
+  # draw, in two samples UNDRAWN_CONFIRM seconds apart. Layer "undrawn".
+  undrawn=$(undrawn_ids)
+  [ -n "$undrawn" ] || return 0
+  sleep "$UNDRAWN_CONFIRM"
+  again=$(undrawn_ids)
+  still=""
+  for u in $undrawn; do case " $again " in *" $u "*) still="$still$u " ;; esac; done
+  [ -n "$still" ] || return 0
+  ${GHOSTS_YABAI:-yabai} -m query --windows 2>/dev/null | jq -r --arg us "$US" --arg ids "$still" '
+    ($ids | split(" ") | map(select(length > 0) | tonumber)) as $want
+    | .[] | select(.id as $i | $want | index($i))
+    | [.id, "undrawn", .pid, .app, (.title // ""), (.frame.x|floor), (.frame.y|floor), (.frame.w|floor), (.frame.h|floor)]
+    | map(tostring) | join($us)' | while IFS="$US" read -r id layer pid owner name x y w h; do
+    case " $IGNORE " in *" $owner "*) continue ;; esac
+    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$id" "$layer" "$pid" "$owner" "$name" "$x" "$y" "$w" "$h"
+  done
 }
 
 # Put an orphan back into its Space's tree: floating it and un-floating it makes
@@ -170,6 +222,7 @@ announce() {
 # Graceful quit via NSRunningApplication (same as the Quit menu item), wait for
 # the process to go, then open the bundle again. An app that refuses to quit
 # (unsaved-changes dialog) is left alone and reported.
+GHOST_WHAT="a window the tiler cannot see"   # cmd_check and cmd_fix set it per ghost
 relaunch_pid() {
   pid=$1; owner=$2
   # Resolve the bundle BEFORE quitting anything. A degraded app (Notes, five
@@ -203,7 +256,7 @@ relaunch_pid() {
   while kill -0 "$pid" 2>/dev/null && [ $i -lt 40 ]; do sleep 0.5; i=$((i+1)); done
   if kill -0 "$pid" 2>/dev/null; then
     log "relaunch $owner: did not quit within 20s, leaving it"
-    announce "$owner has a window the tiler cannot see and did not quit when asked; save your work there and relaunch it when convenient."
+    announce "$owner has $GHOST_WHAT and did not quit when asked; save your work there and relaunch it when convenient."
     return 1
   fi
   open -a "$path" && log "relaunched $owner from $path"
@@ -305,10 +358,12 @@ cmd_check() {
       fi
       continue
     fi
+    GHOST_WHAT="a window the tiler cannot see"
+    [ "$layer" != undrawn ] || GHOST_WHAT="a window macOS is not drawing"
     case " $NO_RELAUNCH " in
       *" $owner "*)
         state_set "$id" "$owner" reported
-        announce "$owner has a window the tiler cannot see; it is not restarted unasked, relaunch it when convenient." ;;
+        announce "$owner has $GHOST_WHAT; it is not restarted unasked, relaunch it when convenient." ;;
       *)
         if ! breaker_allows "$owner"; then
           state_set "$id" "$owner" reported
@@ -317,7 +372,7 @@ cmd_check() {
           else
             owner_mark "$owner" exhausted
             log "breaker: $owner ghosted again after a relaunch; not retrying for ${RELAUNCH_COOLDOWN}s"
-            announce "$owner has a window the tiler cannot see. Relaunching it did not help, so it is being left alone; quit and reopen it yourself when convenient."
+            announce "$owner has $GHOST_WHAT. Relaunching it did not help, so it is being left alone; quit and reopen it yourself when convenient."
           fi
           continue
         fi
@@ -355,6 +410,8 @@ cmd_fix() {
     fi
     case "$done_pids" in *" $pid "*) continue ;; esac
     done_pids="$done_pids$pid "
+    GHOST_WHAT="a window the tiler cannot see"
+    [ "$layer" != undrawn ] || GHOST_WHAT="a window macOS is not drawing"
     echo "relaunching $owner (pid $pid, window $id)"
     # An explicit fix is never refused by the breaker -- it was asked for --
     # but it is recorded, so an app that ghosts again afterwards trips it.

@@ -64,4 +64,7 @@ toggles). Only on the user's request.
   terminal; the Mission Control "Switch to Desktop N" shortcuts for super + N.
 - Windows not tiling or invisible to yabai: `gallery ghosts`; a locked screen
   makes new windows invisible until relaunched.
+- An empty tile showing only wallpaper: a window yabai tiles but macOS does
+  not draw; `gallery ghosts` lists it as `undrawn`, `gallery ghosts fix`
+  relaunches its app.
 - More in `docs/FAQ.md` and `docs/INSTALL.md` (Troubleshooting).
