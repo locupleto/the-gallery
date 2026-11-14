@@ -5,6 +5,19 @@ What changed in each release of The Gallery. Versions follow
 a minor release (0.2, 0.3) may change how things work, and its notes say how
 to carry your setup across. `gallery version` prints the version you have.
 
+## 0.10.6 (2026-11-14)
+
+- Fix: a window brought back from the Dock no longer ends up floating, with
+  the next window opened on its Desktop taking the whole display and covering
+  it. A minimized window reports itself as a dialog while it sits in the
+  Dock, and the half-hourly desktop autosave (and `gallery home save`,
+  `home apply`, a yabai start) re-applied every yabai rule to the open
+  windows, so the rule that floats dialogs marked it as never-tiled for good.
+  The Gallery now applies only its own home rules, and yabairc leaves the
+  dialog rule to act when a window is created. A window already caught is
+  tiled again with `super + t`. Apply a rule of your own by its label
+  (`yabai -m rule --apply <label>`), never with a bare `rule --apply`.
+
 ## 0.10.5 (2026-11-13)
 
 - Fix: an empty tile that shows only wallpaper is now found and repaired. A

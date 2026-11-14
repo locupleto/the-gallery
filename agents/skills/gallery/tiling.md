@@ -27,8 +27,14 @@ file so they survive the next start:
 ```sh
 yabai -m config window_gap 12     # takes effect at once
 sh ~/.config/yabai/yabairc.local  # or re-run the whole file
-yabai -m rule --apply             # apply rules to windows already open
+yabai -m rule --apply my-label    # apply ONE rule to windows already open
 ```
+
+Always name the rule (its `label=`). A bare `yabai -m rule --apply` re-runs
+every rule, and the rule that floats dialogs then catches each minimized
+window (it reports itself as a dialog while it is in the Dock): brought back,
+it floats and the next window on its Desktop covers it. If that has happened,
+focus the window and press super + t to tile it again.
 
 ## Which Desktop an app lives on: `gallery home`
 
@@ -86,7 +92,7 @@ gallery home reopen              # status of the Gallery starting the apps after
 
 super + t floats or tiles the focused window. System dialogs and utilities
 float by design. To keep an app out of tiling for good, a `manage=off` rule
-in `yabairc.local`, then `yabai -m rule --apply`.
+in `yabairc.local` (give it a `label=`), then `yabai -m rule --apply <label>`.
 
 ## The focus outline
 

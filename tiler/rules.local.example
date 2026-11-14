@@ -22,8 +22,10 @@
 #
 # Keep every rule labelled: yabai replaces a rule re-added with the same label,
 # so this file can be re-sourced live (`. ~/.config/yabai/rules.local &&
-# yabai -m rule --apply`) without duplicates. `--apply` moves already-open
-# windows; without it a rule only affects windows created afterwards.
+# yabai -m rule --apply <label>`) without duplicates. `--apply <label>` moves
+# already-open windows; without it a rule only affects windows created
+# afterwards. Never a bare `--apply`: it re-runs every rule and floats each
+# minimized window (see yabairc).
 #
 # Leave roaming apps (terminals, the browser) OUT of this file: a pinned
 # `iTerm2` rule would drag every super+return terminal to one Space.

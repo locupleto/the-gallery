@@ -78,7 +78,7 @@ yourself with super + t. To keep an app out of tiling for good, add a rule to
 
 ```sh
 yabai -m rule --add label=never-tile-spotify app="^Spotify$" manage=off
-yabai -m rule --apply
+yabai -m rule --apply never-tile-spotify
 ```
 
 See [Tiling](CUSTOMIZING.md#settings-yabairclocal). A few apps refuse to

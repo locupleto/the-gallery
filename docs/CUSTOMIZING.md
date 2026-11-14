@@ -395,8 +395,14 @@ start:
 ```sh
 yabai -m config window_gap 12     # takes effect at once
 sh ~/.config/yabai/yabairc.local  # or re-run the whole file (labelled rules only)
-yabai -m rule --apply             # move already-open windows by the new rules
+yabai -m rule --apply my-label    # apply ONE rule to the windows already open
 ```
+
+Name the rule you mean (its `label=`). A bare `yabai -m rule --apply` re-runs
+every rule, and the one that floats dialogs then catches each minimized
+window, which reports itself as a dialog while it sits in the Dock: brought
+back, it floats, and the next window on its Desktop covers it. `super + t`
+on such a window tiles it again.
 
 ### Where apps live: `rules.local` and `gallery home`
 

@@ -3944,25 +3944,13 @@ cmd_home_save() {
     while IFS= read -r label; do
       [ -n "${label}" ] || continue
       yabai -m rule --remove "${label}" >/dev/null 2>&1 || true
-    done < <(yabai -m rule --list 2>/dev/null | python3 -c '
-import json, sys
-
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    data = []
-for r in data:
-    if isinstance(r, dict):
-        label = r.get("label") or ""
-        if label.startswith("home-"):
-            print(label)
-')
+    done < <(home_rule_labels)
     # `sh <file>` rather than sourcing (`.`) it into this shell: every
     # generated line is already a standalone `yabai -m rule --add ...`
     # command, the file sets no variable this script reads afterwards, and
     # a plain interpreter run cannot leak anything back into cmd_home_save.
     sh "${RULES_LOCAL_FILE}"
-    yabai -m rule --apply
+    home_rules_apply
     # Mid-session the file loads nothing (homes are for the login), but a
     # signal from before must not stay behind either.
     home_settled && home_unload
@@ -4006,7 +3994,7 @@ cmd_home_apply() {
   fi
   command -v yabai >/dev/null 2>&1 || { echo "gallery: yabai not found on PATH" >&2; exit 1; }
   GALLERY_HOME_FORCE=1 sh "${RULES_LOCAL_FILE}"
-  yabai -m rule --apply
+  home_rules_apply
   if [ -f "${HOME_LAYOUT_FILE}" ] && [ -x "${HOME_LAYOUT_TOOL}" ]; then
     "${HOME_LAYOUT_TOOL}" place --file "${HOME_LAYOUT_FILE}" >/dev/null 2>&1 || true
   fi
@@ -4101,13 +4089,9 @@ home_settled() {
   [ "$(login_session_age)" -gt $((HOME_LOGIN_MAX_AGE + HOME_QUIET_TIMEOUT)) ]
 }
 
-# Every live home-* rule and home-* signal out of yabai.
-home_unload() {
-  local label
-  while IFS= read -r label; do
-    [ -n "${label}" ] || continue
-    yabai -m rule --remove "${label}" >/dev/null 2>&1 || true
-  done < <(yabai -m rule --list 2>/dev/null | python3 -c '
+# The labels of the home-* rules yabai holds now, one per line.
+home_rule_labels() {
+  yabai -m rule --list 2>/dev/null | python3 -c '
 import json, sys
 try:
     data = json.load(sys.stdin)
@@ -4116,7 +4100,32 @@ except Exception:
 for r in data:
     if isinstance(r, dict) and (r.get("label") or "").startswith("home-"):
         print(r["label"])
-')
+'
+}
+
+# Apply the home rules to the windows already open -- those rules and no
+# others. A bare `yabai -m rule --apply` re-runs EVERY rule against every
+# window, and a minimized window reports the subrole AXDialog for as long as
+# it sits in the Dock (web apps, Calendar, Messages; verified on yabai
+# 7.1.25). The tiler-float-nonstandard rule then marked it manage=off for
+# good: brought back from the Dock it floated, and the next window opened on
+# that Desktop took the whole display and covered it. The periodic autosave
+# ran that bare apply every half hour (2026-11-14).
+home_rules_apply() {
+  local label
+  while IFS= read -r label; do
+    [ -n "${label}" ] || continue
+    yabai -m rule --apply "${label}" >/dev/null 2>&1 || true
+  done < <(home_rule_labels)
+}
+
+# Every live home-* rule and home-* signal out of yabai.
+home_unload() {
+  local label
+  while IFS= read -r label; do
+    [ -n "${label}" ] || continue
+    yabai -m rule --remove "${label}" >/dev/null 2>&1 || true
+  done < <(home_rule_labels)
   yabai -m signal --remove home-title-changed >/dev/null 2>&1 || true
   yabai -m signal --remove home-keep-here >/dev/null 2>&1 || true
 }
@@ -4868,7 +4877,7 @@ cmd_home_login_pass() {
     if [ "${sig}" = "${last}" ]; then still=$((still + poll)); else still=0; last="${sig}"; fi
     if [ "${still}" -ge "${HOME_QUIET_FOR}" ] && [ "$(user_idle_seconds)" -ge "${HOME_IDLE_FOR}" ]; then
       sh "${RULES_LOCAL_FILE}" >/dev/null 2>&1 || true
-      yabai -m rule --apply
+      home_rules_apply
       home_log "login pass: home rules applied after ${waited}s"
       home_login_place
       home_login_shapes

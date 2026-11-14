@@ -69,11 +69,22 @@ yabai -m rule --add app="^(iTerm2|Ghostty|kitty|WezTerm)$" title="^Learn: " mana
 # `yabai -m config` line in it replaces the shipped value above (gaps, layout,
 # mouse modifier, ...), since yabai keeps the last value set; it may add rules
 # too. Sourced here, after every shipped config line and rule, so it wins over
-# them, but BEFORE `rule --apply` (its rules get applied) and before the
+# them, but BEFORE the rules are applied below (its rules too) and before the
 # signals and the border below, which are not meant to be tuned from here (the
 # border has `gallery borders`). Template: tiler/yabairc.local.example.
 [ -r "${HOME}/.config/yabai/yabairc.local" ] && . "${HOME}/.config/yabai/yabairc.local"
-yabai -m rule --apply
+# Apply the rules to the windows already open -- every rule but
+# tiler-float-nonstandard. A minimized window reports the subrole AXDialog for
+# as long as it sits in the Dock (web apps, Calendar, Messages; verified on
+# yabai 7.1.25), so that rule, applied to open windows, marked each of them
+# manage=off for good: brought back from the Dock it floated, and the next
+# window on its Desktop covered it. It is left to act at creation, where the
+# subrole is the window's own; a dialog already open is not a standard window
+# and yabai leaves it floating without a rule. Never a bare `rule --apply`.
+if command -v jq >/dev/null 2>&1; then
+  yabai -m rule --list | jq -r '.[] | select(.label != "tiler-float-nonstandard") | .index' \
+    | while read -r rule_index; do yabai -m rule --apply "${rule_index}"; done
+fi
 
 # --- keep something focused when a window goes away -------------------------
 # macOS leaves keyboard focus with the frontmost APPLICATION, so an app that

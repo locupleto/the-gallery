@@ -353,6 +353,7 @@ cat > "${LP_STUB}/yabai" <<EOF
 echo "yabai \$*" >> "${LP_LOG}"
 case "\$*" in
   "-m query --windows") echo '[{"id": 1, "space": 2}, {"id": 2, "space": 3}]' ;;
+  "-m rule --list") echo '[{"index": 0, "label": "tiler-float-nonstandard"}, {"index": 1, "label": "home-mail"}]' ;;
 esac
 exit 0
 EOF
@@ -382,6 +383,11 @@ rm -f "${LP_HOME}/.config/gallery/state/home-login-pass"
 : > "${LP_LOG}"; lp 30 60
 applied || fail "login pass: did not apply the home rules in a quiet fresh session"
 grep -q "home-mail" "${LP_LOG}" || fail "login pass: rules.local was not loaded first"
+# Only the home rules, by label: a bare apply re-runs the dialog float rule on
+# every minimized window (it reads as AXDialog in the Dock) and floats it.
+grep -qx "yabai -m rule --apply home-mail" "${LP_LOG}" || fail "login pass: the home rule was not applied by its label"
+grep -qx "yabai -m rule --apply" "${LP_LOG}" && fail "login pass: a bare rule --apply re-ran every rule"
+grep -q "rule --apply tiler-float-nonstandard" "${LP_LOG}" && fail "login pass: applied a rule that is not a home rule"
 grep -q "home rules applied" "${LP_HOME}/.config/gallery/gallery-home.log" || fail "login pass: not logged"
 : > "${LP_LOG}"; lp 30 60
 applied && fail "login pass: ran twice in one login session"
@@ -746,4 +752,13 @@ as periodic "${WORK_DIR}/as4.json" 60
 saved && fail "autosave: saved while the Gallery is off"
 say "autosave: after the login pass, only on change, never scattered, title-less, half-closed or off; history kept"
 
+# --- no bare `rule --apply` anywhere the Gallery runs one ---------------------
+# A bare apply floats every minimized window (2026-11-14); bin/gallery applies
+# home rules by label and yabairc every rule but tiler-float-nonstandard.
+if grep -nE 'yabai -m rule --apply[[:space:]]*$' "${GALLERY_BIN}" "${REPO_ROOT}/tiler/yabairc" | grep -v '^[^:]*:[0-9]*:[[:space:]]*#'; then
+  fail "a bare 'yabai -m rule --apply' is back in bin/gallery or tiler/yabairc"
+fi
+grep -q 'select(.label != "tiler-float-nonstandard")' "${REPO_ROOT}/tiler/yabairc" \
+  || fail "tiler/yabairc applies tiler-float-nonstandard to the open windows"
+say "rules are applied by label; the dialog float rule only at creation"
 say "PASS home_test.sh"

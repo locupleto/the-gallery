@@ -208,7 +208,8 @@ by the script).
   is reset by OS upgrades; a labelled `app="^Telegram$" space=10` rule puts the
   app back on its Space at every login. Template: `rules.local.example`. Apply
   live without restarting yabai: `. ~/.config/yabai/rules.local && yabai -m
-  rule --apply`. `gallery home save` generates this file from the current
+  rule --apply <label>` (one rule by its label; never bare, which would
+  float every minimized window). `gallery home save` generates this file from the current
   layout (snapshot the windows you have arranged instead of hand-writing the
   map) and `gallery home apply` re-sources it live the same way.
 - `skhdrc` → `~/.config/skhd/skhdrc`: binds nothing; it loads `local.skhd`,
@@ -225,7 +226,7 @@ by the script).
   skhd's error log.
 - `~/.config/yabai/yabairc.local` (optional, not created by the installer):
   plain `sh` sourced by `yabairc` after its own `yabai -m config` lines and
-  rules and before `rule --apply`, so any setting there (gaps, layout, mouse
+  rules and before the rules are applied to the open windows, so any setting there (gaps, layout, mouse
   modifier, extra rules) replaces the shipped one. Template:
   `yabairc.local.example`.
 
